@@ -1,7 +1,8 @@
 /*
  * Copyright (C) 2014-2015 OpenHeadend S.A.R.L.
  *
- * Authors: Christophe Massiot
+ * Authors: Xavier Boulet
+ *          Christophe Massiot
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -24,26 +25,25 @@
  */
 
 /** @file
- * @short Upipe module synchronizing latencies of flows belonging to a program
+ * @short Upipe NaCl module to play video frames
  */
 
-#ifndef _UPIPE_MODULES_UPIPE_PLAY_H_
+#ifndef _UPIPE_MODULES_UPIPE_NACL_GRAPHICS2D_H_
 /** @hidden */
-#define _UPIPE_MODULES_UPIPE_PLAY_H_
+#define _UPIPE_MODULES_UPIPE_NACL_GRAPHICS2D_H_
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #include <upipe/upipe.h>
 
-#define UPIPE_PLAY_SIGNATURE UBASE_FOURCC('p','l','a','y')
-#define UPIPE_PLAY_SUB_SIGNATURE UBASE_FOURCC('p','l','a','s')
+#define UPIPE_NACL_G2D_SIGNATURE UBASE_FOURCC('S','g','2','d')
 
-/** @This returns the management structure for all play pipes.
+/** @This returns the management structure for nacl_g2d pipes.
  *
  * @return pointer to manager
  */
-struct upipe_mgr *upipe_play_mgr_alloc(void);
+struct upipe_mgr *upipe_nacl_g2d_mgr_alloc(void);
 
 #ifdef __cplusplus
 }

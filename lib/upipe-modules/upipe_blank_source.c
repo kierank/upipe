@@ -80,6 +80,8 @@ struct upipe_blksrc {
 
     /** ubuf manager */
     struct ubuf_mgr *ubuf_mgr;
+    /** flow format packet */
+    struct uref *flow_format;
     /** ubuf manager request */
     struct urequest ubuf_mgr_request;
 
@@ -126,7 +128,7 @@ UPIPE_HELPER_UREF_MGR(upipe_blksrc, uref_mgr, uref_mgr_request,
                       upipe_blksrc_check,
                       upipe_blksrc_register_output_request,
                       upipe_blksrc_unregister_output_request)
-UPIPE_HELPER_UBUF_MGR(upipe_blksrc, ubuf_mgr, ubuf_mgr_request,
+UPIPE_HELPER_UBUF_MGR(upipe_blksrc, ubuf_mgr, flow_format, ubuf_mgr_request,
                       upipe_blksrc_check,
                       upipe_blksrc_register_output_request,
                       upipe_blksrc_unregister_output_request)
@@ -344,7 +346,7 @@ static int upipe_blksrc_set_flow_def(struct upipe *upipe, struct uref *flow_def)
         return UBASE_ERR_ALLOC;
     }
 
-    size_t hsize, vsize;
+    uint64_t hsize, vsize;
     struct urational sar;
     uref_pic_flow_clear_format(flow_def_dup);
     uref_pic_flow_copy_format(flow_def_dup, flow_def);

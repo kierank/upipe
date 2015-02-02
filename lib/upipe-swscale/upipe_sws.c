@@ -85,6 +85,8 @@ struct upipe_sws {
 
     /** ubuf manager */
     struct ubuf_mgr *ubuf_mgr;
+    /** flow format packet */
+    struct uref *flow_format;
     /** ubuf manager request */
     struct urequest ubuf_mgr_request;
 
@@ -119,7 +121,8 @@ UPIPE_HELPER_UREFCOUNT(upipe_sws, urefcount, upipe_sws_free)
 UPIPE_HELPER_FLOW(upipe_sws, "pic.");
 UPIPE_HELPER_OUTPUT(upipe_sws, output, flow_def, output_state, request_list)
 UPIPE_HELPER_FLOW_DEF(upipe_sws, flow_def_input, flow_def_attr)
-UPIPE_HELPER_UBUF_MGR(upipe_sws, ubuf_mgr, ubuf_mgr_request, upipe_sws_check,
+UPIPE_HELPER_UBUF_MGR(upipe_sws, ubuf_mgr, flow_format, ubuf_mgr_request,
+                      upipe_sws_check,
                       upipe_sws_register_output_request,
                       upipe_sws_unregister_output_request)
 UPIPE_HELPER_INPUT(upipe_sws, urefs, nb_urefs, max_urefs, blockers, upipe_sws_handle)
@@ -452,6 +455,7 @@ static int _upipe_sws_set_flags(struct upipe *upipe, int flags)
 {
     struct upipe_sws *upipe_sws = upipe_sws_from_upipe(upipe);
     upipe_sws->flags = flags;
+    upipe_dbg_va(upipe, "setting flags to %d", flags);
     return UBASE_ERR_NONE;
 }
 
@@ -563,9 +567,6 @@ static struct upipe *upipe_sws_alloc(struct upipe_mgr *mgr,
 
     upipe_throw_ready(upipe);
 
-    struct urational sar;
-    sar.num = sar.den = 1;
-    UBASE_FATAL(upipe, uref_pic_flow_set_sar(flow_def, sar))
     UBASE_FATAL(upipe, uref_pic_flow_set_align(flow_def, 16))
     upipe_sws_store_flow_def_attr(upipe, flow_def);
     return upipe;

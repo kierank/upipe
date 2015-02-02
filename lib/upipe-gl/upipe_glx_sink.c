@@ -65,10 +65,11 @@
 
 /** @hidden */
 static bool upipe_glx_sink_output(struct upipe *upipe, struct uref *uref,
-                                     struct upump **upump_p);
+                                  struct upump **upump_p);
 /** @hidden */
 static void upipe_glx_sink_write_watcher(struct upump *upump);
 
+/** @internal upipe_glx_sink private structure */
 struct upipe_glx_sink {
     /** refcount management structure */
     struct urefcount urefcount;
@@ -412,6 +413,8 @@ static bool upipe_glx_sink_output(struct upipe *upipe, struct uref *uref,
             pts += upipe_glx_sink->latency;
             uint64_t now = uclock_now(upipe_glx_sink->uclock);
             if (now < pts) {
+                upipe_verbose_va(upipe, "sleeping %"PRIu64" (%"PRIu64")",
+                                 pts - now, pts);
                 upipe_glx_sink_wait_upump(upipe, pts - now,
                                           upipe_glx_sink_write_watcher);
                 return false;
