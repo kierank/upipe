@@ -30,7 +30,6 @@
 #include <upipe/ulist.h>
 #include <upipe/uprobe.h>
 #include <upipe/uclock.h>
-#include <upipe/uclock_std.h>
 #include <upipe/uref.h>
 #include <upipe/uref_attr.h>
 #pragma GCC diagnostic push
@@ -113,10 +112,10 @@ struct upipe_bmd_sink {
     /** handle to decklink card output */
     IDeckLinkOutput *deckLinkOutput;
 
-    IDeckLinkDisplayMode* displayMode;
+    IDeckLinkDisplayMode *displayMode;
 
     /** hardware uclock */
-    struct uclock_bmd_sink *uclock;
+    struct uclock_bmd_sink uclock;
 
     /** public upipe structure */
     struct upipe upipe;
@@ -133,6 +132,9 @@ UBASE_FROM_TO(upipe_bmd_sink, upipe_mgr, sub_mgr, sub_mgr)
 UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, pic_subpipe, pic_subpipe)
 UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, sound_subpipe, sound_subpipe)
 UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, subpic_subpipe, subpic_subpipe)
+
+UBASE_FROM_TO(upipe_bmd_sink, uclock_bmd_sink, uclock_bmd_sink, uclock)
+
 
 /** @internal @This initializes an subpipe of a bmd sink pipe.
  *
@@ -295,6 +297,53 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
     return upipe;
 }
 
+/** @This returns the Blackmagic hardware output time.
+ *
+ * @param uclock utility structure passed to the module
+ * @return current hardware output time in 27 MHz ticks
+ */
+static uint64_t uclock_bmd_sink_now(struct uclock *uclock)
+{
+    struct uclock_bmd_sink *uclock_bmd_sink = uclock_bmd_sink_from_uclock(uclock);
+    struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_uclock_bmd_sink(uclock_bmd_sink);
+    BMDTimeValue hardware_time, time_in_frame, ticks_per_frame;
+    
+    upipe_bmd_sink->deckLinkOutput->GetHardwareReferenceClock(UCLOCK_FREQ, &hardware_time,
+                                                              &time_in_frame, &ticks_per_frame);
+
+    return (uint64_t)hardware_time;
+}
+
+/** @This frees a uclock.
+ *
+ * @param urefcount pointer to urefcount
+ */
+static void uclock_bmd_sink_free(struct urefcount *urefcount)
+{
+    struct uclock_bmd_sink *uclock_bmd_sink = uclock_bmd_sink_from_urefcount(urefcount);
+
+    urefcount_clean(urefcount);
+    free(uclock_bmd_sink);
+}
+
+/** @This allocates a new uclock_bmd_sink structure.
+ *
+ * @param flags flags for the creation of a uclock structure
+ * @return pointer to uclock_bmd_sink, or NULL in case of error
+ */
+static struct uclock_bmd_sink *uclock_bmd_sink_alloc(void)
+{
+    struct uclock_bmd_sink *uclock_bmd_sink = (struct uclock_bmd_sink*)malloc(sizeof(struct uclock_bmd_sink));
+    if (unlikely(uclock_bmd_sink == NULL))
+        return NULL;
+
+    urefcount_init(uclock_bmd_sink_to_urefcount(uclock_bmd_sink), uclock_bmd_sink_free);
+    uclock_bmd_sink->uclock.refcount = uclock_bmd_sink_to_urefcount(uclock_bmd_sink);
+    uclock_bmd_sink->uclock.uclock_now = uclock_bmd_sink_now;
+
+    return uclock_bmd_sink;
+}
+
 /** @internal @This asks to open the given device.
  *
  * @param upipe description structure of the pipe
@@ -420,6 +469,8 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
     upipe_bmd_sink->deckLinkOutput = deckLinkOutput;
     upipe_bmd_sink->deckLink = deckLink;
 
+    urefcount_use(uclock_bmd_sink_to_urefcount(&upipe_bmd_sink->uclock));
+
 end:
 
     if (displayModeIterator != NULL)
@@ -502,9 +553,11 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
         }
         case UPIPE_BMD_SINK_GET_UCLOCK: {
             UBASE_SIGNATURE_CHECK(args, UPIPE_BMD_SINK_SIGNATURE)
-            struct uclock **uclock = va_arg(args, struct uclock **);
+            struct uclock **pp_uclock = va_arg(args, struct uclock **);
             struct upipe_bmd_sink *bmd_sink = upipe_bmd_sink_from_upipe(upipe);
-            *uclock = uclock_bmd_sink_to_uclock(bmd_sink->uclock);
+            struct uclock_bmd_sink *uclock_bmd_sink = upipe_bmd_sink_to_uclock_bmd_sink(bmd_sink);
+            struct uclock *uclock = uclock_bmd_sink_to_uclock(uclock_bmd_sink);
+            *pp_uclock = uclock;
             return UBASE_ERR_NONE;
         }
         case UPIPE_SET_OPTION: {
@@ -524,11 +577,14 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
 static void upipe_bmd_sink_free(struct upipe *upipe)
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
+    struct uclock_bmd_sink *uclock_bmd_sink = &upipe_bmd_sink->uclock;
 
     upipe_release(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->pic_subpipe));
     upipe_release(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->sound_subpipe));
     upipe_release(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->subpic_subpipe));
     upipe_throw_dead(upipe);
+
+    urefcount_release(uclock_bmd_sink_to_urefcount(uclock_bmd_sink));
 
     if (upipe_bmd_sink->deckLink) {
         upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
