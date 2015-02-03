@@ -78,6 +78,18 @@ struct upipe_bmd_sink_sub {
     struct upipe upipe;
 };
 
+/** super-set of the uclock structure with additional local members */
+struct uclock_bmd_sink {
+    /** refcount management structure */
+    struct urefcount urefcount;
+
+    /** structure exported to modules */
+    struct uclock uclock;
+};
+
+UBASE_FROM_TO(uclock_bmd_sink, uclock, uclock, uclock)
+UBASE_FROM_TO(uclock_bmd_sink, urefcount, urefcount, urefcount)
+
 /** upipe_bmd_sink structure */
 struct upipe_bmd_sink {
     /** refcount management structure */
@@ -102,6 +114,9 @@ struct upipe_bmd_sink {
     IDeckLinkOutput *deckLinkOutput;
 
     IDeckLinkDisplayMode* displayMode;
+
+    /** hardware uclock */
+    struct uclock_bmd_sink *uclock;
 
     /** public upipe structure */
     struct upipe upipe;
@@ -483,6 +498,13 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
             *upipe_p =  upipe_bmd_sink_sub_to_upipe(
                             upipe_bmd_sink_to_subpic_subpipe(
                                 upipe_bmd_sink_from_upipe(upipe)));
+            return UBASE_ERR_NONE;
+        }
+        case UPIPE_BMD_SINK_GET_UCLOCK: {
+            UBASE_SIGNATURE_CHECK(args, UPIPE_BMD_SINK_SIGNATURE)
+            struct uclock **uclock = va_arg(args, struct uclock **);
+            struct upipe_bmd_sink *bmd_sink = upipe_bmd_sink_from_upipe(upipe);
+            *uclock = uclock_bmd_sink_to_uclock(bmd_sink->uclock);
             return UBASE_ERR_NONE;
         }
         case UPIPE_SET_OPTION: {
