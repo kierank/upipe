@@ -43,7 +43,10 @@ enum upipe_bmd_sink_command {
     /** returns the sound subpipe (struct upipe **) */
     UPIPE_BMD_SINK_GET_SOUND_SUB,
     /** returns the subpic subpipe (struct upipe **) */
-    UPIPE_BMD_SINK_GET_SUBPIC_SUB
+    UPIPE_BMD_SINK_GET_SUBPIC_SUB,
+
+    /** returns the uclock (struct uclock *) **/
+    UPIPE_BMD_SINK_GET_UCLOCK
 };
 
 /** @This returns the management structure for all bmd sinks.
