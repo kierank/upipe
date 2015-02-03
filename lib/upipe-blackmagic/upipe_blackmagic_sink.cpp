@@ -503,13 +503,14 @@ static int upipe_bmd_sink_set_option(struct upipe *upipe,
         upipe_bmd_sink->options = uref_alloc_control(uref_mgr);
         uref_mgr_release(uref_mgr);
     }
-#endif
 
     if (v != NULL)
         return udict_set_string(upipe_bmd_sink->options->udict, v,
                                 UDICT_TYPE_STRING, k);
     else
         udict_delete(upipe_bmd_sink->options->udict, UDICT_TYPE_STRING, k);
+#endif
+
     return UBASE_ERR_NONE;
 }
 
