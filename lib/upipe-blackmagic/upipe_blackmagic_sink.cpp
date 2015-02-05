@@ -184,6 +184,72 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
         return;
     }
 
+    HRESULT result;
+
+    if (upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe){
+        int w = upipe_bmd_sink->displayMode->GetWidth();
+        int h = upipe_bmd_sink->displayMode->GetHeight();
+
+        if (!upipe_bmd_sink->started){
+            upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(uref->date_sys, UCLOCK_FREQ, 1.0);
+            upipe_bmd_sink->started = 1;
+        }
+
+        int dst_stride = (((w + 47) / 48) * 48) * 8 / 3;
+        IDeckLinkMutableVideoFrame *video_frame;
+        result = upipe_bmd_sink->deckLinkOutput->CreateVideoFrame(w, h, dst_stride, bmdFormat10BitYUV, bmdFrameFlagDefault, &video_frame);
+        if (result != S_OK) {
+            upipe_err_va(upipe, "Could not create frame");
+            uref_free(uref);
+            return;
+        }
+
+        void *frame_bytes;
+        video_frame->GetBytes((void**)&frame_bytes);
+
+        int s = -1;
+        const uint8_t *buf;
+        uref_block_read(uref, 0, &s, &buf);
+        memcpy(frame_bytes, buf, s);
+        uref_block_unmap(uref, 0);
+
+        BMDTimeValue timeValue;
+        BMDTimeScale timeScale;
+        upipe_bmd_sink->displayMode->GetFrameRate(&timeValue, &timeScale);
+
+        result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, uref->date_sys, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
+        if( result != S_OK )
+            upipe_err_va(upipe, "DROPPED FRAME");
+
+        video_frame->Release();
+    }
+    else if(upipe_bmd_sink_sub == &upipe_bmd_sink->sound_subpipe && upipe_bmd_sink->started){
+        size_t size = 0;
+        uref_sound_size(uref, &size, NULL);
+
+        const int32_t *buffers[1];
+        uref_sound_read_int32_t(uref, 0, size, buffers, 1);
+
+        uint32_t written;
+        result = upipe_bmd_sink->deckLinkOutput->ScheduleAudioSamples((void*)buffers[0], size, uref->date_sys, UCLOCK_FREQ, &written);
+        uref_sound_unmap(uref, 0, size, 1);
+
+        if( result != S_OK )
+            upipe_err_va(upipe, "DROPPED AUDIO");
+
+        uint32_t buffered;
+        upipe_bmd_sink->deckLinkOutput->GetBufferedAudioSampleFrameCount(&buffered);
+        if (buffered == 0) {
+            /* TODO: get notified as soon as audio buffers empty */
+            upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
+            upipe_bmd_sink->started = 0;
+        }
+        if (written != size)
+            upipe_dbg_va(upipe, "written %u/%u", written, size);
+        upipe_dbg_va(upipe, "buffered samples: %u", buffered );
+    }
+
+
     uref_free(uref);
     return;
 }
