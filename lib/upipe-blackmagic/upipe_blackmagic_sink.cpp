@@ -323,25 +323,14 @@ static void uclock_bmd_sink_free(struct urefcount *urefcount)
     struct uclock_bmd_sink *uclock_bmd_sink = uclock_bmd_sink_from_urefcount(urefcount);
 
     urefcount_clean(urefcount);
-    free(uclock_bmd_sink);
+    uclock_bmd_sink->uclock.uclock_now = NULL;
 }
 
-/** @This allocates a new uclock_bmd_sink structure.
- *
- * @param flags flags for the creation of a uclock structure
- * @return pointer to uclock_bmd_sink, or NULL in case of error
- */
-static struct uclock_bmd_sink *uclock_bmd_sink_alloc(void)
+static void uclock_bmd_sink_init(uclock_bmd_sink *uclock_bmd_sink)
 {
-    struct uclock_bmd_sink *uclock_bmd_sink = (struct uclock_bmd_sink*)malloc(sizeof(struct uclock_bmd_sink));
-    if (unlikely(uclock_bmd_sink == NULL))
-        return NULL;
-
     urefcount_init(uclock_bmd_sink_to_urefcount(uclock_bmd_sink), uclock_bmd_sink_free);
     uclock_bmd_sink->uclock.refcount = uclock_bmd_sink_to_urefcount(uclock_bmd_sink);
     uclock_bmd_sink->uclock.uclock_now = uclock_bmd_sink_now;
-
-    return uclock_bmd_sink;
 }
 
 /** @internal @This asks to open the given device.
@@ -469,6 +458,7 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
     upipe_bmd_sink->deckLinkOutput = deckLinkOutput;
     upipe_bmd_sink->deckLink = deckLink;
 
+    uclock_bmd_sink_init(&upipe_bmd_sink->uclock);
     urefcount_use(uclock_bmd_sink_to_urefcount(&upipe_bmd_sink->uclock));
 
 end:
