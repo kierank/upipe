@@ -97,6 +97,20 @@ static inline int upipe_bmd_sink_get_subpic_sub(struct upipe *upipe,
                           UPIPE_BMD_SINK_SIGNATURE, upipe_p);
 }
 
+/** @This returns the bmd_sink uclock. The refcount is not incremented so you
+ * have to use it if you want to keep the pointer.
+ *
+ * @param upipe description structure of the super pipe
+ * @param upipe_p filled in with a pointer to the subpic subpipe
+ * @return an error code
+ */
+static inline int upipe_bmd_sink_get_uclock(struct upipe *upipe,
+                                              struct uclock **uclock_p)
+{
+    return upipe_control(upipe, UPIPE_BMD_SINK_GET_UCLOCK,
+                          UPIPE_BMD_SINK_SIGNATURE, uclock_p);
+}
+
 /** @This allocates and initializes a bmd sink pipe.
  *
  * @param mgr management structure for bmd sink type
