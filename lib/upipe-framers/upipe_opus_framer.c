@@ -454,11 +454,11 @@ static int upipe_opusf_control(struct upipe *upipe, int command, va_list args)
     switch (command) {
         case UPIPE_REGISTER_REQUEST: {
             struct urequest *request = va_arg(args, struct urequest *);
-            return upipe_a52f_alloc_output_proxy(upipe, request);
+            return upipe_opusf_alloc_output_proxy(upipe, request);
         }
         case UPIPE_UNREGISTER_REQUEST: {
             struct urequest *request = va_arg(args, struct urequest *);
-            return upipe_a52f_free_output_proxy(upipe, request);
+            return upipe_opusf_free_output_proxy(upipe, request);
         }
         case UPIPE_GET_FLOW_DEF: {
             struct uref **p = va_arg(args, struct uref **);
