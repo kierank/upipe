@@ -185,6 +185,7 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
     }
 
     HRESULT result;
+    const char *v210 = "u10y10v10y10u10y10v10y10u10y10v10y10";
 
     if (upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe){
         int w = upipe_bmd_sink->displayMode->GetWidth();
@@ -207,11 +208,20 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
         void *frame_bytes;
         video_frame->GetBytes((void**)&frame_bytes);
 
-        int s = -1;
-        const uint8_t *buf;
-        uref_block_read(uref, 0, &s, &buf);
-        memcpy(frame_bytes, buf, s);
-        uref_block_unmap(uref, 0);
+
+        size_t stride;
+        const uint8_t *plane;
+        if (unlikely(!ubase_check(uref_pic_plane_size(uref, v210, &stride,
+                                          NULL, NULL, NULL)) ||
+                     !ubase_check(uref_pic_plane_read(uref, v210, 0, 0, -1, -1,
+                                          &plane)))) {
+            upipe_err_va(upipe, "Could not read v210 plane");
+            uref_free(uref);
+            return;
+        }
+
+        memcpy(frame_bytes, plane, stride * h);
+        uref_pic_plane_unmap(uref, v210, 0, 0, -1, -1);
 
         BMDTimeValue timeValue;
         BMDTimeScale timeScale;
