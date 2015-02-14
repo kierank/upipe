@@ -1,5 +1,5 @@
 /*
- * V210ENC encoder
+ * V210 encoder
  *
  * Copyright (C) 2009 Michael Niedermayer <michaelni@gmx.at>
  * Copyright (c) 2009 Baptiste Coudurier <baptiste dot coudurier at gmail dot com>

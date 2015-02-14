@@ -3,8 +3,9 @@
  *
  * Copyright (C) 2009 Michael Niedermayer <michaelni@gmx.at>
  * Copyright (c) 2009 Baptiste Coudurier <baptiste dot coudurier at gmail dot com>
+ * Copyright (c) 2015 Open Broadcast Systems Ltd
  *
- * This file is part of FFmpeg.
+ * This file originates from FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,25 +23,25 @@
  */
 
 /** @file
- * @short Upipe v210 module
+ * @short Upipe v210enc module
  */
 
-#ifndef _UPIPE_MODULES_UPIPE_V210_H_
+#ifndef _UPIPE_MODULES_UPIPE_V210ENC_H_
 /** @hidden */
-#define _UPIPE_MODULES_UPIPE_V210_H_
+#define _UPIPE_MODULES_UPIPE_V210ENC_H_
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #include <upipe/upipe.h>
 
-#define UPIPE_V210_SIGNATURE UBASE_FOURCC('v','2','1','0')
+#define UPIPE_V210ENC_SIGNATURE UBASE_FOURCC('v','2','1','e')
 
 /** @This returns the management structure for v210 pipes.
  *
  * @return pointer to manager
  */
-struct upipe_mgr *upipe_v210_mgr_alloc(void);
+struct upipe_mgr *upipe_v210enc_mgr_alloc(void);
 
 #ifdef __cplusplus
 }
