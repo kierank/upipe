@@ -163,6 +163,7 @@ AC_CONFIG_FILES([Makefile
                  include/upipe-ebur128/Makefile
                  include/upipe-nacl/Makefile
                  include/upipe-amt/Makefile
+                 include/upipe-v210/Makefile
                  lib/Makefile
                  lib/upipe/Makefile
                  lib/upipe/libupipe.pc

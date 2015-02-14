@@ -51,21 +51,17 @@
 #include <errno.h>
 #include <assert.h>
 
-#include <upipe-v210/upipe_v210.h>
+#include <upipe-v210/upipe_v210enc.h>
 
 #include <libavutil/common.h>
 #include <libavutil/cpu.h>
 #include <libavutil/intreadwrite.h>
 
-/** upipe_v210 structure with v210 parameters */
-struct upipe_v210 {
+/** upipe_v210enc structure with v210enc parameters */
+struct upipe_v210enc {
     /** refcount management structure */
     struct urefcount urefcount;
 
-    /** input flow */
-    struct uref *flow_def_input;
-    /** attributes added by the pipe */
-    struct uref *flow_def_attr;
     /** output pipe */
     struct upipe *output;
     /** output flow */
