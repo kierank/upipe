@@ -194,13 +194,13 @@ static bool upipe_v210enc_handle(struct upipe *upipe, struct uref *uref,
 
     /* map output */
     uint8_t *output_plane;
-    size_t output_stride;
+    size_t stride;
     if (unlikely(!ubase_check(ubuf_pic_plane_write(ubuf,
                                        upipe_v210enc->output_chroma_map,
                                        0, 0, -1, -1, &output_plane)) ||
                  !ubase_check(ubuf_pic_plane_size(ubuf,
                                        upipe_v210enc->output_chroma_map,
-                                       &output_stride, NULL, NULL, NULL)))) {
+                                       &stride, NULL, NULL, NULL)))) {
         upipe_warn(upipe, "invalid buffer received");
         ubuf_free(ubuf);
         uref_free(uref);
@@ -208,7 +208,94 @@ static bool upipe_v210enc_handle(struct upipe *upipe, struct uref *uref,
     }
 
     /* Do v210 packing */
+    int line_padding = stride - ((input_hsize * 8 + 11) / 12) * 4;
+    uint8_t *dst = output_plane;
+    int h, w;
+    if (upipe_v210enc->input_bit_depth == 10) {
+        const uint16_t *y = (const uint16_t *)input_planes[0];
+        const uint16_t *u = (const uint16_t *)input_planes[1];
+        const uint16_t *v = (const uint16_t *)input_planes[2];
+        for (h = 0; h < input_vsize; h++) {
+            uint32_t val;
+            w = (input_hsize / 6) * 6;
+            upipe_v210enc->pack_line_10(y, u, v, dst, w);
 
+            y += w;
+            u += w >> 1;
+            v += w >> 1;
+            dst += (w / 6) * 16;
+            if (w < input_hsize - 1) {
+                WRITE_PIXELS(u, y, v);
+
+                val = CLIP(*y++);
+                if (w == input_hsize - 2) {
+                    AV_WL32(dst, val);
+                    dst += 4;
+                }
+            }
+            if (w < input_hsize - 3) {
+                val |= (CLIP(*u++) << 10) | (CLIP(*y++) << 20);
+                AV_WL32(dst, val);
+                dst += 4;
+
+                val = CLIP(*v++) | (CLIP(*y++) << 10);
+                AV_WL32(dst, val);
+                dst += 4;
+            }
+
+            memset(dst, 0, line_padding);
+            dst += line_padding;
+            y += input_strides[0] / 2 - input_hsize;
+            u += input_strides[1] / 2 - input_hsize / 2;
+            v += input_strides[2] / 2 - input_hsize / 2;
+        }
+    }
+    else {
+        const uint8_t *y = input_planes[0];
+        const uint8_t *u = input_planes[1];
+        const uint8_t *v = input_planes[2];
+        for (h = 0; h < input_vsize; h++) {
+            uint32_t val;
+            w = (input_hsize / 12) * 12;
+            upipe_v210enc->pack_line_8(y, u, v, dst, w);
+
+            y += w;
+            u += w >> 1;
+            v += w >> 1;
+            dst += (w / 12) * 32;
+
+            for (; w < input_hsize - 5; w += 6) {
+                WRITE_PIXELS8(u, y, v);
+                WRITE_PIXELS8(y, u, y);
+                WRITE_PIXELS8(v, y, u);
+                WRITE_PIXELS8(y, v, y);
+            }
+            if (w < input_hsize - 1) {
+                WRITE_PIXELS8(u, y, v);
+
+                val = CLIP8(*y++) << 2;
+                if (w == input_hsize - 2) {
+                    AV_WL32(dst, val);
+                    dst += 4;
+                }
+            }
+            if (w < input_hsize - 3) {
+                val |= (CLIP8(*u++) << 12) | (CLIP8(*y++) << 22);
+                AV_WL32(dst, val);
+                dst += 4;
+
+                val = (CLIP8(*v++) << 2) | (CLIP8(*y++) << 12);
+                AV_WL32(dst, val);
+                dst += 4;
+            }
+            memset(dst, 0, line_padding);
+            dst += line_padding;
+
+            y += input_strides[0] - input_hsize;
+            u += input_strides[1] - input_hsize / 2;
+            v += input_strides[2] - input_hsize / 2;
+        }
+    }
 
     /* unmap pictures */
     for (i = 0; i < UPIPE_V210_MAX_PLANES &&
@@ -327,8 +414,8 @@ static int upipe_v210enc_set_flow_def(struct upipe *upipe, struct uref *flow_def
 
     uref_pic_flow_set_align(flow_def_dup, 16);
     uref_pic_flow_set_planes(flow_def_dup, 1);
-    uref_pic_flow_set_macropixel(flow_def_dup, 6);
-    uref_pic_flow_set_macropixel_size(flow_def_dup, 16, 0);
+    uref_pic_flow_set_macropixel(flow_def_dup, 18);
+    uref_pic_flow_set_macropixel_size(flow_def_dup, 48, 0);
     uref_pic_flow_set_chroma(flow_def_dup, upipe_v210enc->output_chroma_map, 0);
     
     upipe_input(upipe, flow_def_dup, NULL);
