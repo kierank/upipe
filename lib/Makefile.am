@@ -17,7 +17,8 @@ SUBDIRS = \
 	upipe-blackmagic \
 	upipe-ebur128 \
 	upipe-nacl \
-	upipe-amt
+	upipe-amt \
+	upipe-v210
 
 if HAVE_QTWEBKIT
 SUBDIRS += upipe-qt

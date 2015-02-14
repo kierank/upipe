@@ -24,6 +24,7 @@ AC_PROG_LN_S
 AC_PROG_MAKE_SET
 AM_PROG_CC_C_O
 LT_INIT([win32-dll])
+AC_CHECK_PROG(YASM, yasm, yasm)
 
 # Checks for libraries.
 AC_CHECK_LIB(rt, clock_gettime, libadd_rt_lib="-lrt", libadd_rt_lib="")
@@ -42,6 +43,7 @@ AC_CHECK_HEADERS([ev.h], [
                         AM_CONDITIONAL(HAVE_EV, false))])],
         AM_CONDITIONAL(HAVE_EV, false))
 
+PKG_CHECK_UPIPE(AVUTIL, libavutil, [libavutil/avutil.h])
 PKG_CHECK_UPIPE(AVFORMAT, [libavformat >= 53.32.0 libavcodec libavutil], [libavformat/avformat.h libavformat/avio.h libavutil/avutil.h])
 PKG_CHECK_UPIPE(SWSCALE, libswscale >= 2.1.0 libavutil, [libswscale/swscale.h libavutil/avutil.h])
 PKG_CHECK_UPIPE(SWRESAMPLE, libswresample libavutil, [libswresample/swresample.h libavutil/avutil.h])
@@ -161,6 +163,7 @@ AC_CONFIG_FILES([Makefile
                  include/upipe-ebur128/Makefile
                  include/upipe-nacl/Makefile
                  include/upipe-amt/Makefile
+                 include/upipe-v210/Makefile
                  lib/Makefile
                  lib/upipe/Makefile
                  lib/upipe/libupipe.pc
@@ -202,6 +205,8 @@ AC_CONFIG_FILES([Makefile
                  lib/upipe-nacl/libupipe_nacl.pc
                  lib/upipe-amt/Makefile
                  lib/upipe-amt/libupipe_amt.pc
+                 lib/upipe-v210/Makefile
+                 lib/upipe-v210/libupipe_v210.pc
                  tests/Makefile
                  examples/Makefile])
 AC_OUTPUT
