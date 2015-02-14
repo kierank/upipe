@@ -36,9 +36,35 @@ static int upipe_v210enc_check(struct upipe *upipe, struct uref *flow_format);
 
 
 UPIPE_HELPER_UPIPE(upipe_v210enc, upipe, UPIPE_V210ENC_SIGNATURE);
-UPIPE_HELPER_UREFCOUNT(upipe_v210enc, urefcount, upipe_v210enc_free)
-UPIPE_HELPER_VOID(upipe_v210enc);
-UPIPE_HELPER_FLOW(upipe_v210enc, "pic.");
+UPIPE_HELPER_UREFCOUNT(upipe_v210enc, urefcount, upipe_v210enc_free);
+static struct upipe *upipe_v210enc_alloc_void(struct upipe_mgr *mgr,          
+                                            struct uprobe *uprobe,          
+                                            uint32_t signature,             
+                                            va_list args)                   
+{                                                                           
+    if (signature != UPIPE_VOID_SIGNATURE) {                                
+        uprobe_release(uprobe);                                             
+        return NULL;                                                        
+    }                                                                       
+    struct upipe_v210enc *s =                                                   
+        (struct upipe_v210enc *)malloc(sizeof(struct upipe_v210enc));               
+    if (unlikely(s == NULL)) {                                              
+        uprobe_release(uprobe);                                             
+        return NULL;                                                        
+    }                                                                       
+    struct upipe *upipe = upipe_v210enc_to_upipe(s);                          
+    upipe_init(upipe, mgr, uprobe);                                         
+    return upipe;                                                           
+}
+
+static void upipe_v210enc_free_void(struct upipe *upipe)                      
+{                                                                           
+    struct upipe_v210enc *s = upipe_v210enc_from_upipe(upipe);                    
+    upipe_clean(upipe);                                                     
+    free(s);                                                                
+}
+
+
 UPIPE_HELPER_OUTPUT(upipe_v210enc, output, flow_def, output_state, request_list)
 UPIPE_HELPER_UBUF_MGR(upipe_v210enc, ubuf_mgr, flow_format, ubuf_mgr_request,
                       upipe_v210enc_check,
@@ -114,8 +140,7 @@ static bool upipe_v210enc_handle(struct upipe *upipe, struct uref *uref,
     struct upipe_v210enc *upipe_v210enc = upipe_v210enc_from_upipe(upipe);
     const char *def;
     if (unlikely(ubase_check(uref_flow_get_def(uref, &def)))) {
-        upipe_v210enc_store_flow_def(upipe, NULL);
-        uref = upipe_v210enc_store_flow_def_input(upipe, uref);
+        upipe_v210enc_store_flow_def(upipe, uref);
         upipe_v210enc_require_ubuf_mgr(upipe, uref);
         return true;
     }
@@ -130,6 +155,71 @@ static bool upipe_v210enc_handle(struct upipe *upipe, struct uref *uref,
         return true;
     }
 
+    /* map input */
+    const uint8_t *input_planes[UPIPE_V210_MAX_PLANES + 1];
+    int input_strides[UPIPE_V210_MAX_PLANES + 1];
+    int i;
+    for (i = 0; i < UPIPE_V210_MAX_PLANES &&
+                upipe_v210enc->input_chroma_map[i] != NULL; i++) {
+        const uint8_t *data;
+        size_t stride;
+        if (unlikely(!ubase_check(uref_pic_plane_read(uref,
+                                          upipe_v210enc->input_chroma_map[i],
+                                          0, 0, -1, -1, &data)) ||
+                     !ubase_check(uref_pic_plane_size(uref,
+                                          upipe_v210enc->input_chroma_map[i],
+                                          &stride, NULL, NULL, NULL)))) {
+            upipe_warn(upipe, "invalid buffer received");
+            uref_free(uref);
+            return true;
+        }
+        input_planes[i] = data;
+        input_strides[i] = stride;
+    }
+    input_planes[i] = NULL;
+    input_strides[i] = 0;
+
+    /* allocate dest ubuf */
+    struct ubuf *ubuf = ubuf_pic_alloc(upipe_v210enc->ubuf_mgr,
+                                       input_hsize, input_vsize);
+    if (unlikely(ubuf == NULL)) {
+        for (i = 0; i < UPIPE_V210_MAX_PLANES &&
+                    upipe_v210enc->input_chroma_map[i] != NULL; i++)
+            uref_pic_plane_unmap(uref, upipe_v210enc->input_chroma_map[i],
+                                 0, 0, -1, -1);
+        uref_free(uref);
+        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+        return true;
+    }
+
+    /* map output */
+    uint8_t *output_plane;
+    size_t output_stride;
+    if (unlikely(!ubase_check(ubuf_pic_plane_write(ubuf,
+                                       upipe_v210enc->output_chroma_map,
+                                       0, 0, -1, -1, &output_plane)) ||
+                 !ubase_check(ubuf_pic_plane_size(ubuf,
+                                       upipe_v210enc->output_chroma_map,
+                                       &output_stride, NULL, NULL, NULL)))) {
+        upipe_warn(upipe, "invalid buffer received");
+        ubuf_free(ubuf);
+        uref_free(uref);
+        return true;
+    }
+
+    /* Do v210 packing */
+
+
+    /* unmap pictures */
+    for (i = 0; i < UPIPE_V210_MAX_PLANES &&
+                upipe_v210enc->input_chroma_map[i] != NULL; i++)
+        uref_pic_plane_unmap(uref, upipe_v210enc->input_chroma_map[i],
+                             0, 0, -1, -1);
+
+    ubuf_pic_plane_unmap(ubuf, upipe_v210enc->output_chroma_map,
+                         0, 0, -1, -1);
+
+    uref_attach_ubuf(uref, ubuf);
     upipe_v210enc_output(upipe, uref, upump_p);
     return true;
 }
@@ -181,28 +271,6 @@ static int upipe_v210enc_check(struct upipe *upipe, struct uref *flow_format)
     return UBASE_ERR_NONE;
 }
 
-/** @internal @This requires a ubuf manager by proxy, and amends the flow
- * format.
- *
- * @param upipe description structure of the pipe
- * @param request description structure of the request
- * @return an error code
- */
-static int upipe_v210enc_amend_ubuf_mgr(struct upipe *upipe,
-                                    struct urequest *request)
-{
-    struct uref *flow_format = uref_dup(request->uref);
-    UBASE_ALLOC_RETURN(flow_format);
-
-    struct urequest ubuf_mgr_request;
-    urequest_set_opaque(&ubuf_mgr_request, request);
-    urequest_init_ubuf_mgr(&ubuf_mgr_request, flow_format,
-                           upipe_v210enc_provide_output_proxy, NULL);
-    upipe_throw_provide_request(upipe, &ubuf_mgr_request);
-    urequest_clean(&ubuf_mgr_request);
-    return UBASE_ERR_NONE;
-}
-
 /** @internal @This sets the input flow definition.
  *
  * @param upipe description structure of the pipe
@@ -216,25 +284,54 @@ static int upipe_v210enc_set_flow_def(struct upipe *upipe, struct uref *flow_def
 
     UBASE_RETURN(uref_flow_match_def(flow_def, "pic."))
 
+    struct upipe_v210enc *upipe_v210enc = upipe_v210enc_from_upipe(upipe);
+    struct uref *flow_def_dup;
+
+    if ((flow_def_dup = uref_dup(flow_def)) == NULL)
+        return UBASE_ERR_ALLOC;
+
     uint8_t macropixel;
     if (!ubase_check(uref_pic_flow_get_macropixel(flow_def, &macropixel)))
         return -1;
 
 #define u ubase_check
     if (!(macropixel == 1 &&
-           ((u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "y8")) &&
-             u(uref_pic_flow_check_chroma(flow_def, 2, 2, 2, "u8")) &&
-             u(uref_pic_flow_check_chroma(flow_def, 2, 2, 2, "v8"))) ||
+           ((u(uref_pic_flow_check_chroma(flow_def, 1, 1, 1, "y8")) &&
+             u(uref_pic_flow_check_chroma(flow_def, 2, 1, 1, "u8")) &&
+             u(uref_pic_flow_check_chroma(flow_def, 2, 1, 1, "v8"))) ||
             (u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "y10l")) &&
-             u(uref_pic_flow_check_chroma(flow_def, 2, 2, 2, "u10l")) &&
-             u(uref_pic_flow_check_chroma(flow_def, 2, 2, 2, "v10l")))))) {
+             u(uref_pic_flow_check_chroma(flow_def, 2, 1, 2, "u10l")) &&
+             u(uref_pic_flow_check_chroma(flow_def, 2, 1, 2, "v10l")))))) {
         upipe_err(upipe, "incompatible input flow def");
         uref_dump(flow_def, upipe->uprobe);
         return UBASE_ERR_EXTERNAL;
     }
+
+    upipe_v210enc->input_bit_depth = u(uref_pic_flow_check_chroma(flow_def, 1, 1, 1, "y8")) ? 8 : 10;
 #undef u
 
-    upipe_input(upipe, flow_def, NULL);
+    if (upipe_v210enc->input_bit_depth == 8){
+        upipe_v210enc->input_chroma_map[0] = "y8";
+        upipe_v210enc->input_chroma_map[1] = "u8";
+        upipe_v210enc->input_chroma_map[2] = "v8";
+        upipe_v210enc->input_chroma_map[3] = NULL;
+    }
+    else {
+        upipe_v210enc->input_chroma_map[0] = "y10l";
+        upipe_v210enc->input_chroma_map[1] = "u10l";
+        upipe_v210enc->input_chroma_map[2] = "v10l";
+        upipe_v210enc->input_chroma_map[3] = NULL;
+    }
+
+    upipe_v210enc->output_chroma_map = "u10y10v10y10u10y10v10y10u10y10v10y10";
+
+    uref_pic_flow_set_align(flow_def_dup, 16);
+    uref_pic_flow_set_planes(flow_def_dup, 1);
+    uref_pic_flow_set_macropixel(flow_def_dup, 6);
+    uref_pic_flow_set_macropixel_size(flow_def_dup, 16, 0);
+    uref_pic_flow_set_chroma(flow_def_dup, upipe_v210enc->output_chroma_map, 0);
+    
+    upipe_input(upipe, flow_def_dup, NULL);
     return UBASE_ERR_NONE;
 }
 
@@ -251,9 +348,8 @@ static int upipe_v210enc_control(struct upipe *upipe, int command, va_list args)
     switch (command) {
         case UPIPE_REGISTER_REQUEST: {
             struct urequest *request = va_arg(args, struct urequest *);
-            if (request->type == UREQUEST_UBUF_MGR)
-                return upipe_v210enc_amend_ubuf_mgr(upipe, request);
-            if (request->type == UREQUEST_FLOW_FORMAT)
+            if (request->type == UREQUEST_UBUF_MGR ||
+                request->type == UREQUEST_FLOW_FORMAT)
                 return upipe_throw_provide_request(upipe, request);
             return upipe_v210enc_alloc_output_proxy(upipe, request);
         }
@@ -298,7 +394,6 @@ static struct upipe *upipe_v210enc_alloc(struct upipe_mgr *mgr,
                                      struct uprobe *uprobe,
                                      uint32_t signature, va_list args)
 {
-    struct uref *flow_def;
     struct upipe *upipe = upipe_v210enc_alloc_void(mgr, uprobe, signature, args);
     if (unlikely(upipe == NULL))
         return NULL;
@@ -315,14 +410,7 @@ static struct upipe *upipe_v210enc_alloc(struct upipe_mgr *mgr,
     upipe_v210enc_init_input(upipe);
 
     upipe_throw_ready(upipe);
-
-    UBASE_FATAL(upipe, uref_pic_flow_set_align(flow_def, 16))
-    upipe_v210enc_store_flow_def_attr(upipe, flow_def);
     return upipe;
-
-fail:
-
-    return NULL;
 }
 
 /** @This frees a upipe.
@@ -336,10 +424,9 @@ static void upipe_v210enc_free(struct upipe *upipe)
     upipe_throw_dead(upipe);
     upipe_v210enc_clean_input(upipe);
     upipe_v210enc_clean_output(upipe);
-    upipe_v210enc_clean_flow_def(upipe);
     upipe_v210enc_clean_ubuf_mgr(upipe);
     upipe_v210enc_clean_urefcount(upipe);
-    upipe_v210enc_free_flow(upipe);
+    upipe_v210enc_free_void(upipe);
 }
 
 /** module manager static descriptor */

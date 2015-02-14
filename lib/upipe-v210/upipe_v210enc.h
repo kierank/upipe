@@ -3,8 +3,9 @@
  *
  * Copyright (C) 2009 Michael Niedermayer <michaelni@gmx.at>
  * Copyright (c) 2009 Baptiste Coudurier <baptiste dot coudurier at gmail dot com>
+ * Copyright (c) 2015 Open Broadcast Systems Ltd
  *
- * This file is part of FFmpeg.
+ * This file originates from FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,7 +23,7 @@
  */
 
 /** @file
- * @short Upipe v210 module
+ * @short Upipe v210enc module
  */
 
 #include <upipe/ubase.h>
@@ -57,19 +58,12 @@
 #include <libavutil/cpu.h>
 #include <libavutil/intreadwrite.h>
 
+#define UPIPE_V210_MAX_PLANES 3
+
 /** upipe_v210enc structure with v210enc parameters */
 struct upipe_v210enc {
     /** refcount management structure */
     struct urefcount urefcount;
-
-    /** output pipe */
-    struct upipe *output;
-    /** output flow */
-    struct uref *flow_def;
-    /** output state */
-    enum upipe_helper_output_state output_state;
-    /** list of output requests */
-    struct uchain request_list;
 
     /** ubuf manager */
     struct ubuf_mgr *ubuf_mgr;
@@ -77,6 +71,15 @@ struct upipe_v210enc {
     struct uref *flow_format;
     /** ubuf manager request */
     struct urequest ubuf_mgr_request;
+
+    /** output pipe */
+    struct upipe *output;
+    /** flow_definition packet */
+    struct uref *flow_def;
+    /** output state */
+    enum upipe_helper_output_state output_state;
+    /** list of output requests */
+    struct uchain request_list;
 
     /** temporary uref storage (used during urequest) */
     struct uchain urefs;
@@ -87,12 +90,20 @@ struct upipe_v210enc {
     /** list of blockers (used during udeal) */
     struct uchain blockers;
 
+    /** input bit depth **/
+    int input_bit_depth;
+
     /** cpu flags **/
     int cpu_flags;
 
     /** line packing functions **/
     void (*pack_line_8)(const uint8_t *y, const uint8_t *u, const uint8_t *v, uint8_t *dst, ptrdiff_t width);
     void (*pack_line_10)(const uint16_t *y, const uint16_t *u, const uint16_t *v, uint8_t *dst, ptrdiff_t width);
+
+    /** input chroma map */
+    const char *input_chroma_map[UPIPE_V210_MAX_PLANES+1];
+    /** output chroma map */
+    const char *output_chroma_map;
 
     /** public upipe structure */
     struct upipe upipe;
