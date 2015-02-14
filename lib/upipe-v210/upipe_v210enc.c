@@ -37,6 +37,7 @@ static int upipe_v210enc_check(struct upipe *upipe, struct uref *flow_format);
 
 UPIPE_HELPER_UPIPE(upipe_v210enc, upipe, UPIPE_V210ENC_SIGNATURE);
 UPIPE_HELPER_UREFCOUNT(upipe_v210enc, urefcount, upipe_v210enc_free)
+UPIPE_HELPER_VOID(upipe_v210enc);
 UPIPE_HELPER_FLOW(upipe_v210enc, "pic.");
 UPIPE_HELPER_OUTPUT(upipe_v210enc, output, flow_def, output_state, request_list)
 UPIPE_HELPER_UBUF_MGR(upipe_v210enc, ubuf_mgr, flow_format, ubuf_mgr_request,
