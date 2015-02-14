@@ -2,9 +2,9 @@ prefix=@prefix@
 exec_prefix=@exec_prefix@
 libdir=@libdir@
 includedir=@includedir@     
-Name: libupipe_sws
-Description: Upipe multimedia framework, v210 packing/unpacking module
+Name: libupipe_v210
+Description: Upipe multimedia framework, v210 interface module
 Version: @VERSION@
-Requires: libswscale libupipe
+Requires: libavutil libupipe
 Libs: -L${libdir} -lupipe_v210
 Cflags: -I${includedir}
