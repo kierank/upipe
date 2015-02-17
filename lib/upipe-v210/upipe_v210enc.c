@@ -180,7 +180,7 @@ static bool upipe_v210enc_handle(struct upipe *upipe, struct uref *uref,
     input_strides[i] = 0;
 
     /* allocate dest ubuf */
-    size_t aligned_input_hsize = (input_hsize + 47) / 48;
+    size_t aligned_input_hsize = ((input_hsize + 47) / 48) * 48;
     struct ubuf *ubuf = ubuf_pic_alloc(upipe_v210enc->ubuf_mgr,
                                        aligned_input_hsize, input_vsize);
     if (unlikely(ubuf == NULL)) {
