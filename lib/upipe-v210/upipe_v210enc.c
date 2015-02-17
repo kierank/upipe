@@ -180,8 +180,9 @@ static bool upipe_v210enc_handle(struct upipe *upipe, struct uref *uref,
     input_strides[i] = 0;
 
     /* allocate dest ubuf */
+    size_t aligned_input_hsize = (input_hsize + 47) / 48;
     struct ubuf *ubuf = ubuf_pic_alloc(upipe_v210enc->ubuf_mgr,
-                                       input_hsize, input_vsize);
+                                       aligned_input_hsize, input_vsize);
     if (unlikely(ubuf == NULL)) {
         for (i = 0; i < UPIPE_V210_MAX_PLANES &&
                     upipe_v210enc->input_chroma_map[i] != NULL; i++)
@@ -414,8 +415,8 @@ static int upipe_v210enc_set_flow_def(struct upipe *upipe, struct uref *flow_def
 
     uref_pic_flow_set_align(flow_def_dup, 16);
     uref_pic_flow_set_planes(flow_def_dup, 1);
-    uref_pic_flow_set_macropixel(flow_def_dup, 18);
-    uref_pic_flow_set_macropixel_size(flow_def_dup, 48, 0);
+    uref_pic_flow_set_macropixel(flow_def_dup, 48);
+    uref_pic_flow_set_macropixel_size(flow_def_dup, 128, 0);
     uref_pic_flow_set_chroma(flow_def_dup, upipe_v210enc->output_chroma_map, 0);
     
     upipe_input(upipe, flow_def_dup, NULL);
