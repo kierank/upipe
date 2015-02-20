@@ -43,6 +43,7 @@
 #include <upipe/uref_sound.h>
 #include <upipe/uref_sound_flow.h>
 #include <upipe/uref_clock.h>
+#include <upipe/uref_dump.h>
 #include <upipe/upipe.h>
 #include <upipe/upipe_helper_upipe.h>
 #include <upipe/upipe_helper_urefcount.h>
@@ -273,9 +274,32 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
 static int upipe_bmd_sink_sub_set_flow_def(struct upipe *upipe,
                                           struct uref *flow_def)
 {
+    struct upipe_bmd_sink *upipe_bmd_sink =
+        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+    struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
+        upipe_bmd_sink_sub_from_upipe(upipe);
+
     if (flow_def == NULL)
         return UBASE_ERR_INVALID;
 
+    if (upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe) {
+        uint8_t macropixel;
+        if (!ubase_check(uref_pic_flow_get_macropixel(flow_def, &macropixel))) {
+            upipe_err(upipe, "macropixel size not set");
+            uref_dump(flow_def, upipe->uprobe);
+            return UBASE_ERR_EXTERNAL;
+        }
+
+        if (macropixel != 48 || ubase_check(
+                             uref_pic_flow_check_chroma(flow_def, 1, 1, 1,
+                                                        "u10y10v10y10u10y10v10y10u10y10v10y10"))) {
+            upipe_err(upipe, "incompatible input flow def");
+            uref_dump(flow_def, upipe->uprobe);
+            return UBASE_ERR_EXTERNAL;
+        }
+    }
+
+    upipe_input(upipe, flow_def, NULL);
     return UBASE_ERR_NONE;
 }
 
