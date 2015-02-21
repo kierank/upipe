@@ -45,7 +45,10 @@
 #include <upipe/uref_clock.h>
 #include <upipe/uref_dump.h>
 #include <upipe/upipe.h>
+#include <upipe/upipe_helper_input.h>
 #include <upipe/upipe_helper_upipe.h>
+#include <upipe/upipe_helper_upump_mgr.h>
+#include <upipe/upipe_helper_upump.h>
 #include <upipe/upipe_helper_urefcount.h>
 #include <upipe/upipe_helper_void.h>
 #include <upipe-blackmagic/upipe_blackmagic_sink.h>
@@ -66,6 +69,13 @@
 
 #include "include/DeckLinkAPI.h"
 
+/** @hidden */
+static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
+                                      struct upump **upump_p);
+
+/** @hidden */
+static void upipe_bmd_sink_sub_write_watcher(struct upump *upump);
+
 /** @internal @This is the private context of an output of an bmd_sink sink
  * pipe. */
 struct upipe_bmd_sink_sub {
@@ -73,6 +83,23 @@ struct upipe_bmd_sink_sub {
 
     /** refcount management structure */
     struct urefcount urefcount;
+
+    /** temporary uref storage */
+    struct uchain urefs;
+    /** nb urefs in storage */
+    unsigned int nb_urefs;
+    /** max urefs in storage */
+    unsigned int max_urefs;
+    /** list of blockers */
+    struct uchain blockers;
+
+    /** delay applied to pts attribute when uclock is provided */
+    uint64_t latency;
+
+    /** upump manager */
+    struct upump_mgr *upump_mgr;
+    /** watcher */
+    struct upump *upump;
 
     /** public upipe structure */
     struct upipe upipe;
@@ -128,6 +155,9 @@ UPIPE_HELPER_VOID(upipe_bmd_sink);
 
 UPIPE_HELPER_UPIPE(upipe_bmd_sink_sub, upipe, UPIPE_BMD_SINK_INPUT_SIGNATURE)
 UPIPE_HELPER_UREFCOUNT(upipe_bmd_sink_sub, urefcount, upipe_bmd_sink_sub_free);
+UPIPE_HELPER_UPUMP_MGR(upipe_bmd_sink_sub, upump_mgr);
+UPIPE_HELPER_UPUMP(upipe_bmd_sink_sub, upump, upump_mgr);
+UPIPE_HELPER_INPUT(upipe_bmd_sink_sub, urefs, nb_urefs, max_urefs, blockers, upipe_bmd_sink_sub_output);
 
 UBASE_FROM_TO(upipe_bmd_sink, upipe_mgr, sub_mgr, sub_mgr)
 UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, pic_subpipe, pic_subpipe)
@@ -153,6 +183,9 @@ static void upipe_bmd_sink_sub_init(struct upipe *upipe,
     upipe_bmd_sink_sub->upipe_bmd_sink = upipe_bmd_sink_to_upipe(upipe_bmd_sink);
 
     upipe_bmd_sink_sub_init_urefcount(upipe);
+    upipe_bmd_sink_sub_init_input(upipe);
+    upipe_bmd_sink_sub_init_upump_mgr(upipe);
+    upipe_bmd_sink_sub_init_upump(upipe);
 
     upipe_throw_ready(upipe);
 }
@@ -161,9 +194,24 @@ static void upipe_bmd_sink_sub_free(struct upipe *upipe)
 {
     struct upipe_bmd_sink_sub *upipe_bmd_sink_sub = upipe_bmd_sink_sub_from_upipe(upipe);
     upipe_throw_dead(upipe);
+    upipe_bmd_sink_sub_clean_upump(upipe);
+    upipe_bmd_sink_sub_clean_upump_mgr(upipe);
+    upipe_bmd_sink_sub_clean_input(upipe);
     upipe_bmd_sink_sub_clean_urefcount(upipe);
     uprobe_release(upipe->uprobe);
     upipe_release(upipe_bmd_sink_sub->upipe_bmd_sink);
+}
+
+/** @internal @This is called when the data should be displayed.
+ *
+ * @param upump description structure of the watcher
+ */
+static void upipe_bmd_sink_sub_write_watcher(struct upump *upump)
+{
+    struct upipe *upipe = upump_get_opaque(upump, struct upipe *);
+    upipe_bmd_sink_sub_set_upump(upipe, NULL);
+    upipe_bmd_sink_sub_output_input(upipe);
+    upipe_bmd_sink_sub_unblock_input(upipe);
 }
 
 /** @internal @This handles input uref.
@@ -172,21 +220,48 @@ static void upipe_bmd_sink_sub_free(struct upipe *upipe)
  * @param uref uref structure
  * @param upump_p reference to upump structure
  */
-static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
-                                     struct upump **upump_p)
+static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
+                                      struct upump **upump_p)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
         upipe_bmd_sink_from_sub_mgr(upipe->mgr);
     struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
         upipe_bmd_sink_sub_from_upipe(upipe);
 
-    if (!upipe_bmd_sink->deckLink) {
-        upipe_err_va(upipe, "DeckLink card not ready");
-        return;
-    }
-
     HRESULT result;
     const char *v210 = "u10y10v10y10u10y10v10y10u10y10v10y10";
+
+    const char *def;
+    if (unlikely(ubase_check(uref_flow_get_def(uref, &def)))) {
+        upipe_bmd_sink_sub->latency = 0;
+        uref_clock_get_latency(uref, &upipe_bmd_sink_sub->latency);
+
+        upipe_bmd_sink_sub_check_upump_mgr(upipe);
+
+        uref_free(uref);
+        return true;
+    }
+
+    uint64_t pts = 0;
+    if (likely(ubase_check(uref_clock_get_pts_sys(uref, &pts)))) {
+        uint64_t now = uclock_now(&upipe_bmd_sink->uclock.uclock);
+        pts += upipe_bmd_sink_sub->latency;
+
+        if (now < pts) {
+            upipe_verbose_va(upipe, "sleeping %"PRIu64" (%"PRIu64")",
+                             pts - now, pts);
+            upipe_bmd_sink_sub_wait_upump(upipe, pts - now,
+                                      upipe_bmd_sink_sub_write_watcher);
+            return false;
+        } else if (now > pts + UCLOCK_FREQ / 10) {
+            upipe_warn_va(upipe, "late uref dropped (%"PRId64")",
+                          (now - pts) * 1000 / UCLOCK_FREQ);
+            uref_free(uref);
+            return true;
+        }
+        
+        printf("\n %s NOW %"PRIu64" PTS %"PRIu64" DELTA %"PRIi64" \n", upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe ? "VIDEO" : "AUDIO", now, pts, now-pts );
+    }
 
     if (upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe){
         int w = upipe_bmd_sink->displayMode->GetWidth();
@@ -203,12 +278,11 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
         if (result != S_OK) {
             upipe_err_va(upipe, "Could not create frame");
             uref_free(uref);
-            return;
+            return true;
         }
 
         void *frame_bytes;
         video_frame->GetBytes((void**)&frame_bytes);
-
 
         size_t stride;
         const uint8_t *plane;
@@ -218,7 +292,7 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
                                           &plane)))) {
             upipe_err_va(upipe, "Could not read v210 plane");
             uref_free(uref);
-            return;
+            return true;
         }
 
         memcpy(frame_bytes, plane, stride * h);
@@ -228,7 +302,7 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
         BMDTimeScale timeScale;
         upipe_bmd_sink->displayMode->GetFrameRate(&timeValue, &timeScale);
 
-        result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, uref->date_sys, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
+        result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
         if( result != S_OK )
             upipe_err_va(upipe, "DROPPED FRAME");
 
@@ -237,12 +311,11 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
     else if(upipe_bmd_sink_sub == &upipe_bmd_sink->sound_subpipe && upipe_bmd_sink->started){
         size_t size = 0;
         uref_sound_size(uref, &size, NULL);
-
         const int32_t *buffers[1];
         uref_sound_read_int32_t(uref, 0, size, buffers, 1);
 
         uint32_t written;
-        result = upipe_bmd_sink->deckLinkOutput->ScheduleAudioSamples((void*)buffers[0], size, uref->date_sys, UCLOCK_FREQ, &written);
+        result = upipe_bmd_sink->deckLinkOutput->ScheduleAudioSamples((void*)buffers[0], size, pts, UCLOCK_FREQ, &written);
         uref_sound_unmap(uref, 0, size, 1);
 
         if( result != S_OK )
@@ -250,6 +323,7 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
 
         uint32_t buffered;
         upipe_bmd_sink->deckLinkOutput->GetBufferedAudioSampleFrameCount(&buffered);
+
         if (buffered == 0) {
             /* TODO: get notified as soon as audio buffers empty */
             upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
@@ -262,7 +336,33 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
 
 
     uref_free(uref);
-    return;
+    return true;
+}
+
+/** @internal @This handles output data.
+ *
+ * @param upipe description structure of the pipe
+ * @param uref uref structure
+ * @param upump_p reference to upump structure
+ */
+static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref, 
+                                      struct upump **upump_p)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink =
+        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+    struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
+        upipe_bmd_sink_sub_from_upipe(upipe);
+    
+    if (!upipe_bmd_sink->deckLink) {
+        upipe_err_va(upipe, "DeckLink card not ready");
+        return;
+    }
+
+    if (!upipe_bmd_sink_sub_check_input(upipe) ||
+        !upipe_bmd_sink_sub_output(upipe, uref, upump_p)) {
+        upipe_bmd_sink_sub_hold_input(upipe, uref);
+        upipe_bmd_sink_sub_block_input(upipe, upump_p);
+    }
 }
 
 /** @internal @This sets the input flow definition.
@@ -315,6 +415,11 @@ static int upipe_bmd_sink_sub_control(struct upipe *upipe,
                                      int command, va_list args)
 {
     switch (command) {
+        case UPIPE_ATTACH_UPUMP_MGR: {
+            upipe_bmd_sink_sub_set_upump(upipe, NULL);
+            UBASE_RETURN(upipe_bmd_sink_sub_attach_upump_mgr(upipe))
+            return UBASE_ERR_NONE;
+        }
         case UPIPE_REGISTER_REQUEST: {
             struct urequest *request = va_arg(args, struct urequest *);
             return upipe_throw_provide_request(upipe, request);
@@ -382,7 +487,6 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
     upipe_init(upipe, mgr, uprobe);
 
     upipe_bmd_sink_init_sub_mgr(upipe);
-
     upipe_bmd_sink_init_urefcount(upipe);
 
     /* Initalise subpipes */
@@ -505,7 +609,7 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
         opt = NULL;
 
     if (!opt || strlen(opt) != 4)
-        opt = "pal ";
+        opt = "Hi50";
 
     while ((result = displayModeIterator->Next(&displayMode)) == S_OK)
     {
@@ -537,7 +641,6 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
 
     upipe_bmd_sink->displayMode = displayMode;
 
-        ;
     result = deckLinkOutput->EnableVideoOutput(displayMode->GetDisplayMode(),
                                                bmdVideoOutputFlagDefault);
     if (result != S_OK)
