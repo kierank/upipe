@@ -268,7 +268,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         int h = upipe_bmd_sink->displayMode->GetHeight();
 
         if (!upipe_bmd_sink->started){
-            upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(uref->date_sys, UCLOCK_FREQ, 1.0);
+            upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(pts, UCLOCK_FREQ, 1.0);
             upipe_bmd_sink->started = 1;
         }
 
