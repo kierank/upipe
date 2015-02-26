@@ -140,9 +140,22 @@ static bool upipe_v210enc_handle(struct upipe *upipe, struct uref *uref,
     struct upipe_v210enc *upipe_v210enc = upipe_v210enc_from_upipe(upipe);
     const char *def;
     if (unlikely(ubase_check(uref_flow_get_def(uref, &def)))) {
-        upipe_v210enc_store_flow_def(upipe, uref);
+        upipe_v210enc_store_flow_def(upipe, NULL);
         upipe_v210enc_require_ubuf_mgr(upipe, uref);
         return true;
+    }
+
+    if (upipe_v210enc->input_bit_depth == 8){
+        upipe_v210enc->input_chroma_map[0] = "y8";
+        upipe_v210enc->input_chroma_map[1] = "u8";
+        upipe_v210enc->input_chroma_map[2] = "v8";
+        upipe_v210enc->input_chroma_map[3] = NULL;
+    }
+    else {
+        upipe_v210enc->input_chroma_map[0] = "y10l";
+        upipe_v210enc->input_chroma_map[1] = "u10l";
+        upipe_v210enc->input_chroma_map[2] = "v10l";
+        upipe_v210enc->input_chroma_map[3] = NULL;
     }
 
     if (upipe_v210enc->flow_def == NULL)
@@ -375,12 +388,9 @@ static int upipe_v210enc_set_flow_def(struct upipe *upipe, struct uref *flow_def
     struct upipe_v210enc *upipe_v210enc = upipe_v210enc_from_upipe(upipe);
     struct uref *flow_def_dup;
 
-    if ((flow_def_dup = uref_dup(flow_def)) == NULL)
-        return UBASE_ERR_ALLOC;
-
     uint8_t macropixel;
     if (!ubase_check(uref_pic_flow_get_macropixel(flow_def, &macropixel)))
-        return -1;
+        return UBASE_ERR_INVALID;
 
 #define u ubase_check
     if (!(macropixel == 1 &&
@@ -398,27 +408,17 @@ static int upipe_v210enc_set_flow_def(struct upipe *upipe, struct uref *flow_def
     upipe_v210enc->input_bit_depth = u(uref_pic_flow_check_chroma(flow_def, 1, 1, 1, "y8")) ? 8 : 10;
 #undef u
 
-    if (upipe_v210enc->input_bit_depth == 8){
-        upipe_v210enc->input_chroma_map[0] = "y8";
-        upipe_v210enc->input_chroma_map[1] = "u8";
-        upipe_v210enc->input_chroma_map[2] = "v8";
-        upipe_v210enc->input_chroma_map[3] = NULL;
-    }
-    else {
-        upipe_v210enc->input_chroma_map[0] = "y10l";
-        upipe_v210enc->input_chroma_map[1] = "u10l";
-        upipe_v210enc->input_chroma_map[2] = "v10l";
-        upipe_v210enc->input_chroma_map[3] = NULL;
-    }
-
     upipe_v210enc->output_chroma_map = "u10y10v10y10u10y10v10y10u10y10v10y10";
+
+    if ((flow_def_dup = uref_dup(flow_def)) == NULL)
+        return UBASE_ERR_ALLOC;
 
     uref_pic_flow_set_align(flow_def_dup, 16);
     uref_pic_flow_set_planes(flow_def_dup, 1);
     uref_pic_flow_set_macropixel(flow_def_dup, 48);
     uref_pic_flow_set_macropixel_size(flow_def_dup, 128, 0);
     uref_pic_flow_set_chroma(flow_def_dup, upipe_v210enc->output_chroma_map, 0);
-    
+
     upipe_input(upipe, flow_def_dup, NULL);
     return UBASE_ERR_NONE;
 }
