@@ -27,6 +27,7 @@
 #define __STDC_CONSTANT_MACROS 1
 
 #include <upipe/ubase.h>
+#include <upipe/uatomic.h>
 #include <upipe/ulist.h>
 #include <upipe/uprobe.h>
 #include <upipe/uclock.h>
@@ -68,6 +69,82 @@
 #include <assert.h>
 
 #include "include/DeckLinkAPI.h"
+#include "include/DeckLinkAPIDispatch.cpp"
+
+/* FIXME: handle other pixel formats, Ancillary data etc*/
+class upipe_bmd_sink_frame : public IDeckLinkVideoFrame
+{
+public:
+    upipe_bmd_sink_frame(struct uref *_uref, void *_buffer, long _width, long _height) :
+                         uref(_uref), data(_buffer), width(_width), height(_height) {
+        uatomic_store(&refcount, 1);
+    }
+
+    ~upipe_bmd_sink_frame(void) {
+        printf("\n DESTRUCT \n");
+        uatomic_clean(&refcount);
+        uref_pic_plane_unmap(uref, "u10y10v10y10u10y10v10y10u10y10v10y10", 0, 0, -1, -1);
+        uref_free(uref);
+    }
+
+    virtual long STDMETHODCALLTYPE GetWidth(void) {
+        return width;
+    }
+
+    virtual long STDMETHODCALLTYPE GetHeight(void) {
+        return height;
+    }
+
+    virtual long STDMETHODCALLTYPE GetRowBytes(void) {
+        return ((width + 47) / 48) * 128;
+    }
+
+    virtual BMDPixelFormat STDMETHODCALLTYPE GetPixelFormat(void) {
+        return bmdFormat10BitYUV;
+    }
+
+    virtual BMDFrameFlags STDMETHODCALLTYPE GetFlags(void) {
+        return bmdVideoOutputFlagDefault;
+    }
+
+    virtual HRESULT STDMETHODCALLTYPE GetBytes(void **buffer) {
+        *buffer = data;
+        return S_OK;
+    }
+
+    virtual HRESULT STDMETHODCALLTYPE GetTimecode(BMDTimecodeFormat format,
+                                                  IDeckLinkTimecode **timecode) {
+        *timecode = NULL;
+        return S_FALSE;
+    }
+
+    virtual HRESULT STDMETHODCALLTYPE GetAncillaryData(IDeckLinkVideoFrameAncillary **ancillary) {
+        return S_FALSE;
+    }
+
+    virtual ULONG STDMETHODCALLTYPE AddRef(void) {
+        return uatomic_fetch_add(&refcount, 1) + 1;
+    }
+
+    virtual ULONG STDMETHODCALLTYPE Release(void) {
+        uint32_t new_ref = uatomic_fetch_sub(&refcount, 1) - 1;
+        if (new_ref == 0)
+            delete this;
+        return new_ref;
+    }
+
+    virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, LPVOID *ppv) {
+        return E_NOINTERFACE;
+    }
+
+private:
+    struct uref *uref;
+    void *data;
+    long width;
+    long height;
+
+    uatomic_uint32_t refcount;
+};
 
 /** @hidden */
 static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
@@ -229,7 +306,6 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         upipe_bmd_sink_sub_from_upipe(upipe);
 
     HRESULT result;
-    const char *v210 = "u10y10v10y10u10y10v10y10u10y10v10y10";
 
     const char *def;
     if (unlikely(ubase_check(uref_flow_get_def(uref, &def)))) {
@@ -251,39 +327,26 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
             upipe_verbose_va(upipe, "sleeping %"PRIu64" (%"PRIu64")",
                              pts - now, pts);
             upipe_bmd_sink_sub_wait_upump(upipe, pts - now,
-                                      upipe_bmd_sink_sub_write_watcher);
+                                          upipe_bmd_sink_sub_write_watcher);
             return false;
         } else if (now > pts + UCLOCK_FREQ / 10) {
             upipe_warn_va(upipe, "late uref dropped (%"PRId64")",
                           (now - pts) * 1000 / UCLOCK_FREQ);
             uref_free(uref);
             return true;
-        }
-        
-        printf("\n %s NOW %"PRIu64" PTS %"PRIu64" DELTA %"PRIi64" \n", upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe ? "VIDEO" : "AUDIO", now, pts, now-pts );
+        }   
     }
 
-    if (upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe){
+    if (upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe) {
         int w = upipe_bmd_sink->displayMode->GetWidth();
         int h = upipe_bmd_sink->displayMode->GetHeight();
 
-        if (!upipe_bmd_sink->started){
+        if(!upipe_bmd_sink->started) {
             upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(pts, UCLOCK_FREQ, 1.0);
             upipe_bmd_sink->started = 1;
         }
 
-        int dst_stride = (((w + 47) / 48) * 48) * 8 / 3;
-        IDeckLinkMutableVideoFrame *video_frame;
-        result = upipe_bmd_sink->deckLinkOutput->CreateVideoFrame(w, h, dst_stride, bmdFormat10BitYUV, bmdFrameFlagDefault, &video_frame);
-        if (result != S_OK) {
-            upipe_err_va(upipe, "Could not create frame");
-            uref_free(uref);
-            return true;
-        }
-
-        void *frame_bytes;
-        video_frame->GetBytes((void**)&frame_bytes);
-
+        const char *v210 = "u10y10v10y10u10y10v10y10u10y10v10y10";
         size_t stride;
         const uint8_t *plane;
         if (unlikely(!ubase_check(uref_pic_plane_size(uref, v210, &stride,
@@ -291,12 +354,15 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
                      !ubase_check(uref_pic_plane_read(uref, v210, 0, 0, -1, -1,
                                           &plane)))) {
             upipe_err_va(upipe, "Could not read v210 plane");
+            return NULL;
+        }
+
+        upipe_bmd_sink_frame *video_frame = new upipe_bmd_sink_frame(uref, (void*)plane,
+                                                                     w, h);
+        if (!video_frame) {
             uref_free(uref);
             return true;
         }
-
-        memcpy(frame_bytes, plane, stride * h);
-        uref_pic_plane_unmap(uref, v210, 0, 0, -1, -1);
 
         BMDTimeValue timeValue;
         BMDTimeScale timeScale;
@@ -304,11 +370,11 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
 
         result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
         if( result != S_OK )
-            upipe_err_va(upipe, "DROPPED FRAME");
+            upipe_err_va(upipe, "DROPPED FRAME %x", result);
 
         video_frame->Release();
     }
-    else if(upipe_bmd_sink_sub == &upipe_bmd_sink->sound_subpipe && upipe_bmd_sink->started){
+    else if (upipe_bmd_sink_sub == &upipe_bmd_sink->sound_subpipe && upipe_bmd_sink->started) {
         size_t size = 0;
         uref_sound_size(uref, &size, NULL);
         const int32_t *buffers[1];
@@ -332,10 +398,9 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         if (written != size)
             upipe_dbg_va(upipe, "written %u/%u", written, size);
         upipe_dbg_va(upipe, "buffered samples: %u", buffered );
+        uref_free(uref);
     }
 
-
-    uref_free(uref);
     return true;
 }
 
@@ -399,6 +464,8 @@ static int upipe_bmd_sink_sub_set_flow_def(struct upipe *upipe,
         }
     }
 
+    flow_def = uref_dup(flow_def);
+    UBASE_ALLOC_RETURN(flow_def)
     upipe_input(upipe, flow_def, NULL);
     return UBASE_ERR_NONE;
 }
