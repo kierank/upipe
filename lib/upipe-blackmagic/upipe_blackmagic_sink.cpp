@@ -275,7 +275,6 @@ static void upipe_bmd_sink_sub_free(struct upipe *upipe)
     upipe_bmd_sink_sub_clean_upump_mgr(upipe);
     upipe_bmd_sink_sub_clean_input(upipe);
     upipe_bmd_sink_sub_clean_urefcount(upipe);
-    uprobe_release(upipe->uprobe);
     upipe_release(upipe_bmd_sink_sub->upipe_bmd_sink);
 }
 
