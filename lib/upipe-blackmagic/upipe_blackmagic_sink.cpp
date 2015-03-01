@@ -207,8 +207,13 @@ struct upipe_bmd_sink {
     /** subpic subpipe */
     struct upipe_bmd_sink_sub subpic_subpipe;
 
-    struct uref *options;
+    /** card index **/
+    int card_idx;
 
+    /** output mode **/
+    char mode[5];
+
+    /** started flag **/
     int started;
 
     /** handle to decklink card */
@@ -620,13 +625,6 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
     int err = UBASE_ERR_NONE;
     int card_idx = 0;
     HRESULT result = E_NOINTERFACE;
-    struct udict *dict = NULL;
-    const char *opt;
-
-    // FIXME check things here
-
-    if (upipe_bmd_sink->options)
-        dict = upipe_bmd_sink->options->udict;
 
     /* decklink interface interator */
     deckLinkIterator = CreateDeckLinkIteratorInstance();
@@ -635,9 +633,6 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
         err = UBASE_ERR_EXTERNAL;
         goto end;
     }
-
-    if (dict && !udict_get_string(dict, &opt, UDICT_TYPE_STRING, "card-index"))
-        card_idx = atoi(opt);
 
     /* get decklink interface handler */
     for (int i = 0; i <= card_idx; i++) {
@@ -650,7 +645,7 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
 
     if (result != S_OK) {
         upipe_err_va(upipe, "decklink card %d not found", card_idx);
-        //err = UBASE_ERR_EXTERNAL;
+        err = UBASE_ERR_EXTERNAL;
         goto end;
     }
 
@@ -670,12 +665,6 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
         goto end;
     }
 
-    if (!dict || udict_get_string(dict, &opt, UDICT_TYPE_STRING, "mode"))
-        opt = NULL;
-
-    if (!opt || strlen(opt) != 4)
-        opt = "Hi50";
-
     while ((result = displayModeIterator->Next(&displayMode)) == S_OK)
     {
         union {
@@ -684,7 +673,7 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
         } u;
         u.mode_id = ntohl(displayMode->GetDisplayMode());
 
-        if (!strncmp(u.mode_s, opt, 4))
+        if (!strncmp(u.mode_s, upipe_bmd_sink->mode, 4))
             break;
 
         displayMode->Release();
@@ -692,7 +681,7 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
 
     if (result != S_OK || displayMode == NULL)
     {
-        fprintf(stderr, "Unable to get display mode %s\n", opt);
+        fprintf(stderr, "Unable to get display mode %s\n", upipe_bmd_sink->mode);
         err = UBASE_ERR_EXTERNAL;
         goto end;
     }
@@ -753,21 +742,13 @@ static int upipe_bmd_sink_set_option(struct upipe *upipe,
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
     assert(k != NULL);
 
-// FIXME
-#if 0 
-    if (upipe_bmd_sink->options == NULL) {
-        struct uref_mgr *uref_mgr;
-        UBASE_RETURN(upipe_throw_need_uref_mgr(upipe, &uref_mgr))
-        upipe_bmd_sink->options = uref_alloc_control(uref_mgr);
-        uref_mgr_release(uref_mgr);
-    }
+    if (!strcmp(k, "card-idx"))
+        upipe_bmd_sink->card_idx = atoi(v);
 
-    if (v != NULL)
-        return udict_set_string(upipe_bmd_sink->options->udict, v,
-                                UDICT_TYPE_STRING, k);
-    else
-        udict_delete(upipe_bmd_sink->options->udict, UDICT_TYPE_STRING, k);
-#endif
+    if (!strcmp(k, "mode")) {
+        strncpy(upipe_bmd_sink->mode, v, sizeof(upipe_bmd_sink->mode));
+        upipe_bmd_sink->mode[4] = '\0';
+    }
 
     return UBASE_ERR_NONE;
 }
@@ -856,7 +837,6 @@ static void upipe_bmd_sink_free(struct upipe *upipe)
 
     upipe_dbg_va(upipe, "releasing blackmagic sink pipe %p", upipe);
 
-    uref_free(upipe_bmd_sink->options);
     upipe_bmd_sink_clean_urefcount(upipe);
     upipe_bmd_sink_free_void(upipe);
 }
