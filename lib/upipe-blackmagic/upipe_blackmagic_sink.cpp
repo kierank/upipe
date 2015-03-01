@@ -81,7 +81,6 @@ public:
     }
 
     ~upipe_bmd_sink_frame(void) {
-        printf("\n DESTRUCT \n");
         uatomic_clean(&refcount);
         uref_pic_plane_unmap(uref, "u10y10v10y10u10y10v10y10u10y10v10y10", 0, 0, -1, -1);
         uref_free(uref);
