@@ -35,6 +35,7 @@ check_PROGRAMS = \
 	uclock_std_test \
 	upipe_play_test \
 	upipe_trickplay_test \
+	upipe_even_test \
 	upipe_null_test \
 	upipe_dup_test \
 	upipe_genaux_test \
@@ -42,6 +43,7 @@ check_PROGRAMS = \
 	upipe_probe_uref_test \
 	upipe_delay_test \
 	upipe_skip_test \
+	upipe_aggregate_test \
 	upipe_htons_test \
 	upipe_chunk_stream_test \
 	upipe_setflowdef_test \
@@ -74,12 +76,14 @@ TESTS = \
 	upipe_null_test \
 	upipe_play_test \
 	upipe_trickplay_test \
+	upipe_even_test \
 	upipe_dup_test \
 	upipe_genaux_test \
 	upipe_multicat_probe_test \
 	upipe_probe_uref_test \
 	upipe_delay_test \
 	upipe_skip_test \
+	upipe_aggregate_test \
 	upipe_htons_test \
 	upipe_chunk_stream_test \
 	upipe_setflowdef_test \
@@ -172,6 +176,7 @@ check_PROGRAMS += \
 	upipe_mpgv_framer_test \
 	upipe_mpga_framer_test \
 	upipe_a52_framer_test \
+	upipe_video_trim_test \
 	upipe_ts_check_test \
 	upipe_ts_decaps_test \
 	upipe_ts_pes_decaps_test \
@@ -182,12 +187,8 @@ check_PROGRAMS += \
 	upipe_ts_split_test \
 	upipe_ts_sync_test \
 	upipe_ts_demux_test \
-	upipe_ts_aggregate_test \
 	upipe_ts_encaps_test \
-	upipe_ts_join_test \
-	upipe_ts_pes_encaps_test \
 	upipe_ts_psi_generator_test \
-	upipe_ts_psi_inserter_test \
 	upipe_ts_tstd_test \
 	upipe_ts_test
 TESTS += \
@@ -196,6 +197,7 @@ TESTS += \
 	upipe_mpgv_framer_test \
 	upipe_mpga_framer_test \
 	upipe_a52_framer_test \
+	upipe_video_trim_test \
 	upipe_ts_check_test \
 	upipe_ts_decaps_test \
 	upipe_ts_pes_decaps_test \
@@ -206,12 +208,8 @@ TESTS += \
 	upipe_ts_split_test \
 	upipe_ts_sync_test \
 	upipe_ts_demux_test \
-	upipe_ts_aggregate_test \
 	upipe_ts_encaps_test \
-	upipe_ts_join_test \
-	upipe_ts_pes_encaps_test \
 	upipe_ts_psi_generator_test \
-	upipe_ts_psi_inserter_test \
 	upipe_ts_tstd_test
 endif
 
@@ -253,11 +251,13 @@ upipe_http_src_test_LDADD = $(LDADD) -lev $(top_builddir)/lib/upump-ev/libupump_
 upipe_blank_source_test_LDADD = $(LDADD) -lev $(top_builddir)/lib/upump-ev/libupump_ev.la $(top_builddir)/lib/upipe-modules/libupipe_modules.la
 upipe_play_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-modules/libupipe_modules.la
 upipe_trickplay_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-modules/libupipe_modules.la
+upipe_even_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-modules/libupipe_modules.la
 upipe_dup_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-modules/libupipe_modules.la
 upipe_genaux_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-modules/libupipe_modules.la
 upipe_delay_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-modules/libupipe_modules.la
 upipe_null_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-modules/libupipe_modules.la
 upipe_skip_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-modules/libupipe_modules.la
+upipe_aggregate_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-modules/libupipe_modules.la
 upipe_setflowdef_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-modules/libupipe_modules.la
 upipe_setattr_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-modules/libupipe_modules.la
 upipe_match_attr_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-modules/libupipe_modules.la
@@ -278,6 +278,7 @@ uprobe_pthread_upump_mgr_test_LDADD = $(LDADD) -lev -lpthread $(top_builddir)/li
 upipe_mpgv_framer_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-framers/libupipe_framers.la
 upipe_mpga_framer_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-framers/libupipe_framers.la
 upipe_a52_framer_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-framers/libupipe_framers.la
+upipe_video_trim_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-framers/libupipe_framers.la
 
 upipe_avformat_test_CFLAGS = @AVFORMAT_CFLAGS@
 upipe_avformat_test_LDADD = $(LDADD) -lev $(top_builddir)/lib/upump-ev/libupump_ev.la $(top_builddir)/lib/upipe-av/libupipe_av.la @AVFORMAT_LIBS@
@@ -295,20 +296,16 @@ upipe_swr_test_LDADD = $(LDADD) $(SWRESAMPLE_LIBS) $(top_builddir)/lib/upipe-swr
 upipe_ts_sync_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_check_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_split_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
-upipe_ts_join_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_decaps_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_encaps_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_pes_decaps_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
-upipe_ts_pes_encaps_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_psi_generator_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
-upipe_ts_psi_inserter_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_psi_merge_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_psi_split_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_pat_decoder_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_pmt_decoder_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_demux_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la $(top_builddir)/lib/upipe-framers/libupipe_framers.la
 upipe_ts_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la $(top_builddir)/lib/upipe-framers/libupipe_framers.la -lev $(top_builddir)/lib/upump-ev/libupump_ev.la $(top_builddir)/lib/upipe-modules/libupipe_modules.la
-upipe_ts_aggregate_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_tstd_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 
 upipe_glx_sink_test_LDADD = $(LDADD) $(GLX_LIBS) $(top_builddir)/lib/upipe-gl/libupipe_gl.la -lev $(top_builddir)/lib/upump-ev/libupump_ev.la

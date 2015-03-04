@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 OpenHeadend S.A.R.L.
+ * Copyright (C) 2015 OpenHeadend S.A.R.L.
  *
  * Authors: Christophe Massiot
  *
@@ -13,31 +13,31 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program; if not, write to the Free Software Foundation,
+ * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  */
 
 /** @file
- * @short Upipe module encapsulating access units into PES packets
+ * @short Upipe module trimming dead frames off a video stream
  */
 
-#ifndef _UPIPE_TS_UPIPE_TS_PES_ENCAPS_H_
+#ifndef _UPIPE_FRAMERS_UPIPE_VIDEO_TRIM_H_
 /** @hidden */
-#define _UPIPE_TS_UPIPE_TS_PES_ENCAPS_H_
+#define _UPIPE_FRAMERS_UPIPE_VIDEO_TRIM_H_
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #include <upipe/upipe.h>
 
-#define UPIPE_TS_PESE_SIGNATURE UBASE_FOURCC('t','s','p','e')
+#define UPIPE_VTRIM_SIGNATURE UBASE_FOURCC('v','t','r','m')
 
-/** @This returns the management structure for all ts_pese pipes.
+/** @This returns the management structure for all vtrim pipes.
  *
  * @return pointer to manager
  */
-struct upipe_mgr *upipe_ts_pese_mgr_alloc(void);
+struct upipe_mgr *upipe_vtrim_mgr_alloc(void);
 
 #ifdef __cplusplus
 }

@@ -1,21 +1,21 @@
 /*
- * Copyright (C) 2013-2014 OpenHeadend S.A.R.L.
+ * Copyright (C) 2013-2015 OpenHeadend S.A.R.L.
  *
  * Authors: Christophe Massiot
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation; either version 2.1 of the License, or
  * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Lesser General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program; if not, write to the Free Software Foundation,
+ * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  */
 
 /** @file
@@ -1086,9 +1086,6 @@ static int upipe_ts_demux_program_pmtd_update(struct upipe *upipe,
     struct upipe_ts_demux_program *upipe_ts_demux_program =
         upipe_ts_demux_program_from_upipe(upipe);
 
-    /* send the event upstream */
-    upipe_split_throw_update(upipe);
-
     /* send source_end on the removed or changed outputs */
     struct uchain *uchain;
     struct upipe_ts_demux_output *output = NULL;
@@ -1114,6 +1111,10 @@ static int upipe_ts_demux_program_pmtd_update(struct upipe *upipe,
         if (id != output->pid)
             upipe_throw_source_end(upipe_ts_demux_output_to_upipe(output));
     }
+
+    /* send the event upstream */
+    upipe_split_throw_update(upipe);
+
     if (output != NULL)
         upipe_release(upipe_ts_demux_output_to_upipe(output));
     return UBASE_ERR_NONE;
@@ -1284,7 +1285,7 @@ static void upipe_ts_demux_program_check_pcr(struct upipe *upipe)
     upipe_ts_demux_program->pcr_split_output =
         upipe_flow_alloc_sub(demux->split,
                      uprobe_pfx_alloc_va(
-                         uprobe_use(upipe_ts_demux_to_upipe(demux)->uprobe),
+                         uprobe_use(&demux->proxy_probe),
                          UPROBE_LOG_VERBOSE, "split output PCR %"PRIu64,
                          upipe_ts_demux_program->pcr_pid),
                      flow_def);
@@ -2156,6 +2157,9 @@ static void upipe_ts_demux_free(struct urefcount *urefcount_real)
 static void upipe_ts_demux_no_input(struct upipe *upipe)
 {
     struct upipe_ts_demux *upipe_ts_demux = upipe_ts_demux_from_upipe(upipe);
+    /* release the packet blocked in ts_sync */
+    upipe_ts_demux_store_first_inner(upipe, NULL);
+
     upipe_ts_demux_throw_sub_programs(upipe, UPROBE_SOURCE_END);
     /* close PAT to release programs */
     if (upipe_ts_demux->psi_split_output_pat != NULL) {
@@ -2169,7 +2173,6 @@ static void upipe_ts_demux_no_input(struct upipe *upipe)
     upipe_ts_demux_store_last_inner(upipe, NULL);
     upipe_split_throw_update(upipe);
 
-    upipe_ts_demux_store_first_inner(upipe, NULL);
     if (upipe_ts_demux->split != NULL)
         upipe_release(upipe_ts_demux->split);
     if (upipe_ts_demux->setrap != NULL)

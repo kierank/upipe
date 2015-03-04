@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2014 OpenHeadend S.A.R.L.
+ * Copyright (C) 2015 OpenHeadend S.A.R.L.
  *
  * Authors: Christophe Massiot
  *
@@ -24,7 +24,7 @@
  */
 
 /** @file
- * @short unit tests for trick play pipes
+ * @short unit tests for even pipes
  */
 
 #undef NDEBUG
@@ -45,7 +45,7 @@
 #include <upipe/uref_flow.h>
 #include <upipe/uref_clock.h>
 #include <upipe/upipe.h>
-#include <upipe-modules/upipe_trickplay.h>
+#include <upipe-modules/upipe_even.h>
 
 #include <stdlib.h>
 #include <stdbool.h>
@@ -107,11 +107,7 @@ static void test_input(struct upipe *upipe, struct uref *uref,
 {
     struct test_pipe *test_pipe = container_of(upipe, struct test_pipe, upipe);
     assert(uref != NULL);
-    uint64_t systime;
-    if (ubase_check(uref_clock_get_pts_sys(uref, &systime)))
-        *test_pipe->count_p += systime;
-    if (ubase_check(uref_clock_get_dts_sys(uref, &systime)))
-        *test_pipe->count_p += systime;
+    (*test_pipe->count_p)++;
     uref_free(uref);
 }
 
@@ -136,18 +132,12 @@ static void test_free(struct upipe *upipe)
 }
 
 /** helper phony pipe */
-static struct upipe_mgr trickp_test_mgr = {
+static struct upipe_mgr even_test_mgr = {
     .refcount = NULL,
     .upipe_alloc = test_alloc,
     .upipe_input = test_input,
     .upipe_control = test_control
 };
-
-/** helper uclock to test upipe_trickp */
-static uint64_t now(struct uclock *unused)
-{
-    return 42;
-}
 
 int main(int argc, char *argv[])
 {
@@ -168,106 +158,107 @@ int main(int argc, char *argv[])
     logger = uprobe_uref_mgr_alloc(logger, uref_mgr);
     assert(logger != NULL);
 
-    struct uclock uclock;
-    uclock.refcount = NULL;
-    uclock.uclock_now = now;
-    logger = uprobe_uclock_alloc(logger, &uclock);
-    assert(logger != NULL);
-
-    struct upipe_mgr *upipe_trickp_mgr = upipe_trickp_mgr_alloc();
-    assert(upipe_trickp_mgr != NULL);
-    struct upipe *upipe_trickp = upipe_void_alloc(upipe_trickp_mgr,
-            uprobe_pfx_alloc(uprobe_use(logger), UPROBE_LOG_LEVEL, "trickp"));
-    assert(upipe_trickp != NULL);
+    struct upipe_mgr *upipe_even_mgr = upipe_even_mgr_alloc();
+    assert(upipe_even_mgr != NULL);
+    struct upipe *upipe_even = upipe_void_alloc(upipe_even_mgr,
+            uprobe_pfx_alloc(uprobe_use(logger), UPROBE_LOG_LEVEL, "even"));
+    assert(upipe_even != NULL);
 
     uref = uref_alloc(uref_mgr);
     assert(uref != NULL);
     ubase_assert(uref_flow_set_def(uref, "pic."));
 
-    struct upipe *upipe_sink_pic = upipe_flow_alloc(&trickp_test_mgr,
+    struct upipe *upipe_sink_pic = upipe_flow_alloc(&even_test_mgr,
                                                     uprobe_use(logger), uref);
     assert(upipe_sink_pic != NULL);
 
-    struct upipe *upipe_trickp_pic = upipe_void_alloc_sub(upipe_trickp,
-            uprobe_pfx_alloc(uprobe_use(logger), UPROBE_LOG_LEVEL, "trickp pic"));
-    assert(upipe_trickp_pic != NULL);
-    ubase_assert(upipe_set_flow_def(upipe_trickp_pic, uref));
-    assert(upipe_trickp_pic != NULL);
+    struct upipe *upipe_even_pic = upipe_void_alloc_sub(upipe_even,
+            uprobe_pfx_alloc(uprobe_use(logger), UPROBE_LOG_LEVEL, "even pic"));
+    assert(upipe_even_pic != NULL);
+    ubase_assert(upipe_set_flow_def(upipe_even_pic, uref));
+    assert(upipe_even_pic != NULL);
     uref_free(uref);
-    ubase_assert(upipe_set_output(upipe_trickp_pic, upipe_sink_pic));
+    ubase_assert(upipe_set_output(upipe_even_pic, upipe_sink_pic));
 
     uref = uref_alloc(uref_mgr);
     assert(uref != NULL);
     ubase_assert(uref_flow_set_def(uref, "sound.s16."));
 
-    struct upipe *upipe_sink_sound = upipe_flow_alloc(&trickp_test_mgr,
+    struct upipe *upipe_sink_sound = upipe_flow_alloc(&even_test_mgr,
                                                       uprobe_use(logger), uref);
     assert(upipe_sink_sound != NULL);
 
-    struct upipe *upipe_trickp_sound = upipe_void_alloc_sub(upipe_trickp,
-            uprobe_pfx_alloc(uprobe_use(logger), UPROBE_LOG_LEVEL, "trickp sound"));
-    assert(upipe_trickp_sound != NULL);
-    ubase_assert(upipe_set_flow_def(upipe_trickp_sound, uref));
+    struct upipe *upipe_even_sound = upipe_void_alloc_sub(upipe_even,
+            uprobe_pfx_alloc(uprobe_use(logger), UPROBE_LOG_LEVEL, "even sound"));
+    assert(upipe_even_sound != NULL);
+    ubase_assert(upipe_set_flow_def(upipe_even_sound, uref));
     uref_free(uref);
-    ubase_assert(upipe_set_output(upipe_trickp_sound, upipe_sink_sound));
+    ubase_assert(upipe_set_output(upipe_even_sound, upipe_sink_sound));
 
     uref = uref_alloc(uref_mgr);
     assert(uref != NULL);
     ubase_assert(uref_flow_set_def(uref, "pic.sub."));
 
-    struct upipe *upipe_sink_subpic = upipe_flow_alloc(&trickp_test_mgr,
+    struct upipe *upipe_sink_subpic = upipe_flow_alloc(&even_test_mgr,
                                                        uprobe_use(logger),
                                                        uref);
     assert(upipe_sink_subpic != NULL);
 
-    struct upipe *upipe_trickp_subpic = upipe_void_alloc_sub(upipe_trickp,
-            uprobe_pfx_alloc(uprobe_use(logger), UPROBE_LOG_LEVEL, "trickp subpic"));
-    assert(upipe_trickp_subpic != NULL);
-    ubase_assert(upipe_set_flow_def(upipe_trickp_subpic, uref));
+    struct upipe *upipe_even_subpic = upipe_void_alloc_sub(upipe_even,
+            uprobe_pfx_alloc(uprobe_use(logger), UPROBE_LOG_LEVEL, "even subpic"));
+    assert(upipe_even_subpic != NULL);
+    ubase_assert(upipe_set_flow_def(upipe_even_subpic, uref));
     uref_free(uref);
-    ubase_assert(upipe_set_output(upipe_trickp_subpic, upipe_sink_subpic));
+    ubase_assert(upipe_set_output(upipe_even_subpic, upipe_sink_subpic));
 
     uref = uref_alloc(uref_mgr);
     assert(uref != NULL);
-    uref_clock_set_pts_prog(uref, (uint64_t)UINT32_MAX);
-    upipe_input(upipe_trickp_pic, uref, NULL);
+    uref_clock_set_pts_sys(uref, (uint64_t)UINT32_MAX);
+    uref_clock_set_duration(uref, 10);
+    upipe_input(upipe_even_pic, uref, NULL);
     assert(count_pic == 0);
     assert(count_sound == 0);
     assert(count_subpic == 0);
 
     uref = uref_alloc(uref_mgr);
     assert(uref != NULL);
-    uref_clock_set_pts_prog(uref, (uint64_t)UINT32_MAX + 1);
-    upipe_input(upipe_trickp_sound, uref, NULL);
-    assert(count_pic == 42);
-    assert(count_sound == 43);
-    assert(count_subpic == 0);
-    count_pic = 0;
-    count_sound = 0;
-
-    uref = uref_alloc(uref_mgr);
-    assert(uref != NULL);
-    uref_clock_set_pts_prog(uref, (uint64_t)UINT32_MAX);
-    upipe_input(upipe_trickp_subpic, uref, NULL);
+    uref_clock_set_pts_sys(uref, (uint64_t)UINT32_MAX * 2);
+    uref_clock_set_duration(uref, 10);
+    upipe_input(upipe_even_sound, uref, NULL);
     assert(count_pic == 0);
     assert(count_sound == 0);
-    assert(count_subpic == 42);
-    count_subpic = 0;
+    assert(count_subpic == 0);
 
     uref = uref_alloc(uref_mgr);
     assert(uref != NULL);
-    uref_clock_set_pts_prog(uref, (uint64_t)UINT32_MAX + 2);
-    upipe_input(upipe_trickp_pic, uref, NULL);
-    assert(count_pic == 44);
-    assert(count_sound == 0);
+    uref_clock_set_pts_sys(uref, (uint64_t)UINT32_MAX * 2 + 1);
+    uref_clock_set_duration(uref, 10);
+    upipe_input(upipe_even_pic, uref, NULL);
+    assert(count_pic == 1);
+    assert(count_sound == 1);
     assert(count_subpic == 0);
-    count_pic = 0;
 
-    upipe_release(upipe_trickp);
-    upipe_release(upipe_trickp_pic);
-    upipe_release(upipe_trickp_sound);
-    upipe_release(upipe_trickp_subpic);
-    upipe_mgr_release(upipe_trickp_mgr); // nop
+    uref = uref_alloc(uref_mgr);
+    assert(uref != NULL);
+    uref_clock_set_pts_sys(uref, (uint64_t)UINT32_MAX * 2);
+    upipe_input(upipe_even_subpic, uref, NULL);
+    assert(count_pic == 1);
+    assert(count_sound == 1);
+    assert(count_subpic == 1);
+
+    uref = uref_alloc(uref_mgr);
+    assert(uref != NULL);
+    uref_clock_set_pts_sys(uref, (uint64_t)UINT32_MAX * 3);
+    upipe_input(upipe_even_pic, uref, NULL);
+    assert(count_pic == 1);
+    assert(count_sound == 1);
+    assert(count_subpic == 1);
+
+    upipe_release(upipe_even);
+    upipe_release(upipe_even_pic);
+    upipe_release(upipe_even_sound);
+    upipe_release(upipe_even_subpic);
+    upipe_mgr_release(upipe_even_mgr); // nop
 
     test_free(upipe_sink_pic);
     test_free(upipe_sink_sound);

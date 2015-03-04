@@ -95,6 +95,9 @@
         @item @ref upipe_wlin_mgr_alloc (also note @ref upipe_wlin_alloc) @item pipe manager allowing to deport a linear pipe to a different thread @item @tt -lupipe-modules
         @item @ref upipe_wsink_mgr_alloc (also note @ref upipe_wsink_alloc) @item pipe manager allowing to deport a sink pipe to a different thread @item @tt -lupipe-modules
         @item @ref upipe_trickp_mgr_alloc @item pipe facilitating trick play operations @item @tt -lupipe-modules
+        @item @ref upipe_even_mgr_alloc @item pipe evening the start and end of a stream @item @tt -lupipe-modules
+        @item @ref upipe_skip_mgr_alloc @item pipe skipping the beginning of each uref @item @tt -lupipe-modules
+        @item @ref upipe_aggregate_mgr_alloc @item pipe aggregating several urefs into one @item @tt -lupipe-modules
         @item @ref upipe_setflowdef_mgr_alloc @item pipe setting given attributes on incoming flow definitions @item @tt -lupipe-modules
         @item @ref upipe_setattr_mgr_alloc @item pipe setting given attributes on all incoming buffers @item @tt -lupipe-modules
         @item @ref upipe_setrap_mgr_alloc @item pipe setting attribute k.systime_rap on all incoming buffers @item @tt -lupipe-modules
@@ -116,6 +119,7 @@
         @item @ref upipe_a52f_mgr_alloc @item linear pipe gathering A52 audio streams into frames @item @tt -lupipe-framers
         @item @ref upipe_telxf_mgr_alloc @item linear pipe gathering teletext streams into frames @item @tt -lupipe-framers
         @item @ref upipe_dvbsubf_mgr_alloc @item linear pipe gathering DVB subtitling streams into frames @item @tt -lupipe-framers
+        @item @ref upipe_vtrim_mgr_alloc @item pipe trimming dead frames off a video stream @item @tt -lupipe-framers
         @item @ref upipe_ffmt_mgr_alloc @item linear pipe transforming the format into another specified (potentially for an encoder) @item @tt -lupipe-filters
         @item @ref upipe_fdec_mgr_alloc @item linear pipe decoding a stream @item @tt -lupipe-filters
         @item @ref upipe_fenc_mgr_alloc @item linear pipe encoding a stream @item @tt -lupipe-filters
