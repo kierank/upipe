@@ -470,6 +470,15 @@ static int upipe_v210enc_control(struct upipe *upipe, int command, va_list args)
     }
 }
 
+void ff_v210_planar_pack_8_ssse3(const uint8_t *y, const uint8_t *u,
+                                 const uint8_t *v, uint8_t *dst,
+                                 ptrdiff_t width);
+void ff_v210_planar_pack_8_avx(const uint8_t *y, const uint8_t *u,
+                               const uint8_t *v, uint8_t *dst, ptrdiff_t width);
+void ff_v210_planar_pack_10_ssse3(const uint16_t *y, const uint16_t *u,
+                                  const uint16_t *v, uint8_t *dst,
+                                  ptrdiff_t width);
+
 /** @internal @This allocates a v210enc pipe.
  *
  * @param mgr common management structure
@@ -489,8 +498,12 @@ static struct upipe *upipe_v210enc_alloc(struct upipe_mgr *mgr,
     struct upipe_v210enc *upipe_v210enc = upipe_v210enc_from_upipe(upipe);
     upipe_v210enc->cpu_flags = av_get_cpu_flags();
 
-    upipe_v210enc->pack_line_8  = v210enc_planar_pack_8_c;
-    upipe_v210enc->pack_line_10 = v210enc_planar_pack_10_c;
+    if (upipe_v210enc->cpu_flags & AV_CPU_FLAG_SSE3) {
+        upipe_v210enc->pack_line_8  = ff_v210_planar_pack_8_ssse3;
+        upipe_v210enc->pack_line_10 = ff_v210_planar_pack_10_ssse3;
+    }
+    if (upipe_v210enc->cpu_flags & AV_CPU_FLAG_AVX)
+        upipe_v210enc->pack_line_8 = ff_v210_planar_pack_8_avx;
 
     upipe_v210enc_init_urefcount(upipe);
     upipe_v210enc_init_ubuf_mgr(upipe);
