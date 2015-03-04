@@ -498,6 +498,9 @@ static struct upipe *upipe_v210enc_alloc(struct upipe_mgr *mgr,
     struct upipe_v210enc *upipe_v210enc = upipe_v210enc_from_upipe(upipe);
     upipe_v210enc->cpu_flags = av_get_cpu_flags();
 
+    upipe_v210enc->pack_line_8 =  v210enc_planar_pack_8_c;
+    upipe_v210enc->pack_line_10 = v210enc_planar_pack_10_c;
+
     if (upipe_v210enc->cpu_flags & AV_CPU_FLAG_SSE3) {
         upipe_v210enc->pack_line_8  = ff_v210_planar_pack_8_ssse3;
         upipe_v210enc->pack_line_10 = ff_v210_planar_pack_10_ssse3;
