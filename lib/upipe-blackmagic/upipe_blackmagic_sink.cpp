@@ -681,6 +681,7 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
         upipe_bmd_sink->displayMode->Release();
         upipe_bmd_sink->started = 0;
         deckLinkOutput = upipe_bmd_sink->deckLinkOutput;
+        deckLink = upipe_bmd_sink->deckLink;
     }
 
     result = deckLinkOutput->GetDisplayModeIterator(&displayModeIterator);
