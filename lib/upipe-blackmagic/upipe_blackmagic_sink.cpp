@@ -186,6 +186,9 @@ struct uclock_bmd_sink {
     /** refcount management structure */
     struct urefcount urefcount;
 
+    /** offset for discontinuities caused by format changes */
+    uint64_t offset;
+
     /** structure exported to modules */
     struct uclock uclock;
 };
@@ -418,8 +421,6 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
         upipe_bmd_sink_from_sub_mgr(upipe->mgr);
-    struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
-        upipe_bmd_sink_sub_from_upipe(upipe);
     
     if (!upipe_bmd_sink->deckLink) {
         upipe_err_va(upipe, "DeckLink card not ready");
@@ -580,12 +581,22 @@ static uint64_t uclock_bmd_sink_now(struct uclock *uclock)
 {
     struct uclock_bmd_sink *uclock_bmd_sink = uclock_bmd_sink_from_uclock(uclock);
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_uclock_bmd_sink(uclock_bmd_sink);
-    BMDTimeValue hardware_time, time_in_frame, ticks_per_frame;
     
-    upipe_bmd_sink->deckLinkOutput->GetHardwareReferenceClock(UCLOCK_FREQ, &hardware_time,
-                                                              &time_in_frame, &ticks_per_frame);
+    BMDTimeValue hardware_time, time_in_frame, ticks_per_frame;
 
-    return (uint64_t)hardware_time;
+    if (upipe_bmd_sink->deckLinkOutput) {
+        upipe_bmd_sink->deckLinkOutput->GetHardwareReferenceClock(UCLOCK_FREQ, &hardware_time,
+                                                                  &time_in_frame, &ticks_per_frame);
+    }
+
+    return (uint64_t)hardware_time + uclock_bmd_sink->offset;
+}
+
+static void uclock_set_offset(struct uclock *uclock)
+{
+    struct uclock_bmd_sink *uclock_bmd_sink = uclock_bmd_sink_from_uclock(uclock);
+
+    uclock_bmd_sink->offset += uclock_bmd_sink_now(uclock);
 }
 
 /** @This frees a uclock.
@@ -626,36 +637,50 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
     int card_idx = 0;
     HRESULT result = E_NOINTERFACE;
 
-    /* decklink interface interator */
-    deckLinkIterator = CreateDeckLinkIteratorInstance();
-    if (!deckLinkIterator) {
-        upipe_err_va(upipe, "decklink drivers not found");
-        err = UBASE_ERR_EXTERNAL;
-        goto end;
-    }
-
-    /* get decklink interface handler */
-    for (int i = 0; i <= card_idx; i++) {
-        if (deckLink)
-            deckLink->Release();
-        result = deckLinkIterator->Next(&deckLink);
-        if (result != S_OK)
-            break;
-    }
-
-    if (result != S_OK) {
-        upipe_err_va(upipe, "decklink card %d not found", card_idx);
-        err = UBASE_ERR_EXTERNAL;
-        goto end;
-    }
-
     /* get decklink output handler */
     IDeckLinkOutput *deckLinkOutput;
-    if (deckLink->QueryInterface(IID_IDeckLinkOutput,
-                                 (void**)&deckLinkOutput) != S_OK) {
-        upipe_err_va(upipe, "decklink card has no output");
-        err = UBASE_ERR_EXTERNAL;
-        goto end;
+    if (!upipe_bmd_sink->deckLink){
+        /* decklink interface interator */
+        deckLinkIterator = CreateDeckLinkIteratorInstance();
+        if (!deckLinkIterator) {
+            upipe_err_va(upipe, "decklink drivers not found");
+            err = UBASE_ERR_EXTERNAL;
+            goto end;
+        }
+
+        /* get decklink interface handler */
+        for (int i = 0; i <= card_idx; i++) {
+            if (deckLink)
+                deckLink->Release();
+            result = deckLinkIterator->Next(&deckLink);
+            if (result != S_OK)
+                break;
+        }
+
+        if (result != S_OK) {
+            upipe_err_va(upipe, "decklink card %d not found", card_idx);
+            err = UBASE_ERR_EXTERNAL;
+            goto end;
+        }
+
+        if (deckLink->QueryInterface(IID_IDeckLinkOutput,
+                                     (void**)&deckLinkOutput) != S_OK) {
+            upipe_err_va(upipe, "decklink card has no output");
+            err = UBASE_ERR_EXTERNAL;
+            goto end;
+        }
+    }
+    else {
+        uclock_set_offset(&upipe_bmd_sink->uclock.uclock);
+        upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->pic_subpipe.upipe);
+        upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->sound_subpipe.upipe);
+        upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->subpic_subpipe.upipe);
+        upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
+        upipe_bmd_sink->deckLinkOutput->DisableVideoOutput();
+        upipe_bmd_sink->deckLinkOutput->DisableAudioOutput();
+        upipe_bmd_sink->displayMode->Release();
+        upipe_bmd_sink->started = 0;
+        deckLinkOutput = upipe_bmd_sink->deckLinkOutput;
     }
 
     result = deckLinkOutput->GetDisplayModeIterator(&displayModeIterator);
@@ -712,11 +737,14 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
         goto end;
     }
 
+    if (!upipe_bmd_sink->deckLink)
+    {
+        uclock_bmd_sink_init(&upipe_bmd_sink->uclock);
+        urefcount_use(uclock_bmd_sink_to_urefcount(&upipe_bmd_sink->uclock));
+    }
+
     upipe_bmd_sink->deckLinkOutput = deckLinkOutput;
     upipe_bmd_sink->deckLink = deckLink;
-
-    uclock_bmd_sink_init(&upipe_bmd_sink->uclock);
-    urefcount_use(uclock_bmd_sink_to_urefcount(&upipe_bmd_sink->uclock));
 
 end:
 
