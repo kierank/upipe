@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2014 OpenHeadend S.A.R.L.
+ * Copyright (C) 2013-2015 OpenHeadend S.A.R.L.
  *
  * Authors: Benjamin Cohen
  *
@@ -41,6 +41,7 @@
 #include <upipe/ubuf.h>
 #include <upipe/uref_pic.h>
 #include <upipe/uref_pic_flow.h>
+#include <upipe/uref_block.h>
 #include <upipe/uref_block_flow.h>
 #include <upipe/ubuf_block.h>
 #include <upipe/upipe.h>
@@ -409,6 +410,70 @@ static bool upipe_x264_open(struct upipe *upipe, int width, int height,
         if (params->rc.i_vbv_buffer_size)
             uref_block_flow_set_buffer_size(flow_def_attr,
                                             params->rc.i_vbv_buffer_size * 125);
+
+        uint64_t max_octetrate, max_bs;
+        switch (params->i_level_idc) {
+            case 10:
+                max_octetrate = 64000 / 8;
+                max_bs = 175000 / 8;
+                break;
+            case 11:
+                max_octetrate = 192000 / 8;
+                max_bs = 500000 / 8;
+                break;
+            case 12:
+                max_octetrate = 384000 / 8;
+                max_bs = 1000000 / 8;
+                break;
+            case 13:
+                max_octetrate = 768000 / 8;
+                max_bs = 2000000 / 8;
+                break;
+            case 20:
+                max_octetrate = 2000000 / 8;
+                max_bs = 2000000 / 8;
+                break;
+            case 21:
+            case 22:
+                max_octetrate = 4000000 / 8;
+                max_bs = 4000000 / 8;
+                break;
+            case 30:
+                max_octetrate = 10000000 / 8;
+                max_bs = 10000000 / 8;
+                break;
+            case 31:
+                max_octetrate = 14000000 / 8;
+                max_bs = 14000000 / 8;
+                break;
+            case 32:
+            case 40:
+                max_octetrate = 20000000 / 8;
+                max_bs = 20000000 / 8;
+                break;
+            case 41:
+            case 42:
+                max_octetrate = 50000000 / 8;
+                max_bs = 62500000 / 8;
+                break;
+            case 50:
+                max_octetrate = 135000000 / 8;
+                max_bs = 135000000 / 8;
+                break;
+            default:
+                upipe_warn_va(upipe, "unknown level %"PRIu8,
+                              params->i_level_idc);
+                /* intended fall-through */
+            case 51:
+            case 52:
+                max_octetrate = 240000000 / 8;
+                max_bs = 240000000 / 8;
+                break;
+        }
+        UBASE_FATAL(upipe, uref_block_flow_set_max_octetrate(flow_def_attr,
+                    max_octetrate))
+        UBASE_FATAL(upipe, uref_block_flow_set_max_buffer_size(flow_def_attr,
+                    max_bs))
     }
 
     /* find latency */
@@ -418,11 +483,10 @@ static bool upipe_x264_open(struct upipe *upipe, int width, int height,
         latency += (uint64_t)delayed * UCLOCK_FREQ
                      * params->i_fps_den
                      / params->i_fps_num;
+    /* add one frame for the time of encoding the current frame */
+    latency += UCLOCK_FREQ * params->i_fps_den / params->i_fps_num;
     upipe_x264->initial_latency = latency;
 
-    if (params->rc.i_bitrate)
-        latency += (uint64_t)params->rc.i_vbv_buffer_size * UCLOCK_FREQ /
-                   params->rc.i_bitrate;
     latency += upipe_x264->sc_latency;
     uref_clock_set_latency(flow_def_attr, latency);
 
@@ -518,7 +582,7 @@ static void upipe_x264_input(struct upipe *upipe, struct uref *uref,
     size_t width, height;
     x264_picture_t pic;
     x264_nal_t *nals;
-    int i, nals_num, size = 0;
+    int i, nals_num, size = 0, header_size = 0;
     struct ubuf *ubuf_block;
     uint8_t *buf = NULL;
     x264_param_t curparams;
@@ -614,8 +678,12 @@ static void upipe_x264_input(struct upipe *upipe, struct uref *uref,
     uref = pic.opaque;
     assert(uref);
 
-    for (i=0; i < nals_num; i++) {
+    for (i = 0; i < nals_num; i++) {
         size += nals[i].i_payload;
+        if (nals[i].i_type == NAL_SPS || nals[i].i_type == NAL_PPS ||
+            nals[i].i_type == NAL_AUD || nals[i].i_type == NAL_FILLER ||
+            nals[i].i_type == NAL_UNKNOWN)
+            header_size += nals[i].i_payload;
     }
 
     /* alloc ubuf, map, copy, unmap */
@@ -628,6 +696,7 @@ static void upipe_x264_input(struct upipe *upipe, struct uref *uref,
     memcpy(buf, nals[0].p_payload, size);
     ubuf_block_unmap(ubuf_block, 0);
     uref_attach_ubuf(uref, ubuf_block);
+    uref_block_set_header_size(uref, header_size);
 
     /* set dts */
     uint64_t dts_pts_delay = (uint64_t)(pic.i_pts - pic.i_dts) * UCLOCK_FREQ

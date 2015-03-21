@@ -38,19 +38,37 @@ extern "C" {
 enum upipe_ts_encaps_command {
     UPIPE_TS_ENCAPS_SENTINEL = UPIPE_TS_MUX_ENCAPS,
 
-    /** returns the date of the next access unit (uint64_t *) */
+    /** sets the size of the TB buffer (unsigned int) */
+    UPIPE_TS_ENCAPS_SET_TB_SIZE,
+    /** returns the cr_sys of the next access unit (uint64_t *) */
     UPIPE_TS_ENCAPS_PEEK,
-    /** returns the date of the next TS packet (uint64_t, uint64_t *,
-     * uint64_t *) */
+    /** returns the cr_sys and dts_sys of the next TS packet (uint64_t,
+     * uint64_t *, uint64_t *) */
     UPIPE_TS_ENCAPS_PREPARE,
-    /** returns a ubuf containing a TS packet (struct ubuf **, uint64_t *) */
-    UPIPE_TS_ENCAPS_SPLICE
+    /** returns a ubuf containing a TS packet and its dts_sys (struct ubuf **,
+     * uint64_t *) */
+    UPIPE_TS_ENCAPS_SPLICE,
+    /** signals an end of stream (void) */
+    UPIPE_TS_ENCAPS_EOS
 };
 
-/** @This returns the date of the next access unit.
+/** @This sets the size of the TB buffer.
  *
  * @param upipe description structure of the pipe
- * @param cr_sys_p filled in with the date of the next access unit
+ * @param tb_size size of the TB buffer
+ * @return an error code
+ */
+static inline int upipe_ts_encaps_set_tb_size(struct upipe *upipe,
+                                              unsigned int tb_size)
+{
+    return upipe_control(upipe, UPIPE_TS_ENCAPS_SET_TB_SIZE,
+                         UPIPE_TS_ENCAPS_SIGNATURE, tb_size);
+}
+
+/** @This returns the cr_sys of the next access unit.
+ *
+ * @param upipe description structure of the pipe
+ * @param cr_sys_p filled in with the cr_sys of the next access unit
  * @return an error code
  */
 static inline int upipe_ts_encaps_peek(struct upipe *upipe, uint64_t *cr_sys_p)
@@ -59,13 +77,13 @@ static inline int upipe_ts_encaps_peek(struct upipe *upipe, uint64_t *cr_sys_p)
                                UPIPE_TS_ENCAPS_SIGNATURE, cr_sys_p);
 }
 
-/** @This returns the date of the next TS packet, and deletes all data
- * prior the given date.
+/** @This returns the cr_sys and dts_sys of the next TS packet, and deletes
+ * all data prior to the given date cr_sys.
  *
  * @param upipe description structure of the pipe
  * @param cr_sys data before cr_sys will be deleted
- * @param cr_sys_p filled in with the date of the next TS packet
- * @param dts_sys_p filled in with the DTS of the next TS packet
+ * @param cr_sys_p filled in with the cr_sys of the next TS packet
+ * @param dts_sys_p filled in with the dts_sys of the next TS packet
  * @return an error code
  */
 static inline int upipe_ts_encaps_prepare(struct upipe *upipe, uint64_t cr_sys,
@@ -77,11 +95,11 @@ static inline int upipe_ts_encaps_prepare(struct upipe *upipe, uint64_t cr_sys,
                                dts_sys_p);
 }
 
-/** @This returns a ubuf containing a TS packet, and the DTS of the packet.
+/** @This returns a ubuf containing a TS packet, and the dts_sys of the packet.
  *
  * @param upipe description structure of the pipe
  * @param ubuf_p filled in with a pointer to the ubuf
- * @param dts_sys_p filled in with the DTS, or UINT64_MAX
+ * @param dts_sys_p filled in with the dts_sys, or UINT64_MAX
  * @return an error code
  */
 static inline int upipe_ts_encaps_splice(struct upipe *upipe,
@@ -90,6 +108,16 @@ static inline int upipe_ts_encaps_splice(struct upipe *upipe,
 {
     return upipe_control_nodbg(upipe, UPIPE_TS_ENCAPS_SPLICE,
                                UPIPE_TS_ENCAPS_SIGNATURE, ubuf_p, dts_sys_p);
+}
+
+/** @This signals an end of stream, so that buffered packets can be released.
+ *
+ * @param upipe description structure of the pipe
+ * @return an error code
+ */
+static inline int upipe_ts_encaps_eos(struct upipe *upipe)
+{
+    return upipe_control(upipe, UPIPE_TS_ENCAPS_EOS, UPIPE_TS_ENCAPS_SIGNATURE);
 }
 
 /** @This returns the management structure for all ts_encaps pipes.
