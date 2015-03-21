@@ -1,0 +1,127 @@
+From 799ca8f25e9ba6254c9b6255507b3bd8066f6fc9 Mon Sep 17 00:00:00 2001
+From: Kieran Kunhya <kieran@kunhya.com>
+Date: Tue, 3 Feb 2015 23:20:08 +0000
+Subject: [PATCH] Add support for YUV4xxP10 pixel formats in
+ upipe_av_pixfmt_from_flow_def
+
+---
+ include/upipe-av/upipe_av_pixfmt.h |   78 ++++++++++++++++++++++++++++++++++++
+ 1 files changed, 78 insertions(+), 0 deletions(-)
+
+diff --git a/include/upipe-av/upipe_av_pixfmt.h b/include/upipe-av/upipe_av_pixfmt.h
+index c80ba54..3427185 100644
+--- a/include/upipe-av/upipe_av_pixfmt.h
++++ b/include/upipe-av/upipe_av_pixfmt.h
+@@ -214,10 +214,16 @@ static inline enum PixelFormat
+         AV_PIX_FMT_YUVJ444P,
+         AV_PIX_FMT_YUYV422,
+         AV_PIX_FMT_UYVY422,
++        AV_PIX_FMT_YUV420P10LE,
++        AV_PIX_FMT_YUV420P10BE,
+         AV_PIX_FMT_YUV420P16LE,
+         AV_PIX_FMT_YUV420P16BE,
++        AV_PIX_FMT_YUV422P10LE,
++        AV_PIX_FMT_YUV422P10BE,
+         AV_PIX_FMT_YUV422P16LE,
+         AV_PIX_FMT_YUV422P16BE,
++        AV_PIX_FMT_YUV444P10LE,
++        AV_PIX_FMT_YUV444P10BE,
+         AV_PIX_FMT_YUV444P16LE,
+         AV_PIX_FMT_YUV444P16BE,
+         AV_PIX_FMT_RGB24,
+@@ -293,6 +299,30 @@ static inline enum PixelFormat
+                     return *pix_fmts;
+                 }
+                 break;
++            case AV_PIX_FMT_YUV420P10LE:
++                if (macropixel == 1 &&
++                    u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "y10l")) &&
++                    u(uref_pic_flow_check_chroma(flow_def, 2, 2, 2, "u10l")) &&
++                    u(uref_pic_flow_check_chroma(flow_def, 2, 2, 2, "v10l"))) {
++                    chroma_p[0] = "y10l";
++                    chroma_p[1] = "u10l";
++                    chroma_p[2] = "v10l";
++                    chroma_p[3] = NULL;
++                    return *pix_fmts;
++                }
++                break;
++            case AV_PIX_FMT_YUV420P10BE:
++                if (macropixel == 1 &&
++                    u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "y10b")) &&
++                    u(uref_pic_flow_check_chroma(flow_def, 2, 2, 2, "u10b")) &&
++                    u(uref_pic_flow_check_chroma(flow_def, 2, 2, 2, "v10b"))) {
++                    chroma_p[0] = "y10b";
++                    chroma_p[1] = "u10b";
++                    chroma_p[2] = "v10b";
++                    chroma_p[3] = NULL;
++                    return *pix_fmts;
++                }
++                break;
+             case AV_PIX_FMT_YUV420P16LE:
+                 if (macropixel == 1 &&
+                     u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "y16l")) &&
+@@ -317,6 +347,30 @@ static inline enum PixelFormat
+                     return *pix_fmts;
+                 }
+                 break;
++            case AV_PIX_FMT_YUV422P10LE:
++                if (macropixel == 1 &&
++                    u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "y10l")) &&
++                    u(uref_pic_flow_check_chroma(flow_def, 2, 1, 2, "u10l")) &&
++                    u(uref_pic_flow_check_chroma(flow_def, 2, 1, 2, "v10l"))) {
++                    chroma_p[0] = "y10l";
++                    chroma_p[1] = "u10l";
++                    chroma_p[2] = "v10l";
++                    chroma_p[3] = NULL;
++                    return *pix_fmts;
++                }
++                break;
++            case AV_PIX_FMT_YUV422P10BE:
++                if (macropixel == 1 &&
++                    u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "y10b")) &&
++                    u(uref_pic_flow_check_chroma(flow_def, 2, 1, 2, "u10b")) &&
++                    u(uref_pic_flow_check_chroma(flow_def, 2, 1, 2, "v10b"))) {
++                    chroma_p[0] = "y10b";
++                    chroma_p[1] = "u10b";
++                    chroma_p[2] = "v10b";
++                    chroma_p[3] = NULL;
++                    return *pix_fmts;
++                }
++                break;
+             case AV_PIX_FMT_YUV422P16LE:
+                 if (macropixel == 1 &&
+                     u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "y16l")) &&
+@@ -341,6 +395,30 @@ static inline enum PixelFormat
+                     return *pix_fmts;
+                 }
+                 break;
++            case AV_PIX_FMT_YUV444P10LE:
++                if (macropixel == 1 &&
++                    u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "y10l")) &&
++                    u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "u10l")) &&
++                    u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "v10l"))) {
++                    chroma_p[0] = "y10l";
++                    chroma_p[1] = "u10l";
++                    chroma_p[2] = "v10l";
++                    chroma_p[3] = NULL;
++                    return *pix_fmts;
++                }
++                break;
++            case AV_PIX_FMT_YUV444P10BE:
++                if (macropixel == 1 &&
++                    u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "y10b")) &&
++                    u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "u10b")) &&
++                    u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "v10b"))) {
++                    chroma_p[0] = "y10b";
++                    chroma_p[1] = "u10b";
++                    chroma_p[2] = "v10b";
++                    chroma_p[3] = NULL;
++                    return *pix_fmts;
++                }
++                break;
+             case AV_PIX_FMT_YUV444P16LE:
+                 if (macropixel == 1 &&
+                     u(uref_pic_flow_check_chroma(flow_def, 1, 1, 2, "y16l")) &&
+-- 
+1.7.9
+
