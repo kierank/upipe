@@ -347,7 +347,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         int w = upipe_bmd_sink->displayMode->GetWidth();
         int h = upipe_bmd_sink->displayMode->GetHeight();
 
-        if(!upipe_bmd_sink->started) {
+        if(!upipe_bmd_sink->started && pts > 0) {
             upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(pts, UCLOCK_FREQ, 1.0);
             upipe_bmd_sink->started = 1;
         }
@@ -374,9 +374,12 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         BMDTimeScale timeScale;
         upipe_bmd_sink->displayMode->GetFrameRate(&timeValue, &timeScale);
 
-        result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
-        if( result != S_OK )
-            upipe_err_va(upipe, "DROPPED FRAME %x", result);
+        if( pts > 0 )
+        {
+            result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
+            if( result != S_OK )
+                upipe_err_va(upipe, "DROPPED FRAME %x", result);
+        }
 
         video_frame->Release();
     }
@@ -630,7 +633,6 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
 
     IDeckLinkIterator *deckLinkIterator = NULL;
     IDeckLink *deckLink = NULL;
-    IDeckLinkOutput *deckLinkOutput;
     IDeckLinkDisplayModeIterator *displayModeIterator = NULL;
     char* displayModeName = NULL;
     IDeckLinkDisplayMode* displayMode = NULL;
@@ -638,7 +640,40 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
     int card_idx = 0;
     HRESULT result = E_NOINTERFACE;
 
-    if (upipe_bmd_sink->deckLink){
+    /* get decklink output handler */
+    IDeckLinkOutput *deckLinkOutput;
+    if (!upipe_bmd_sink->deckLink){
+        /* decklink interface interator */
+        deckLinkIterator = CreateDeckLinkIteratorInstance();
+        if (!deckLinkIterator) {
+            upipe_err_va(upipe, "decklink drivers not found");
+            err = UBASE_ERR_EXTERNAL;
+            goto end;
+        }
+
+        /* get decklink interface handler */
+        for (int i = 0; i <= card_idx; i++) {
+            if (deckLink)
+                deckLink->Release();
+            result = deckLinkIterator->Next(&deckLink);
+            if (result != S_OK)
+                break;
+        }
+
+        if (result != S_OK) {
+            upipe_err_va(upipe, "decklink card %d not found", card_idx);
+            err = UBASE_ERR_EXTERNAL;
+            goto end;
+        }
+
+        if (deckLink->QueryInterface(IID_IDeckLinkOutput,
+                                     (void**)&deckLinkOutput) != S_OK) {
+            upipe_err_va(upipe, "decklink card has no output");
+            err = UBASE_ERR_EXTERNAL;
+            goto end;
+        }
+    }
+    else {
         uclock_set_offset(&upipe_bmd_sink->uclock.uclock);
         upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->pic_subpipe.upipe);
         upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->sound_subpipe.upipe);
@@ -647,38 +682,9 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
         upipe_bmd_sink->deckLinkOutput->DisableVideoOutput();
         upipe_bmd_sink->deckLinkOutput->DisableAudioOutput();
         upipe_bmd_sink->displayMode->Release();
-        upipe_bmd_sink->deckLink->Release();
         upipe_bmd_sink->started = 0;
-    }
-
-    /* decklink interface interator */
-    deckLinkIterator = CreateDeckLinkIteratorInstance();
-    if (!deckLinkIterator) {
-        upipe_err_va(upipe, "decklink drivers not found");
-        err = UBASE_ERR_EXTERNAL;
-        goto end;
-    }
-
-    /* get decklink interface handler */
-    for (int i = 0; i <= card_idx; i++) {
-        if (deckLink)
-            deckLink->Release();
-        result = deckLinkIterator->Next(&deckLink);
-        if (result != S_OK)
-            break;
-    }
-
-    if (result != S_OK) {
-        upipe_err_va(upipe, "decklink card %d not found", card_idx);
-        err = UBASE_ERR_EXTERNAL;
-        goto end;
-    }
-
-    if (deckLink->QueryInterface(IID_IDeckLinkOutput,
-                                 (void**)&deckLinkOutput) != S_OK) {
-        upipe_err_va(upipe, "decklink card has no output");
-        err = UBASE_ERR_EXTERNAL;
-        goto end;
+        deckLinkOutput = upipe_bmd_sink->deckLinkOutput;
+        deckLink = upipe_bmd_sink->deckLink;
     }
 
     result = deckLinkOutput->GetDisplayModeIterator(&displayModeIterator);
