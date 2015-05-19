@@ -347,7 +347,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         int w = upipe_bmd_sink->displayMode->GetWidth();
         int h = upipe_bmd_sink->displayMode->GetHeight();
 
-        if(!upipe_bmd_sink->started) {
+        if(!upipe_bmd_sink->started && pts > 0) {
             upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(pts, UCLOCK_FREQ, 1.0);
             upipe_bmd_sink->started = 1;
         }
@@ -374,9 +374,12 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         BMDTimeScale timeScale;
         upipe_bmd_sink->displayMode->GetFrameRate(&timeValue, &timeScale);
 
-        result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
-        if( result != S_OK )
-            upipe_err_va(upipe, "DROPPED FRAME %x", result);
+        if( pts > 0 )
+        {
+            result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
+            if( result != S_OK )
+                upipe_err_va(upipe, "DROPPED FRAME %x", result);
+        }
 
         video_frame->Release();
     }
