@@ -638,7 +638,6 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
     char* displayModeName = NULL;
     IDeckLinkDisplayMode* displayMode = NULL;
     int err = UBASE_ERR_NONE;
-    int card_idx = 0;
     HRESULT result = E_NOINTERFACE;
 
     if (upipe_bmd_sink->deckLink){
@@ -663,7 +662,7 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
     }
 
     /* get decklink interface handler */
-    for (int i = 0; i <= card_idx; i++) {
+    for (int i = 0; i <= upipe_bmd_sink->card_idx; i++) {
         if (deckLink)
             deckLink->Release();
         result = deckLinkIterator->Next(&deckLink);
@@ -672,7 +671,7 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
     }
 
     if (result != S_OK) {
-        upipe_err_va(upipe, "decklink card %d not found", card_idx);
+        upipe_err_va(upipe, "decklink card %d not found", upipe_bmd_sink->card_idx);
         err = UBASE_ERR_EXTERNAL;
         goto end;
     }
