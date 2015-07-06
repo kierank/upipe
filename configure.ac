@@ -160,7 +160,6 @@ AC_CONFIG_FILES([Makefile
                  include/upipe-swresample/Makefile
                  include/upipe-blackmagic/Makefile
                  include/upipe-qt/Makefile
-                 include/upipe-ebur128/Makefile
                  include/upipe-nacl/Makefile
                  include/upipe-amt/Makefile
                  include/upipe-v210/Makefile
@@ -199,8 +198,6 @@ AC_CONFIG_FILES([Makefile
                  lib/upipe-blackmagic/libupipe_blackmagic.pc
                  lib/upipe-qt/Makefile
                  lib/upipe-qt/libupipe_qt.pc
-                 lib/upipe-ebur128/Makefile
-                 lib/upipe-ebur128/libupipe_ebur128.pc
                  lib/upipe-nacl/Makefile
                  lib/upipe-nacl/libupipe_nacl.pc
                  lib/upipe-amt/Makefile

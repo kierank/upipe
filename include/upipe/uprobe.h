@@ -35,6 +35,7 @@ extern "C" {
 #endif
 
 #include <upipe/ubase.h>
+#include <upipe/ulist.h>
 #include <upipe/uref_flow.h>
 
 #include <stdbool.h>
@@ -98,11 +99,47 @@ enum uprobe_event {
     /** a pipe signals that a uref carries a presentation and/or a
      * decoding timestamp (struct uref *) */
     UPROBE_CLOCK_TS,
+    /** a pipe signals that a uref contains a UTC clock reference
+     * (struct uref *, uint64_t) */
+    UPROBE_CLOCK_UTC,
 
     /** non-standard events implemented by a module type can start from
      * there (first arg = signature) */
     UPROBE_LOCAL = 0x8000
 };
+
+/** @This return the corresponding event string.
+ *
+ * @param event the event value
+ * @return the event string
+ */
+static inline const char *uprobe_event_str(int event)
+{
+    switch (event) {
+    case UPROBE_LOG: return "UPROBE_LOG";
+    case UPROBE_FATAL: return "UPROBE_FATAL";
+    case UPROBE_ERROR: return "UPROBE_ERROR";
+    case UPROBE_READY: return "UPROBE_READY";
+    case UPROBE_DEAD: return "UPROBE_DEAD";
+    case UPROBE_SOURCE_END: return "UPROBE_SOURCE_END";
+    case UPROBE_SINK_END: return "UPROBE_SINK_END";
+    case UPROBE_NEED_OUTPUT: return "UPROBE_NEED_OUTPUT";
+    case UPROBE_PROVIDE_REQUEST: return "UPROBE_PROVIDE_REQUEST";
+    case UPROBE_NEED_UPUMP_MGR: return "UPROBE_NEED_UPUMP_MGR";
+    case UPROBE_FREEZE_UPUMP_MGR: return "UPROBE_FREEZE_UPUMP_MGR";
+    case UPROBE_THAW_UPUMP_MGR: return "UPROBE_THAW_UPUMP_MGR";
+    case UPROBE_NEW_FLOW_DEF: return "UPROBE_NEW_FLOW_DEF";
+    case UPROBE_NEW_RAP: return "UPROBE_NEW_RAP";
+    case UPROBE_SPLIT_UPDATE: return "UPROBE_SPLIT_UPDATE";
+    case UPROBE_SYNC_ACQUIRED: return "UPROBE_SYNC_ACQUIRED";
+    case UPROBE_SYNC_LOST: return "UPROBE_SYNC_LOST";
+    case UPROBE_CLOCK_REF: return "UPROBE_CLOCK_REF";
+    case UPROBE_CLOCK_TS: return "UPROBE_CLOCK_TS";
+    case UPROBE_CLOCK_UTC: return "UPROBE_CLOCK_UTC";
+    case UPROBE_LOCAL: break;
+    }
+    return NULL;
+}
 
 /** @This defines the levels of log messages. */
 enum uprobe_log_level {
@@ -117,6 +154,26 @@ enum uprobe_log_level {
     UPROBE_LOG_WARNING,
     /** error messages, the processing cannot continue */
     UPROBE_LOG_ERROR
+};
+
+/** @This describe a prefix tag for a log message. */
+struct ulog_pfx {
+    /** uchain to attach in prefixes list */
+    struct uchain uchain;
+    /** the prefix string */
+    const char *tag;
+};
+
+UBASE_FROM_TO(ulog_pfx, uchain, uchain, uchain)
+
+/** @This describe a log message. */
+struct ulog {
+    /** log level of the message */
+    enum uprobe_log_level level;
+    /** the message to be logged */
+    const char *msg;
+    /** list of prefix tags */
+    struct uchain prefixes;
 };
 
 /** @This is the call-back type for uprobe events. */
@@ -271,7 +328,8 @@ static inline int uprobe_throw_next(struct uprobe *uprobe, struct upipe *upipe,
 static inline void uprobe_log(struct uprobe *uprobe, struct upipe *upipe,
                               enum uprobe_log_level level, const char *msg)
 {
-    uprobe_throw(uprobe, upipe, UPROBE_LOG, level, msg);
+    struct ulog ulog = { level, msg, ULIST_INIT(ulog.prefixes) };
+    uprobe_throw(uprobe, upipe, UPROBE_LOG, &ulog);
 }
 
 /** @internal @This throws a log event, with printf-style message generation.

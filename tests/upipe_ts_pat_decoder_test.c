@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2014 OpenHeadend S.A.R.L.
+ * Copyright (C) 2012-2015 OpenHeadend S.A.R.L.
  *
  * Authors: Christophe Massiot
  *
@@ -32,6 +32,7 @@
 #include <upipe/uprobe.h>
 #include <upipe/uprobe_stdio.h>
 #include <upipe/uprobe_prefix.h>
+#include <upipe/uprobe_ubuf_mem.h>
 #include <upipe/umem.h>
 #include <upipe/umem_alloc.h>
 #include <upipe/udict.h>
@@ -94,7 +95,6 @@ static int catch(struct uprobe *uprobe, struct upipe *upipe,
             assert(uref != NULL);
             uint64_t patd_tsid;
             ubase_assert(uref_flow_get_id(uref, &patd_tsid));
-            assert(uref != NULL);
             assert(patd_tsid == tsid);
             break;
         }
@@ -133,6 +133,9 @@ int main(int argc, char *argv[])
     uprobe_init(&uprobe, catch, NULL);
     struct uprobe *uprobe_stdio = uprobe_stdio_alloc(&uprobe, stdout,
                                                      UPROBE_LOG_LEVEL);
+    assert(uprobe_stdio != NULL);
+    uprobe_stdio = uprobe_ubuf_mem_alloc(uprobe_stdio, umem_mgr,
+                                         UBUF_POOL_DEPTH, UBUF_POOL_DEPTH);
     assert(uprobe_stdio != NULL);
 
     struct uref *uref;

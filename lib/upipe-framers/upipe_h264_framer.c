@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2014 OpenHeadend S.A.R.L.
+ * Copyright (C) 2013-2015 OpenHeadend S.A.R.L.
  *
  * Authors: Christophe Massiot
  *
@@ -495,31 +495,25 @@ static void upipe_h264f_stream_parse_scaling(struct ubuf_block_stream *s,
  * @param s ubuf block stream
  * @param octetrate_p filled in with the octet rate
  * @param cpb_size_p filled in with the CPB buffer size
- * @return true if the stream is CBR
  */
-static bool upipe_h264f_stream_parse_hrd(struct upipe *upipe,
+static void upipe_h264f_stream_parse_hrd(struct upipe *upipe,
                                          struct ubuf_block_stream *s,
                                          uint64_t *octetrate_p,
                                          uint64_t *cpb_size_p)
 {
     struct upipe_h264f *upipe_h264f = upipe_h264f_from_upipe(upipe);
-    bool ret = false;
     uint32_t cpb_cnt = upipe_h264f_stream_ue(s) + 1;
     upipe_h264f_stream_fill_bits(s, 8);
     uint8_t bitrate_scale = ubuf_block_stream_show_bits(s, 4);
     ubuf_block_stream_skip_bits(s, 4);
     uint8_t cpb_size_scale = ubuf_block_stream_show_bits(s, 4);
     ubuf_block_stream_skip_bits(s, 4);
-    uint64_t octetrate =
+    *octetrate_p =
         ((upipe_h264f_stream_ue(s) + 1) << (6 + bitrate_scale)) / 8;
-    uint64_t cpb_size =
+    *cpb_size_p =
         ((upipe_h264f_stream_ue(s) + 1) << (4 + cpb_size_scale)) / 8;
-    upipe_h264f_stream_fill_bits(s, 1);
-    if (ubuf_block_stream_show_bits(s, 1)) { /* cbr_flag */
-        *octetrate_p = octetrate;
-        *cpb_size_p = cpb_size;
-        ret = true;
-    }
+    upipe_h264f_stream_fill_bits(s, 2);
+    ubuf_block_stream_skip_bits(s, 1); /* cbr_flag */
     ubuf_block_stream_skip_bits(s, 1);
     cpb_cnt--;
     while (cpb_cnt) {
@@ -540,7 +534,6 @@ static bool upipe_h264f_stream_parse_hrd(struct upipe *upipe,
     upipe_h264f->dpb_output_delay_length =
         ubuf_block_stream_show_bits(s, 5) + 1;
     ubuf_block_stream_skip_bits(s, 10);
-    return ret;
 }
 
 /** @internal @This handles a sequence parameter set.
@@ -956,6 +949,12 @@ static bool upipe_h264f_activate_sps(struct upipe *upipe, uint32_t sps_id)
     bool vui = !!ubuf_block_stream_show_bits(s, 1);
     ubuf_block_stream_skip_bits(s, 1);
     upipe_h264f->sar.den = 0;
+    uint8_t video_format = 5;
+    bool full_range = false;
+    uint8_t colour_primaries = 2;
+    uint8_t transfer_characteristics = 2;
+    uint8_t matrix_coefficients = 2;
+
     if (vui) {
         upipe_h264f_stream_fill_bits(s, 1);
         bool ar_present = !!ubuf_block_stream_show_bits(s, 1);
@@ -993,13 +992,21 @@ static bool upipe_h264f_activate_sps(struct upipe *upipe, uint32_t sps_id)
         ubuf_block_stream_skip_bits(s, 1);
         if (video_signal_present) {
             upipe_h264f_stream_fill_bits(s, 5);
-            ubuf_block_stream_skip_bits(s, 4);
-            if (ubuf_block_stream_show_bits(s, 1)) {
-                upipe_h264f_stream_fill_bits(s, 24);
-                ubuf_block_stream_skip_bits(s, 24);
-            }
-            upipe_h264f_stream_fill_bits(s, 1);
+            video_format = ubuf_block_stream_show_bits(s, 3);
+            ubuf_block_stream_skip_bits(s, 3);
+            full_range = !!ubuf_block_stream_show_bits(s, 1);
             ubuf_block_stream_skip_bits(s, 1);
+            bool colour_present = !!ubuf_block_stream_show_bits(s, 1);
+            ubuf_block_stream_skip_bits(s, 1);
+            if (colour_present) {
+                upipe_h264f_stream_fill_bits(s, 24);
+                colour_primaries = ubuf_block_stream_show_bits(s, 8);
+                ubuf_block_stream_skip_bits(s, 8);
+                transfer_characteristics = ubuf_block_stream_show_bits(s, 8);
+                ubuf_block_stream_skip_bits(s, 8);
+                matrix_coefficients = ubuf_block_stream_show_bits(s, 8);
+                ubuf_block_stream_skip_bits(s, 8);
+            }
         }
 
         upipe_h264f_stream_fill_bits(s, 1);
@@ -1050,8 +1057,8 @@ static bool upipe_h264f_activate_sps(struct upipe *upipe, uint32_t sps_id)
         upipe_h264f_stream_fill_bits(s, 1);
         bool nal_hrd_present = !!ubuf_block_stream_show_bits(s, 1);
         ubuf_block_stream_skip_bits(s, 1);
-        if (nal_hrd_present &&
-            upipe_h264f_stream_parse_hrd(upipe, s, &octetrate, &cpb_size)) {
+        if (nal_hrd_present) {
+            upipe_h264f_stream_parse_hrd(upipe, s, &octetrate, &cpb_size);
             UBASE_FATAL(upipe, uref_block_flow_set_octetrate(flow_def, octetrate))
             UBASE_FATAL(upipe, uref_block_flow_set_buffer_size(flow_def, cpb_size))
             upipe_h264f->octet_rate = octetrate;
@@ -1060,8 +1067,8 @@ static bool upipe_h264f_activate_sps(struct upipe *upipe, uint32_t sps_id)
         upipe_h264f_stream_fill_bits(s, 1);
         bool vcl_hrd_present = !!ubuf_block_stream_show_bits(s, 1);
         ubuf_block_stream_skip_bits(s, 1);
-        if (vcl_hrd_present &&
-            upipe_h264f_stream_parse_hrd(upipe, s, &octetrate, &cpb_size)) {
+        if (vcl_hrd_present) {
+            upipe_h264f_stream_parse_hrd(upipe, s, &octetrate, &cpb_size);
             UBASE_FATAL(upipe, uref_block_flow_set_octetrate(flow_def, octetrate))
             UBASE_FATAL(upipe, uref_block_flow_set_buffer_size(flow_def, cpb_size))
         }
@@ -1082,6 +1089,152 @@ static bool upipe_h264f_activate_sps(struct upipe *upipe, uint32_t sps_id)
         upipe_h264f->duration = 0;
         upipe_h264f->pic_struct_present = false;
         upipe_h264f->hrd = false;
+    }
+
+    const char *video_format_str = NULL;
+    switch (video_format) {
+        case 0:
+            video_format_str = "component";
+            break;
+        case 1:
+            video_format_str = "pal";
+            break;
+        case 2:
+            video_format_str = "ntsc";
+            break;
+        case 3:
+            video_format_str = "secam";
+            break;
+        case 4:
+            video_format_str = "mac";
+            break;
+        default:
+            break;
+    }
+    if (video_format_str != NULL) {
+        UBASE_FATAL(upipe, uref_pic_flow_set_video_format(flow_def,
+                    video_format_str))
+    }
+
+    if (full_range) {
+        UBASE_FATAL(upipe, uref_pic_flow_set_full_range(flow_def))
+    }
+
+    const char *colour_primaries_str = NULL;
+    switch (colour_primaries) {
+        case 1:
+            colour_primaries_str = "bt709";
+            break;
+        case 4:
+            colour_primaries_str = "bt470m";
+            break;
+        case 5:
+            colour_primaries_str = "bt470bg";
+            break;
+        case 6:
+            colour_primaries_str = "smpte170m";
+            break;
+        case 7:
+            colour_primaries_str = "smpte240m";
+            break;
+        case 8:
+            colour_primaries_str = "film";
+            break;
+        case 9:
+            colour_primaries_str = "bt2020";
+            break;
+        default:
+            break;
+    }
+    if (colour_primaries_str != NULL) {
+        UBASE_FATAL(upipe, uref_pic_flow_set_colour_primaries(flow_def,
+                    colour_primaries_str))
+    }
+
+    const char *transfer_characteristics_str = NULL;
+    switch (transfer_characteristics) {
+        case 1:
+            transfer_characteristics_str = "bt709";
+            break;
+        case 4:
+            transfer_characteristics_str = "bt470m";
+            break;
+        case 5:
+            transfer_characteristics_str = "bt470bg";
+            break;
+        case 6:
+            transfer_characteristics_str = "smpte170m";
+            break;
+        case 7:
+            transfer_characteristics_str = "smpte240m";
+            break;
+        case 8:
+            transfer_characteristics_str = "linear";
+            break;
+        case 9:
+            transfer_characteristics_str = "log100";
+            break;
+        case 10:
+            transfer_characteristics_str = "log316";
+            break;
+        case 11:
+            transfer_characteristics_str = "iec61966-2-4";
+            break;
+        case 12:
+            transfer_characteristics_str = "bt1361e";
+            break;
+        case 13:
+            transfer_characteristics_str = "iec61966-2-1";
+            break;
+        case 14:
+            transfer_characteristics_str = "bt2020-10";
+            break;
+        case 15:
+            transfer_characteristics_str = "bt2020-12";
+            break;
+        default:
+            break;
+    }
+    if (transfer_characteristics_str != NULL) {
+        UBASE_FATAL(upipe, uref_pic_flow_set_transfer_characteristics(flow_def,
+                    transfer_characteristics_str))
+    }
+
+    const char *matrix_coefficients_str = NULL;
+    switch (matrix_coefficients) {
+        case 0:
+            matrix_coefficients_str = "GBR";
+            break;
+        case 1:
+            matrix_coefficients_str = "bt709";
+            break;
+        case 4:
+            matrix_coefficients_str = "fcc";
+            break;
+        case 5:
+            matrix_coefficients_str = "bt470bg";
+            break;
+        case 6:
+            matrix_coefficients_str = "smpte170m";
+            break;
+        case 7:
+            matrix_coefficients_str = "smpte240m";
+            break;
+        case 8:
+            matrix_coefficients_str = "YCgCo";
+            break;
+        case 9:
+            matrix_coefficients_str = "bt2020nc";
+            break;
+        case 10:
+            matrix_coefficients_str = "bt2020c";
+            break;
+        default:
+            break;
+    }
+    if (matrix_coefficients_str != NULL) {
+        UBASE_FATAL(upipe, uref_pic_flow_set_matrix_coefficients(flow_def,
+                    matrix_coefficients_str))
     }
 
     upipe_h264f->active_sps = sps_id;
@@ -1639,7 +1792,7 @@ static bool upipe_h264f_nal_begin(struct upipe *upipe, struct upump **upump_p)
                     upipe_h264f->au_size - upipe_h264f->au_last_nal_start_size;
                 return false;
             }
-            if (upipe_h264f->au_slice_nal == UINT8_MAX)
+            if (!upipe_h264f->au_slice)
                 return false;
             break;
 
@@ -1654,13 +1807,12 @@ static bool upipe_h264f_nal_begin(struct upipe *upipe, struct upump **upump_p)
         case H264NAL_TYPE_SPSX:
         case H264NAL_TYPE_SSPS:
         case H264NAL_TYPE_PPS:
-            if (upipe_h264f->au_slice_nal == UINT8_MAX)
+            if (!upipe_h264f->au_slice)
                 return false;
             break;
 
         default:
-            if (nal_type < 14 || nal_type > 18 ||
-                upipe_h264f->au_slice_nal == UINT8_MAX)
+            if (nal_type < 14 || nal_type > 18 || !upipe_h264f->au_slice)
                 return false;
             break;
     }

@@ -346,9 +346,10 @@ static struct upipe *upipe_x264_alloc(struct upipe_mgr *mgr,
  * @param width image width
  * @param height image height
  * @param sar SAR
+ * @param overscan overscan
  */
 static bool upipe_x264_open(struct upipe *upipe, int width, int height,
-                            struct urational *sar)
+                            struct urational *sar, bool overscan)
 {
     struct upipe_x264 *upipe_x264 = upipe_x264_from_upipe(upipe);
     struct urational fps = {0, 0};
@@ -368,10 +369,42 @@ static bool upipe_x264_open(struct upipe *upipe, int width, int height,
 
     params->vui.i_sar_width = sar->num;
     params->vui.i_sar_height = sar->den;
+    params->vui.i_overscan = overscan ? 2 : 1;
     params->i_width = width;
     params->i_height = height;
     if (!ubase_check(uref_pic_get_progressive(upipe_x264->flow_def_input)))
         params->b_interlaced = true;
+
+    const char *content;
+    int ret;
+    if (ubase_check(uref_pic_flow_get_video_format(
+                    upipe_x264->flow_def_input, &content)) &&
+        (ret = x264_param_parse(&upipe_x264->params, "videoformat",
+                                content)) < 0)
+        upipe_err_va(upipe, "can't set option %s:%s (%d)",
+                     "videoformat", content, ret);
+    content =
+        ubase_check(uref_pic_flow_get_full_range(upipe_x264->flow_def_input)) ?
+        "1" : "0";
+    if ((ret = x264_param_parse(&upipe_x264->params, "fullrange", content)) < 0)
+        upipe_err_va(upipe, "can't set option %s:%s (%d)",
+                     "fullrange", content, ret);
+    if (ubase_check(uref_pic_flow_get_colour_primaries(
+                    upipe_x264->flow_def_input, &content)) &&
+        (ret = x264_param_parse(&upipe_x264->params, "colorprim", content)) < 0)
+        upipe_err_va(upipe, "can't set option %s:%s (%d)",
+                     "colorprim", content, ret);
+    if (ubase_check(uref_pic_flow_get_transfer_characteristics(
+                    upipe_x264->flow_def_input, &content)) &&
+        (ret = x264_param_parse(&upipe_x264->params, "transfer", content)) < 0)
+        upipe_err_va(upipe, "can't set option %s:%s (%d)",
+                     "transfer", content, ret);
+    if (ubase_check(uref_pic_flow_get_matrix_coefficients(
+                    upipe_x264->flow_def_input, &content)) &&
+        (ret = x264_param_parse(&upipe_x264->params, "colormatrix",
+                                content)) < 0)
+        upipe_err_va(upipe, "can't set option %s:%s (%d)",
+                     "colormatrix", content, ret);
 
     /* reconfigure encoder with new parameters and return */
     if (unlikely(upipe_x264->encoder)) {
@@ -542,17 +575,19 @@ static void upipe_x264_close(struct upipe *upipe)
  * @param width image width
  * @param height image height
  * @param sar SAR
+ * @param overscan overscan
  * @return true if parameters update needed
  */
 static inline bool upipe_x264_need_update(struct upipe *upipe,
                                           int width, int height,
-                                          struct urational *sar)
+                                          struct urational *sar, bool overscan)
 {
     x264_param_t *params = &upipe_x264_from_upipe(upipe)->params;
     return (params->i_width != width ||
             params->i_height != height ||
             params->vui.i_sar_width != sar->num ||
-            params->vui.i_sar_height != sar->den);
+            params->vui.i_sar_height != sar->den ||
+            params->vui.i_overscan != (overscan ? 2 : 1));
 }
 
 /** @internal @This processes pictures.
@@ -601,17 +636,20 @@ static void upipe_x264_input(struct upipe *upipe, struct uref *uref,
         uref_pic_flow_get_sar(upipe_x264->flow_def_input, &sar);
         urational_simplify(&sar);
         uref_pic_size(uref, &width, &height, NULL);
+        bool overscan =
+            ubase_check(uref_pic_flow_get_overscan(upipe_x264->flow_def_input));
 
         /* open encoder if not already opened or if update needed */
         if (unlikely(!upipe_x264->encoder)) {
             needopen = true;
         } else if (unlikely(upipe_x264_need_update(upipe, width, height,
-                                                   &sar))) {
+                                                   &sar, overscan))) {
             needopen = true;
             upipe_notice(upipe, "Flow parameters changed, reconfiguring encoder");
         }
         if (unlikely(needopen)) {
-            if (unlikely(!upipe_x264_open(upipe, width, height, &sar))) {
+            if (unlikely(!upipe_x264_open(upipe, width, height,
+                                          &sar, overscan))) {
                 upipe_err(upipe, "Could not open encoder");
                 uref_free(uref);
                 return;

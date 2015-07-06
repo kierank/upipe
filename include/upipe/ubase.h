@@ -77,8 +77,13 @@ extern "C" {
 #ifndef container_of
 /** @This is used to retrieve the private portion of a structure. */
 #   define container_of(ptr, type, member) ({                               \
-        const typeof( ((type *)0)->member ) *__mptr = (ptr);                \
-        (type *)( (char *)__mptr - offsetof(type,member) );})
+        const typeof( ((type *)0)->member ) *_mptr = (ptr);                 \
+        (type *)( (char *)_mptr - offsetof(type,member) );})
+#endif
+
+#ifndef UBASE_ARRAY_SIZE
+/** @This is used to retrieve the number of items of an array. */
+#   define UBASE_ARRAY_SIZE(a)        (sizeof (a) / sizeof ((a)[0]))
 #endif
 
 /** @This declares two functions dealing with substructures included into a
@@ -183,6 +188,27 @@ enum ubase_err {
      * there */
     UBASE_ERR_LOCAL = 0x8000
 };
+
+/** @This return the corresponding error string.
+ *
+ * @param err the error value
+ * @return the error string
+ */
+static inline const char *ubase_err_str(int err)
+{
+    switch (err) {
+    case UBASE_ERR_NONE: return "UBASE_ERR_NONE";
+    case UBASE_ERR_UNKNOWN: return "UBASE_ERR_UNKNOWN";
+    case UBASE_ERR_ALLOC: return "UBASE_ERR_ALLOC";
+    case UBASE_ERR_UPUMP: return "UBASE_ERR_UPUMP";
+    case UBASE_ERR_UNHANDLED: return "UBASE_ERR_UNHANDLED";
+    case UBASE_ERR_INVALID: return "UBASE_ERR_INVALID";
+    case UBASE_ERR_EXTERNAL: return "UBASE_ERR_EXTERNAL";
+    case UBASE_ERR_BUSY: return "UBASE_ERR_BUSY";
+    case UBASE_ERR_LOCAL: break;
+    }
+    return NULL;
+}
 
 /** @This returns true if no error happened in an error code.
  *
@@ -311,6 +337,23 @@ static inline void urational_simplify(struct urational *urational)
         gcd = ubase_gcd(-urational->num, urational->den);
     urational->num /= gcd;
     urational->den /= gcd;
+}
+
+/** @This adds two rationals.
+ *
+ * @param urational1 pointer to rational 1
+ * @param urational2 pointer to rational 2
+ * @return a rational
+ */
+static inline struct urational urational_add(const struct urational *urational1,
+                                             const struct urational *urational2)
+{
+    struct urational sum;
+    sum.num = urational1->num * (int64_t)urational2->den +
+              urational2->num * (int64_t)urational1->den;
+    sum.den = urational1->den * (int64_t)urational2->den;
+    urational_simplify(&sum);
+    return sum;
 }
 
 /** @This checks if a prefix matches a string.

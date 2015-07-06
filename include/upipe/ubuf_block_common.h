@@ -152,7 +152,7 @@ static inline int ubuf_block_common_splice(struct ubuf *ubuf,
 
     if (size > 0) {
         struct ubuf *next_ubuf = block->next_ubuf;
-        while (next_ubuf != NULL) {
+        while (size > 0 && next_ubuf != NULL) {
             struct ubuf_block *next_block = ubuf_block_from_ubuf(next_ubuf);
             struct ubuf *saved_ubuf = next_block->next_ubuf;
             next_block->next_ubuf = NULL;
@@ -167,11 +167,6 @@ static inline int ubuf_block_common_splice(struct ubuf *ubuf,
             new_block->total_size = size;
             size -= new_block->size;
         }
-
-        if (unlikely(block->next_ubuf == NULL ||
-                     (new_block->next_ubuf = ubuf_block_splice(block->next_ubuf,
-                                                             0, size)) == NULL))
-            return UBASE_ERR_ALLOC;
     }
     return UBASE_ERR_NONE;
 }

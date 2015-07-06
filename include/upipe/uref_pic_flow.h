@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2014 OpenHeadend S.A.R.L.
+ * Copyright (C) 2012-2015 OpenHeadend S.A.R.L.
  *
  * Authors: Christophe Massiot
  *
@@ -74,12 +74,23 @@ UREF_ATTR_INT(pic_flow, align_hmoffset, "p.align_hmoffset",
 
 UREF_ATTR_RATIONAL_SH(pic_flow, sar, UDICT_TYPE_PIC_SAR, sample aspect ratio)
 UREF_ATTR_VOID_SH(pic_flow, overscan, UDICT_TYPE_PIC_OVERSCAN, overscan)
+UREF_ATTR_RATIONAL(pic_flow, dar, "p.dar", display aspect ratio)
 UREF_ATTR_UNSIGNED_SH(pic_flow, hsize, UDICT_TYPE_PIC_HSIZE, horizontal size)
 UREF_ATTR_UNSIGNED_SH(pic_flow, vsize, UDICT_TYPE_PIC_VSIZE, vertical size)
 UREF_ATTR_UNSIGNED_SH(pic_flow, hsize_visible, UDICT_TYPE_PIC_HSIZE_VISIBLE,
         horizontal visible size)
 UREF_ATTR_UNSIGNED_SH(pic_flow, vsize_visible, UDICT_TYPE_PIC_VSIZE_VISIBLE,
         vertical visible size)
+UREF_ATTR_STRING_SH(pic_flow, video_format, UDICT_TYPE_PIC_VIDEO_FORMAT,
+        video format)
+UREF_ATTR_VOID_SH(pic_flow, full_range, UDICT_TYPE_PIC_FULL_RANGE,
+        colour full range)
+UREF_ATTR_STRING_SH(pic_flow, colour_primaries, UDICT_TYPE_PIC_COLOUR_PRIMARIES,
+        colour primaries)
+UREF_ATTR_STRING_SH(pic_flow, transfer_characteristics,
+        UDICT_TYPE_PIC_TRANSFER_CHARACTERISTICS, transfer characteristics)
+UREF_ATTR_STRING_SH(pic_flow, matrix_coefficients,
+        UDICT_TYPE_PIC_MATRIX_COEFFICIENTS, matrix coefficients)
 
 /** @This allocates a control packet to define a new picture flow. For each
  * plane, uref_pic_flow_add_plane() has to be called afterwards.
@@ -259,6 +270,62 @@ static inline bool uref_pic_flow_compare_format(struct uref *uref1,
             return false;
     }
     return true;
+}
+
+/** @This infers the SAR from the DAR.
+ *
+ * @param uref uref control packet
+ * @param dar display aspect ratio
+ * @return an error code
+ */
+static inline int uref_pic_flow_infer_sar(struct uref *uref,
+                                          struct urational dar)
+{
+    uint64_t width, height;
+    UBASE_RETURN(uref_pic_flow_get_hsize(uref, &width))
+    UBASE_RETURN(uref_pic_flow_get_vsize(uref, &height))
+    bool overscan = ubase_check(uref_pic_flow_get_overscan(uref));
+
+    struct urational sar;
+    sar.num = height * dar.num;
+    sar.den = width * dar.den;
+    if (overscan) {
+        if (width == 720 && height == 576 &&
+            dar.num == 4 && dar.den == 3) {
+            sar.num = 12;
+            sar.den = 11;
+        } else if (width == 720 && height == 480 &&
+                   dar.num == 4 && dar.den == 3) {
+            sar.num = 10;
+            sar.den = 11;
+        } else if (width == 720 && height == 576 &&
+                   dar.num == 16 && dar.den == 9) {
+            sar.num = 16;
+            sar.den = 11;
+        } else if (width == 720 && height == 480 &&
+                   dar.num == 16 && dar.den == 9) {
+            sar.num = 40;
+            sar.den = 33;
+        } else if (width == 480 && height == 576 &&
+                   dar.num == 16 && dar.den == 9) {
+            sar.num = 24;
+            sar.den = 11;
+        } else if (width == 480 && height == 480 &&
+                   dar.num == 16 && dar.den == 9) {
+            sar.num = 20;
+            sar.den = 11;
+        } else if (width == 480 && height == 576 &&
+                   dar.num == 4 && dar.den == 3) {
+            sar.num = 18;
+            sar.den = 11;
+        } else if (width == 480 && height == 480 &&
+                   dar.num == 4 && dar.den == 3) {
+            sar.num = 15;
+            sar.den = 11;
+        }
+    }
+    urational_simplify(&sar);
+    return uref_pic_flow_set_sar(uref, sar);
 }
 
 #ifdef __cplusplus
