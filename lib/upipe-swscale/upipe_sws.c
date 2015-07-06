@@ -111,6 +111,16 @@ struct upipe_sws {
     const char *input_chroma_map[UPIPE_AV_MAX_PLANES];
     /** output chroma map */
     const char *output_chroma_map[UPIPE_AV_MAX_PLANES];
+    /** input colorspace */
+    int input_colorspace;
+    /** output colorspace */
+    int output_colorspace;
+    /** input color range */
+    int input_color_range;
+    /** output color range */
+    int output_color_range;
+    /** true if the we already tried to set the colorspace, but failed at it */
+    bool colorspace_invalid;
 
     /** public upipe structure */
     struct upipe upipe;
@@ -127,6 +137,32 @@ UPIPE_HELPER_UBUF_MGR(upipe_sws, ubuf_mgr, flow_format, ubuf_mgr_request,
                       upipe_sws_unregister_output_request)
 UPIPE_HELPER_INPUT(upipe_sws, urefs, nb_urefs, max_urefs, blockers, upipe_sws_handle)
 
+/** @internal @This converts Upipe color space to sws color space.
+ *
+ * @param upipe description structure of the pipe
+ * @param flow_def flow definition packet
+ * @return sws color space
+ */
+static int upipe_sws_convert_color(struct upipe *upipe, struct uref *flow_def)
+{
+    int colorspace = -1;
+    const char *matrix_coefficients;
+    if (ubase_check(uref_pic_flow_get_matrix_coefficients(flow_def,
+                    &matrix_coefficients))) {
+        if (!strcmp(matrix_coefficients, "bt709"))
+            colorspace = SWS_CS_ITU709;
+        else if (!strcmp(matrix_coefficients, "fcc"))
+            colorspace = SWS_CS_FCC;
+        else if (!strcmp(matrix_coefficients, "smpte170m"))
+            colorspace = SWS_CS_SMPTE170M;
+        else if (!strcmp(matrix_coefficients, "smpte240m"))
+            colorspace = SWS_CS_SMPTE240M;
+        else
+            upipe_warn_va(upipe, "unknown color space %s", matrix_coefficients);
+    }
+    return colorspace;
+}
+
 /** @internal @This handles data.
  *
  * @param upipe description structure of the pipe
@@ -142,6 +178,9 @@ static bool upipe_sws_handle(struct upipe *upipe, struct uref *uref,
     if (unlikely(ubase_check(uref_flow_get_def(uref, &def)))) {
         upipe_sws_store_flow_def(upipe, NULL);
         uref = upipe_sws_store_flow_def_input(upipe, uref);
+        struct urational dar;
+        if (ubase_check(uref_pic_flow_get_dar(uref, &dar)))
+            uref_pic_flow_infer_sar(uref, dar);
         upipe_sws_require_ubuf_mgr(upipe, uref);
         return true;
     }
@@ -172,13 +211,47 @@ static bool upipe_sws_handle(struct upipe *upipe, struct uref *uref,
                     input_hsize, input_vsize >> !!i, upipe_sws->input_pix_fmt,
                     output_hsize, output_vsize >> !!i, upipe_sws->output_pix_fmt,
                     upipe_sws->flags, NULL, NULL, NULL);
+
+        if (unlikely(upipe_sws->convert_ctx[i] == NULL)) {
+            upipe_err(upipe, "sws_getContext failed");
+            uref_free(uref);
+            return true;
+        }
+
+        if (upipe_sws->colorspace_invalid)
+            continue;
+
+        int in_full, out_full, brightness, contrast, saturation;
+        const int *inv_table, *table;
+
+        if (unlikely(sws_getColorspaceDetails(upipe_sws->convert_ctx[i],
+                        (int **)&inv_table, &in_full, (int **)&table, &out_full,
+                        &brightness, &contrast, &saturation) < 0)) {
+            upipe_warn(upipe, "unable to set color space data");
+            upipe_sws->colorspace_invalid = true;
+            continue;
+        }
+
+        if (upipe_sws->input_colorspace != -1)
+            inv_table = sws_getCoefficients(upipe_sws->input_colorspace);
+        if (upipe_sws->input_color_range != -1)
+            in_full = upipe_sws->input_color_range;
+        if (upipe_sws->output_colorspace != -1)
+            table = sws_getCoefficients(upipe_sws->output_colorspace);
+        if (upipe_sws->output_color_range != -1)
+            out_full = upipe_sws->output_color_range;
+
+        if (unlikely(sws_setColorspaceDetails(upipe_sws->convert_ctx[i],
+                        inv_table, in_full, table, out_full,
+                        brightness, contrast, saturation) < 0)) {
+            upipe_warn(upipe, "unable to set color space data");
+            upipe_sws->colorspace_invalid = true;
+        }
     }
 
-    if (unlikely(upipe_sws->convert_ctx == NULL)) {
-        upipe_err(upipe, "sws_getContext failed");
-        uref_free(uref);
-        return true;
-    }
+    upipe_verbose_va(upipe, "%s -> %s",
+        av_get_pix_fmt_name(upipe_sws->input_pix_fmt),
+        av_get_pix_fmt_name(upipe_sws->output_pix_fmt));
 
     /* map input */
     const uint8_t *input_planes[UPIPE_AV_MAX_PLANES + 1];
@@ -199,6 +272,8 @@ static bool upipe_sws_handle(struct upipe *upipe, struct uref *uref,
         }
         input_planes[i] = data;
         input_strides[i] = stride * (1+!progressive);
+        upipe_verbose_va(upipe, "input_stride[%d] %d",
+                         i, input_strides[i]);
     }
     input_planes[i] = NULL;
     input_strides[i] = 0;
@@ -236,6 +311,8 @@ static bool upipe_sws_handle(struct upipe *upipe, struct uref *uref,
         }
         output_planes[i] = data;
         output_strides[i] = stride * (1+!progressive);
+        upipe_verbose_va(upipe, "output_stride[%d] %d",
+                         i, output_strides[i]);
     }
     output_planes[i] = NULL;
     output_strides[i] = 0;
@@ -252,10 +329,11 @@ static bool upipe_sws_handle(struct upipe *upipe, struct uref *uref,
                         input_planes, input_strides, 0, (input_vsize+1)/2,
                         output_planes, output_strides);
 
-        for (i = 0; i < UPIPE_AV_MAX_PLANES &&
-                    upipe_sws->input_chroma_map[i] != NULL; i++) {
-            input_planes[i] += input_strides[i] >> 1;
-            output_planes[i] += output_strides[i] >> 1;
+        for (i = 0; i < UPIPE_AV_MAX_PLANES && input_planes[i]; i++) {
+                input_planes[i] += input_strides[i] >> 1;
+        }
+        for (i = 0; i < UPIPE_AV_MAX_PLANES && output_planes[i]; i++) {
+                output_planes[i] += output_strides[i] >> 1;
         }
 
         ret2 = sws_scale(upipe_sws->convert_ctx[2],
@@ -281,16 +359,6 @@ static bool upipe_sws_handle(struct upipe *upipe, struct uref *uref,
         return true;
     }
     uref_attach_ubuf(uref, ubuf);
-
-    struct urational sar;
-    if (ubase_check(uref_pic_flow_get_sar(upipe_sws->flow_def_attr, &sar)))
-        uref_pic_flow_delete_sar(uref);
-    else if (ubase_check(uref_pic_flow_get_sar(uref, &sar))) {
-        sar.num *= input_hsize * output_vsize;
-        sar.den *= input_vsize * output_hsize;
-        urational_simplify(&sar);
-        UBASE_FATAL(upipe, uref_pic_flow_set_sar(uref, sar))
-    }
     upipe_sws_output(upipe, uref, upump_p);
     return true;
 }
@@ -395,6 +463,9 @@ static int upipe_sws_set_flow_def(struct upipe *upipe, struct uref *flow_def)
         uref_dump(flow_def, upipe->uprobe);
         return UBASE_ERR_EXTERNAL;
     }
+    upipe_sws->input_colorspace = upipe_sws_convert_color(upipe, flow_def);
+    upipe_sws->input_color_range =
+        ubase_check(uref_pic_flow_get_full_range(flow_def)) ? 1 : 0;
 
     flow_def = uref_dup(flow_def);
     if (unlikely(flow_def == NULL)) {
@@ -402,18 +473,45 @@ static int upipe_sws_set_flow_def(struct upipe *upipe, struct uref *flow_def)
         return UBASE_ERR_ALLOC;
     }
 
-    struct urational sar;
     uint64_t input_hsize, input_vsize, output_hsize, output_vsize;
-    if (!ubase_check(uref_pic_flow_get_sar(upipe_sws->flow_def_attr, &sar)) &&
-        ubase_check(uref_pic_flow_get_sar(flow_def, &sar)) &&
-        ubase_check(uref_pic_flow_get_hsize(flow_def, &input_hsize)) &&
+    if (ubase_check(uref_pic_flow_get_hsize(flow_def, &input_hsize)) &&
         ubase_check(uref_pic_flow_get_vsize(flow_def, &input_vsize)) &&
-        ubase_check(uref_pic_flow_get_hsize(upipe_sws->flow_def_attr, &output_hsize)) &&
-        ubase_check(uref_pic_flow_get_vsize(upipe_sws->flow_def_attr, &output_vsize))) {
-        sar.num *= input_hsize * output_vsize;
-        sar.den *= input_vsize * output_hsize;
-        urational_simplify(&sar);
-        UBASE_FATAL(upipe, uref_pic_flow_set_sar(flow_def, sar))
+        ubase_check(uref_pic_flow_get_hsize(upipe_sws->flow_def_attr,
+                                            &output_hsize)) &&
+        ubase_check(uref_pic_flow_get_vsize(upipe_sws->flow_def_attr,
+                                            &output_vsize)) &&
+        (input_hsize != output_hsize || input_vsize != output_vsize)) {
+
+        uint64_t hsize_visible;
+        if (input_hsize != output_hsize &&
+            ubase_check(uref_pic_flow_get_hsize_visible(flow_def,
+                                                        &hsize_visible))) {
+            hsize_visible *= output_hsize;
+            hsize_visible /= input_hsize;
+            UBASE_FATAL(upipe, uref_pic_flow_set_hsize_visible(flow_def,
+                        hsize_visible))
+                upipe_err_va(upipe, "meuh %"PRIu64, hsize_visible);
+        }
+
+        uint64_t vsize_visible;
+        if (input_vsize != output_vsize &&
+            ubase_check(uref_pic_flow_get_vsize_visible(flow_def,
+                                                        &vsize_visible))) {
+            vsize_visible *= output_vsize;
+            vsize_visible /= input_vsize;
+            UBASE_FATAL(upipe, uref_pic_flow_set_vsize_visible(flow_def,
+                        vsize_visible))
+        }
+
+        struct urational sar;
+        if (!ubase_check(uref_pic_flow_get_sar(upipe_sws->flow_def_attr,
+                                               &sar)) &&
+            ubase_check(uref_pic_flow_get_sar(flow_def, &sar))) {
+            sar.num *= input_hsize * output_vsize;
+            sar.den *= input_vsize * output_hsize;
+            urational_simplify(&sar);
+            UBASE_FATAL(upipe, uref_pic_flow_set_sar(flow_def, sar))
+        }
     }
 
     if (upipe_sws->input_pix_fmt == AV_PIX_FMT_YUV420P) {
@@ -427,6 +525,7 @@ static int upipe_sws_set_flow_def(struct upipe *upipe, struct uref *flow_def)
         av_opt_set_int(upipe_sws->convert_ctx[1], "dst_v_chr_pos", 64, 0);
         av_opt_set_int(upipe_sws->convert_ctx[2], "dst_v_chr_pos", 192, 0);
     }
+    upipe_sws->colorspace_invalid = false;
 
     upipe_input(upipe, flow_def, NULL);
     return UBASE_ERR_NONE;
@@ -552,6 +651,7 @@ static struct upipe *upipe_sws_alloc(struct upipe_mgr *mgr,
     upipe_sws_init_output(upipe);
     upipe_sws_init_flow_def(upipe);
     upipe_sws_init_input(upipe);
+    upipe_sws->colorspace_invalid = false;
 
     memset(upipe_sws->convert_ctx, 0, sizeof(upipe_sws->convert_ctx));
     for (int i = 0; i < 3; i++) {
@@ -567,6 +667,9 @@ static struct upipe *upipe_sws_alloc(struct upipe_mgr *mgr,
 
     upipe_throw_ready(upipe);
 
+    upipe_sws->output_colorspace = upipe_sws_convert_color(upipe, flow_def);
+    upipe_sws->output_color_range =
+        ubase_check(uref_pic_flow_get_full_range(flow_def)) ? 1 : 0;
     UBASE_FATAL(upipe, uref_pic_flow_set_align(flow_def, 16))
     upipe_sws_store_flow_def_attr(upipe, flow_def);
     return upipe;

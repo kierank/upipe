@@ -37,6 +37,7 @@ pkginclude_HEADERS = \
 	upipe_helper_flow_def.h \
 	upipe_helper_flow_format.h \
 	upipe_helper_flow.h \
+	upipe_helper_iconv.h \
 	upipe_helper_input.h \
 	upipe_helper_output.h \
 	upipe_helper_output_size.h \
@@ -60,6 +61,7 @@ pkginclude_HEADERS = \
 	uprobe_prefix.h \
 	uprobe_select_flows.h \
 	uprobe_stdio.h \
+	uprobe_stdio_color.h \
 	uprobe_syslog.h \
 	uprobe_transfer.h \
 	uprobe_ubuf_mem.h \
@@ -71,12 +73,13 @@ pkginclude_HEADERS = \
 	upump_common.h \
 	upump.h \
 	uqueue.h \
+	urefcount.h \
 	uref_attr.h \
 	uref_block_flow.h \
 	uref_block.h \
 	uref_clock.h \
 	uref_dump.h \
-	urefcount.h \
+	uref_event.h \
 	uref_flow.h \
 	uref.h \
 	uref_pic_flow.h \

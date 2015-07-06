@@ -1,12 +1,13 @@
 /* See COPYING file for copyright and license details. */
 
-#include <upipe-ebur128/ebur128.h>
+#include "ebur128.h"
 
 #include <float.h>
 #include <limits.h>
 #include <math.h> /* You may have to define _USE_MATH_DEFINES if you use MSVC */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* This can be replaced by any BSD-like queue implementation. */
 #include <sys/queue.h>
@@ -264,12 +265,15 @@ ebur128_state* ebur128_init(unsigned int channels,
   } else if ((mode & EBUR128_MODE_M) == EBUR128_MODE_M) {
     st->d->audio_data_frames = st->d->samples_in_100ms * 4;
   } else {
-    return NULL;
+    goto free_true_peak;
   }
   st->d->audio_data = (double*) malloc(st->d->audio_data_frames *
                                        st->channels *
                                        sizeof(double));
   CHECK_ERROR(!st->d->audio_data, 0, free_true_peak)
+  memset(st->d->audio_data, 0, st->d->audio_data_frames *
+                                       st->channels *
+                                       sizeof(double));
   ebur128_init_filter(st);
 
   if (st->d->use_histogram) {
@@ -658,7 +662,7 @@ int ebur128_add_frames_##type(ebur128_state* st,                               \
           return EBUR128_ERROR_NOMEM;                                          \
         }                                                                      \
       }                                                                        \
-      if ((st->mode & EBUR128_MODE_LRA) == EBUR128_MODE_LRA) {   			   \
+      if ((st->mode & EBUR128_MODE_LRA) == EBUR128_MODE_LRA) {                 \
         st->d->short_term_frame_counter += st->d->needed_frames;               \
         if (st->d->short_term_frame_counter == st->d->samples_in_100ms * 30) { \
           struct ebur128_dq_entry* block;                                      \
@@ -668,7 +672,7 @@ int ebur128_add_frames_##type(ebur128_state* st,                               \
             if (st->d->use_histogram) {                                        \
               ++st->d->short_term_block_energy_histogram[                      \
                                               find_histogram_index(st_energy)];\
-            } else {           												   \
+            } else {                                                           \
               block = (struct ebur128_dq_entry*)                               \
                       malloc(sizeof(struct ebur128_dq_entry));                 \
               if (!block) return EBUR128_ERROR_NOMEM;                          \
@@ -685,16 +689,16 @@ int ebur128_add_frames_##type(ebur128_state* st,                               \
       if (st->d->audio_data_index == st->d->audio_data_frames * st->channels) {\
         st->d->audio_data_index = 0;                                           \
       }                                                                        \
-    } else {       														        \
+    } else {                                                                   \
       ebur128_filter_##type(st, src + src_index, frames);                      \
       st->d->audio_data_index += frames * st->channels;                        \
-      if ((st->mode & EBUR128_MODE_LRA) == EBUR128_MODE_LRA) {					 \
+      if ((st->mode & EBUR128_MODE_LRA) == EBUR128_MODE_LRA) {                 \
         st->d->short_term_frame_counter += frames;                             \
       }                                                                        \
       st->d->needed_frames -= frames;                                          \
       frames = 0;                                                              \
     }                                                                          \
-  }          																   \
+  }                                                                            \
   return EBUR128_SUCCESS;                                                      \
 }
 EBUR128_ADD_FRAMES(short)

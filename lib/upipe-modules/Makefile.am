@@ -42,7 +42,11 @@ libupipe_modules_la_SOURCES = \
 	upipe_sine_wave_source.c \
 	upipe_worker_linear.c \
 	upipe_worker_sink.c \
-	upipe_worker_source.c
+	upipe_worker_source.c \
+	upipe_stream_switcher.c \
+	upipe_rtp_h264.c \
+	upipe_rtp_mpeg4.c \
+	upipe_dump.c
 
 if HAVE_WRITEV
 libupipe_modules_la_SOURCES += \

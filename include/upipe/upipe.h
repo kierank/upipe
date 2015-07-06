@@ -170,6 +170,13 @@ struct upipe_mgr {
     /** signature of the pipe allocator */
     unsigned int signature;
 
+    /** function to get local error string */
+    const char *(*upipe_err_str)(int err);
+    /** function to get local command string */
+    const char *(*upipe_command_str)(int command);
+    /** function to get local event string */
+    const char *(*upipe_event_str)(int event);
+
     /** function to create a pipe - uprobe belongs to the callee */
     struct upipe *(*upipe_alloc)(struct upipe_mgr *, struct uprobe *,
                                  uint32_t, va_list);
@@ -255,6 +262,81 @@ static inline int upipe_mgr_control(struct upipe_mgr *mgr, int command, ...)
 static inline int upipe_mgr_vacuum(struct upipe_mgr *mgr)
 {
     return upipe_mgr_control(mgr, UPIPE_MGR_VACUUM);
+}
+
+/** @This return the corresponding error string.
+ *
+ * @param upipe description structure of the pipe
+ * @param err the error value
+ * @return the error string
+ */
+static inline const char *upipe_err_str(struct upipe *upipe, int err)
+{
+    if (err <= UBASE_ERR_LOCAL)
+        return ubase_err_str(err);
+
+    if (upipe && upipe->mgr && upipe->mgr->upipe_err_str)
+        return upipe->mgr->upipe_err_str(err);
+    return NULL;
+}
+
+/** @This return the corresponding command string.
+ *
+ * @param upipe description structure of the pipe
+ * @param cmd the command value
+ * @return the command string
+ */
+static inline const char *upipe_command_str(struct upipe *upipe, int cmd)
+{
+    if (cmd > UPIPE_CONTROL_LOCAL) {
+        if (upipe && upipe->mgr && upipe->mgr->upipe_command_str)
+            return upipe->mgr->upipe_command_str(cmd);
+        return NULL;
+    }
+
+    switch (cmd) {
+    case UPIPE_ATTACH_UREF_MGR: return "UPIPE_ATTACH_UREF_MGR";
+    case UPIPE_ATTACH_UPUMP_MGR: return "UPIPE_ATTACH_UPUMP_MGR";
+    case UPIPE_ATTACH_UCLOCK: return "UPIPE_ATTACH_UCLOCK";
+    case UPIPE_GET_URI: return "UPIPE_GET_URI";
+    case UPIPE_SET_URI: return "UPIPE_SET_URI";
+    case UPIPE_GET_OPTION: return "UPIPE_GET_OPTION";
+    case UPIPE_SET_OPTION: return "UPIPE_SET_OPTION";
+    case UPIPE_REGISTER_REQUEST: return "UPIPE_REGISTER_REQUEST";
+    case UPIPE_UNREGISTER_REQUEST: return "UPIPE_UNREGISTER_REQUEST";
+    case UPIPE_SET_FLOW_DEF: return "UPIPE_SET_FLOW_DEF";
+    case UPIPE_GET_MAX_LENGTH: return "UPIPE_GET_MAX_LENGTH";
+    case UPIPE_SET_MAX_LENGTH: return "UPIPE_SET_MAX_LENGTH";
+    case UPIPE_FLUSH: return "UPIPE_FLUSH";
+    case UPIPE_GET_OUTPUT: return "UPIPE_GET_OUTPUT";
+    case UPIPE_SET_OUTPUT: return "UPIPE_SET_OUTPUT";
+    case UPIPE_ATTACH_UBUF_MGR: return "UPIPE_ATTACH_UBUF_MGR";
+    case UPIPE_GET_FLOW_DEF: return "UPIPE_GET_FLOW_DEF";
+    case UPIPE_GET_OUTPUT_SIZE: return "UPIPE_GET_OUTPUT_SIZE";
+    case UPIPE_SET_OUTPUT_SIZE: return "UPIPE_SET_OUTPUT_SIZE";
+    case UPIPE_SPLIT_ITERATE: return "UPIPE_SPLIT_ITERATE";
+    case UPIPE_GET_SUB_MGR: return "UPIPE_GET_SUB_MGR";
+    case UPIPE_ITERATE_SUB: return "UPIPE_ITERATE_SUB";
+    case UPIPE_SUB_GET_SUPER: return "UPIPE_SUB_GET_SUPER";
+    case UPIPE_CONTROL_LOCAL: break;
+    }
+    return NULL;
+}
+
+/** @This return the corresponding event string.
+ *
+ * @param upipe description structure of the pipe
+ * @param event the event value
+ * @return the event string
+ */
+static inline const char *upipe_event_str(struct upipe *upipe, int event)
+{
+    if (event < UPROBE_LOCAL)
+        return uprobe_event_str(event);
+
+    if (upipe && upipe->mgr && upipe->mgr->upipe_event_str)
+        return upipe->mgr->upipe_event_str(event);
+    return NULL;
 }
 
 /** @internal @This allocates and initializes a pipe.
@@ -812,6 +894,21 @@ static inline int upipe_throw_clock_ts(struct upipe *upipe, struct uref *uref)
     return upipe_throw(upipe, UPROBE_CLOCK_TS, uref);
 }
 
+/** @This throws an event telling that the given uref carries a UTC clock
+ * reference.
+ *
+ * @param upipe description structure of the pipe
+ * @param uref uref carrying a clock reference
+ * @param clock_utc UTC clock reference, in 27 MHz scale starting at Epoch
+ * (1970-01-01T00:00:00Z)
+ * @return an error code
+ */
+static inline int upipe_throw_clock_utc(struct upipe *upipe, struct uref *uref,
+                                        uint64_t clock_utc)
+{
+    return upipe_throw(upipe, UPROBE_CLOCK_UTC, uref, clock_utc);
+}
+
 /** @This catches an event coming from an inner pipe, and rethrows is as if
  * it were sent by the outermost pipe.
  *
@@ -888,9 +985,23 @@ static inline int upipe_control_va(struct upipe *upipe,
                                    int command, va_list args)
 {
     int err = upipe_control_nodbg_va(upipe, command, args);
-    if (unlikely(!ubase_check(err)))
-        upipe_dbg_va(upipe, "returned error 0x%x to command 0x%x", err,
-                     command);
+    if (unlikely(!ubase_check(err))) {
+        const char *err_str = upipe_err_str(upipe, err);
+        const char *command_str = upipe_command_str(upipe, command);
+
+        if (err_str && command_str)
+            upipe_dbg_va(upipe, "returned error %s to command %s",
+                         err_str, command_str);
+        else if (err_str)
+            upipe_dbg_va(upipe, "returned error %s to command 0x%x",
+                         err_str, command);
+        else if (command_str)
+            upipe_dbg_va(upipe, "returned error 0x%x to command %s",
+                         err, command_str);
+        else
+            upipe_dbg_va(upipe, "returned error 0x%x to command 0x%x",
+                         err, command);
+    }
     return err;
 }
 
@@ -1130,7 +1241,7 @@ static inline int upipe_sub_get_super(struct upipe *upipe, struct upipe **p)
     return upipe_control(upipe, UPIPE_SUB_GET_SUPER, p);
 }
 
-/** @This declares ten functions to allocate pipes with a certain pipe
+/** @This declares twelve functions to allocate pipes with a certain pipe
  * allocator.
  *
  * Supposing the name of the allocator is upipe_foo, it declares:
@@ -1156,6 +1267,14 @@ static inline int upipe_sub_get_super(struct upipe *upipe, struct upipe **p)
  * @end code
  * A wrapper to upipe_foo_alloc_output() which additionally releases the
  * upipe argument.
+ *
+ * @item @code
+ *  int upipe_foo_spawn_output(struct upipe *upipe,
+ *                             struct upipe_mgr *upipe_mgr,
+ *                             struct uprobe *uprobe, ...)
+ * @end code
+ * A wrapper to upipe_foo_alloc_output() which additionally releases the
+ * allocated pipe.
  *
  * @item @code
  *  struct upipe *upipe_foo_alloc_input(struct upipe *upipe,
@@ -1195,6 +1314,14 @@ static inline int upipe_sub_get_super(struct upipe *upipe, struct upipe **p)
  * @end code
  * A wrapper to upipe_foo_alloc_output_sub() which additionally releases the
  * upipe argument.
+ *
+ * @item @code
+ *  int upipe_foo_spawn_output_sub(struct upipe *upipe,
+ *                                 struct upipe *super_pipe,
+ *                                 struct uprobe *uprobe, ...)
+ * @end code
+ * A wrapper to upipe_foo_alloc_output_sub() which additionally releases the
+ * allocated pipe.
  *
  * @item @code
  *  struct upipe *upipe_foo_alloc_input_sub(struct upipe *upipe,
@@ -1290,6 +1417,30 @@ static inline struct upipe *                                                \
                                                         uprobe  ARGS);      \
     upipe_release(upipe);                                                   \
     return output;                                                          \
+}                                                                           \
+/** @This allocates a new pipe from the given manager, sets it as the       \
+ * output of the given pipe, and releases it.                               \
+ *                                                                          \
+ * Please note that this function does not _use() the probe, so if you want \
+ * to reuse an existing probe, you have to use it first.                    \
+ *                                                                          \
+ * @param upipe description structure of the pipe (belongs to the callee)   \
+ * @param upipe_mgr manager for the output pipe                             \
+ * @param uprobe structure used to raise events (belongs to the callee),    \
+ * followed by arguments for the allocator (@see upipe_##GROUP##_alloc)     \
+ * @return an error code                                                    \
+ */                                                                         \
+static inline int                                                           \
+    upipe_##GROUP##_spawn_output(struct upipe *upipe,                       \
+                                 struct upipe_mgr *upipe_mgr,               \
+                                 struct uprobe *uprobe  ARGS_DECL)          \
+{                                                                           \
+    if (unlikely(upipe == NULL))                                            \
+        return UBASE_ERR_ALLOC;                                             \
+    struct upipe *output = upipe_##GROUP##_alloc_output(upipe, upipe_mgr,   \
+                                                        uprobe  ARGS);      \
+    upipe_release(output);                                                  \
+    return output == NULL ? UBASE_ERR_ALLOC : UBASE_ERR_NONE;               \
 }                                                                           \
 /** @This allocates a new pipe from the given manager, and sets it as the   \
  * input of the given pipe.                                                 \
@@ -1392,7 +1543,7 @@ static inline struct upipe *                                                \
     return upipe_##GROUP##_alloc_output(upipe, sub_mgr, uprobe  ARGS);      \
 }                                                                           \
 /** @This allocates a subpipe from the given super-pipe, sets it as the     \
- * output of the given pipe, and releases it.                               \
+ * output of the given pipe, and releases the latter.                       \
  *                                                                          \
  * Please note that this function does not _use() the probe, so if you want \
  * to reuse an existing probe, you have to use it first.                    \
@@ -1415,6 +1566,30 @@ static inline struct upipe *                                                \
             super_pipe, uprobe  ARGS);                                      \
     upipe_release(upipe);                                                   \
     return output;                                                          \
+}                                                                           \
+/** @This allocates a subpipe from the given super-pipe, sets it as the     \
+ * output of the given pipe, and releases it.                               \
+ *                                                                          \
+ * Please note that this function does not _use() the probe, so if you want \
+ * to reuse an existing probe, you have to use it first.                    \
+ *                                                                          \
+ * @param upipe description structure of the pipe                           \
+ * @param super_pipe description structure of the super-pipe                \
+ * @param uprobe structure used to raise events (belongs to the callee)     \
+ * followed by arguments for the allocator (@see upipe_##GROUP##_alloc)     \
+ * @return an error code                                                    \
+ */                                                                         \
+static inline int                                                           \
+    upipe_##GROUP##_spawn_output_sub(struct upipe *upipe,                   \
+                                     struct upipe *super_pipe,              \
+                                     struct uprobe *uprobe  ARGS_DECL)      \
+{                                                                           \
+    if (unlikely(upipe == NULL))                                            \
+        return UBASE_ERR_ALLOC;                                             \
+    struct upipe *output = upipe_##GROUP##_alloc_output_sub(upipe,          \
+            super_pipe, uprobe  ARGS);                                      \
+    upipe_release(output);                                                  \
+    return output == NULL ? UBASE_ERR_ALLOC : UBASE_ERR_NONE;               \
 }                                                                           \
 /** @This allocates a subpipe from the given super-pipe, and sets it as the \
  * input of the given pipe.                                                 \

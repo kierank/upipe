@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2014 OpenHeadend S.A.R.L.
+ * Copyright (C) 2012-2015 OpenHeadend S.A.R.L.
  *
  * Authors: Christophe Massiot
  *
@@ -20,6 +20,8 @@
 
 /** @file
  * @short Upipe module decoding the program map table of TS streams
+ * Normative references:
+ *  - ISO/IEC 13818-1:2007(E) (MPEG-2 Systems)
  */
 
 #include <upipe/ubase.h>
@@ -35,6 +37,8 @@
 #include <upipe/upipe_helper_urefcount.h>
 #include <upipe/upipe_helper_void.h>
 #include <upipe/upipe_helper_output.h>
+#include <upipe/upipe_helper_ubuf_mgr.h>
+#include <upipe/upipe_helper_flow_def.h>
 #include <upipe-ts/upipe_ts_pmt_decoder.h>
 #include <upipe-ts/uref_ts_flow.h>
 #include "upipe_ts_psi_decoder.h"
@@ -46,21 +50,25 @@
 #include <assert.h>
 
 #include <bitstream/mpeg/psi.h>
-#include <bitstream/mpeg/psi/desc_0a.h>
-#include <bitstream/dvb/si/desc_56.h>
-#include <bitstream/dvb/si/desc_59.h>
-#include <bitstream/dvb/si/desc_6a.h>
-#include <bitstream/dvb/si/desc_7a.h>
-#include <bitstream/dvb/si/desc_7b.h>
-#include <bitstream/dvb/si/desc_7c.h>
+#include <bitstream/dvb/si.h>
 
 /** we only accept TS packets */
 #define EXPECTED_FLOW_DEF "block.mpegtspsi.mpegtspmt."
+
+/** @hidden */
+static int upipe_ts_pmtd_check(struct upipe *upipe, struct uref *flow_format);
 
 /** @internal @This is the private context of a ts_pmtd pipe. */
 struct upipe_ts_pmtd {
     /** refcount management structure */
     struct urefcount urefcount;
+
+    /** ubuf manager */
+    struct ubuf_mgr *ubuf_mgr;
+    /** flow format packet */
+    struct uref *flow_format;
+    /** ubuf manager request */
+    struct urequest ubuf_mgr_request;
 
     /** pipe acting as output */
     struct upipe *output;
@@ -70,9 +78,11 @@ struct upipe_ts_pmtd {
     enum upipe_helper_output_state output_state;
     /** list of output requests */
     struct uchain request_list;
-
     /** input flow definition */
     struct uref *flow_def_input;
+    /** attributes in the sequence header */
+    struct uref *flow_def_attr;
+
     /** currently in effect PMT table */
     struct uref *pmt;
     /** list of flows */
@@ -86,6 +96,11 @@ UPIPE_HELPER_UPIPE(upipe_ts_pmtd, upipe, UPIPE_TS_PMTD_SIGNATURE)
 UPIPE_HELPER_UREFCOUNT(upipe_ts_pmtd, urefcount, upipe_ts_pmtd_free)
 UPIPE_HELPER_VOID(upipe_ts_pmtd)
 UPIPE_HELPER_OUTPUT(upipe_ts_pmtd, output, flow_def, output_state, request_list)
+UPIPE_HELPER_UBUF_MGR(upipe_ts_pmtd, ubuf_mgr, flow_format, ubuf_mgr_request,
+                      upipe_ts_pmtd_check,
+                      upipe_ts_pmtd_register_output_request,
+                      upipe_ts_pmtd_unregister_output_request)
+UPIPE_HELPER_FLOW_DEF(upipe_ts_pmtd, flow_def_input, flow_def_attr)
 
 /** @internal @This allocates a ts_pmtd pipe.
  *
@@ -107,14 +122,15 @@ static struct upipe *upipe_ts_pmtd_alloc(struct upipe_mgr *mgr,
     struct upipe_ts_pmtd *upipe_ts_pmtd = upipe_ts_pmtd_from_upipe(upipe);
     upipe_ts_pmtd_init_urefcount(upipe);
     upipe_ts_pmtd_init_output(upipe);
-    upipe_ts_pmtd->flow_def_input = NULL;
+    upipe_ts_pmtd_init_ubuf_mgr(upipe);
+    upipe_ts_pmtd_init_flow_def(upipe);
     upipe_ts_pmtd->pmt = NULL;
     ulist_init(&upipe_ts_pmtd->flows);
     upipe_throw_ready(upipe);
     return upipe;
 }
 
-/** @internal @This cleans up the list of programs.
+/** @internal @This cleans up the list of flows.
  *
  * @param upipe description structure of the pipe
  */
@@ -127,190 +143,6 @@ static void upipe_ts_pmtd_clean_flows(struct upipe *upipe)
         ulist_delete(uchain);
         uref_free(flow_def);
     }
-}
-
-/** @internal @This reads the header of a PMT.
- *
- * @param upipe description structure of the pipe
- * @param pmt PMT table
- * @param header pointer to PMT header
- * @param header_desc pointer to PMT descriptors
- * @param header_desclength size of PMT descriptors
- */
-#define UPIPE_TS_PMTD_HEADER(upipe, pmt, header, header_desc,               \
-                             header_desclength)                             \
-    uint8_t header_buffer[PMT_HEADER_SIZE];                                 \
-    const uint8_t *header = uref_block_peek(pmt, 0, PMT_HEADER_SIZE,        \
-                                            header_buffer);                 \
-    const uint8_t *header_desc = NULL;                                      \
-    uint16_t header_desclength = likely(header != NULL) ?                   \
-                                 pmt_get_desclength(header) : 0;            \
-    uint8_t header_desc_buffer[header_desclength + 1];                      \
-    if (header_desclength) {                                                \
-        header_desc = uref_block_peek(pmt, PMT_HEADER_SIZE,                 \
-                              header_desclength, header_desc_buffer);       \
-        if (unlikely(header_desc == NULL)) {                                \
-            uref_block_peek_unmap(pmt, 0, header_buffer, header);           \
-            header = NULL;                                                  \
-        }                                                                   \
-    }                                                                       \
-
-/** @internal @This unmaps the header of a PMT.
- *
- * @param upipe description structure of the pipe
- * @param pmt PMT table
- * @param header pointer to PMT header
- * @param header_desc pointer to PMT descriptors
- * @param header_desclength size of PMT descriptors
- */
-#define UPIPE_TS_PMTD_HEADER_UNMAP(upipe, pmt, header, header_desc,         \
-                                   header_desclength)                       \
-    uref_block_peek_unmap(pmt, 0, header_buffer, header);                   \
-    if (header_desclength)                                                  \
-        uref_block_peek_unmap(pmt, PMT_HEADER_SIZE,                         \
-                              header_desc_buffer, header_desc);
-
-/** @internal @This walks through the elementary streams in a PMT.
- * This is the first part: read data from es afterwards.
- *
- * @param upipe description structure of the pipe
- * @param pmt PMT table
- * @param offset pointing to the current offset in uref
- * @param header_desclength size of PMT descriptors
- * @param es iterator pointing to ES definition
- * @param desc iterator pointing to descriptors of the ES
- * @param desclength pointing to size of ES descriptors
- */
-#define UPIPE_TS_PMTD_PEEK(upipe, pmt, offset, header_desclength, es, desc, \
-                           desclength)                                      \
-    size_t size = 0;                                                        \
-    uref_block_size(pmt, &size);                                            \
-                                                                            \
-    int offset = PMT_HEADER_SIZE + header_desclength;                       \
-    while (offset + PMT_ES_SIZE <= size - PSI_CRC_SIZE) {                   \
-        uint8_t es_buffer[PMT_ES_SIZE];                                     \
-        const uint8_t *es = uref_block_peek(pmt, offset, PMT_ES_SIZE,       \
-                                            es_buffer);                     \
-        if (unlikely(es == NULL))                                           \
-            break;                                                          \
-        uint16_t desclength = pmtn_get_desclength(es);                      \
-        /* + 1 is to avoid [0] */                                           \
-        uint8_t desc_buffer[desclength + 1];                                \
-        const uint8_t *desc;                                                \
-        if (desclength) {                                                   \
-            desc = uref_block_peek(pmt, offset + PMT_ES_SIZE,               \
-                                   desclength, desc_buffer);                \
-            if (unlikely(desc == NULL)) {                                   \
-                uref_block_peek_unmap(pmt, offset, es_buffer, es);          \
-                break;                                                      \
-            }                                                               \
-        } else                                                              \
-            desc = NULL;
-
-/** @internal @This walks through the elementary streams in a PMT.
- * This is the second part: do the actions afterwards.
- *
- * @param upipe description structure of the pipe
- * @param pmt PMT table
- * @param offset pointing to the current offset in uref
- * @param es iterator pointing to ES definition
- * @param desc iterator pointing to descriptors of the ES
- * @param desclength pointing to size of ES descriptors
- */
-#define UPIPE_TS_PMTD_PEEK_UNMAP(upipe, pmt, offset, es, desc, desclength)  \
-        uref_block_peek_unmap(pmt, offset, es_buffer, es);                  \
-        if (desc != NULL)                                                   \
-            uref_block_peek_unmap(pmt, offset + PMT_ES_SIZE,                \
-                                        desc_buffer, desc);                 \
-        offset += PMT_ES_SIZE + desclength;
-
-/** @internal @This walks through the elementary streams in a PMT.
- * This is the last part.
- *
- * @param upipe description structure of the pipe
- * @param pmt PMT table
- * @param offset pointing to the current offset in uref
- */
-#define UPIPE_TS_PMTD_PEEK_END(upipe, pmt, offset)                          \
-    }                                                                       \
-    if (unlikely(offset + PMT_ES_SIZE <= size - PSI_CRC_SIZE)) {            \
-        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);                          \
-    }                                                                       \
-
-/** @internal @This validates the next PMT.
- *
- * @param upipe description structure of the pipe
- * @param uref PMT section
- * @return false if the PMT is invalid
- */
-static bool upipe_ts_pmtd_validate(struct upipe *upipe, struct uref *pmt)
-{
-    if (!upipe_ts_psid_check_crc(pmt))
-        return false;
-
-    UPIPE_TS_PMTD_HEADER(upipe, pmt, header, header_desc, header_desclength)
-
-    if (unlikely(header == NULL))
-        return false;
-
-    bool validate = psi_get_syntax(header) && !psi_get_section(header) &&
-                    !psi_get_lastsection(header) &&
-                    psi_get_tableid(header) == PMT_TABLE_ID &&
-                    (!header_desclength ||
-                     descl_validate(header_desc, header_desclength));
-
-    UPIPE_TS_PMTD_HEADER_UNMAP(upipe, pmt, header, header_desc,
-                               header_desclength)
-
-    if (!validate)
-        return false;
-    
-    UPIPE_TS_PMTD_PEEK(upipe, pmt, offset, header_desclength, es, desc,
-                       desclength)
-
-    validate = !desclength || descl_validate(desc, desclength);
-
-    UPIPE_TS_PMTD_PEEK_UNMAP(upipe, pmt, offset, es, desc, desclength)
-
-    if (!validate)
-        return false;
-
-    UPIPE_TS_PMTD_PEEK_END(upipe, pmt, offset)
-    return true;
-}
-
-/** @internal @This compares a PMT header with the current PMT.
- *
- * @param upipe description structure of the pipe
- * @param header pointer to PMT header
- * @param header_desc pointer to PMT descriptors
- * @param header_desclength size of PMT descriptors
- * @return false if the headers are different
- */
-static bool upipe_ts_pmtd_compare_header(struct upipe *upipe,
-                                         const uint8_t *header,
-                                         const uint8_t *header_desc,
-                                         uint16_t header_desclength)
-{
-    struct upipe_ts_pmtd *upipe_ts_pmtd = upipe_ts_pmtd_from_upipe(upipe);
-    if (upipe_ts_pmtd->pmt == NULL)
-        return false;
-
-    UPIPE_TS_PMTD_HEADER(upipe, upipe_ts_pmtd->pmt, old_header, old_header_desc,
-                         old_header_desclength)
-
-    if (unlikely(old_header == NULL))
-        return false;
-
-    bool compare = pmt_get_pcrpid(header) == pmt_get_pcrpid(old_header) &&
-                   header_desclength == old_header_desclength &&
-                   (!header_desclength ||
-                    !memcmp(header_desc, old_header_desc, header_desclength));
-
-    UPIPE_TS_PMTD_HEADER_UNMAP(upipe, upipe_ts_pmtd->pmt, old_header,
-                               old_header_desc, old_header_desclength)
-
-    return compare;
 }
 
 /** @internal @This is a helper function to parse the stream type of the
@@ -382,25 +214,30 @@ static void upipe_ts_pmtd_parse_descs(struct upipe *upipe,
     /* cast needed because biTStream expects an uint8_t * (but doesn't write
      * to it */
     while ((desc = descl_get_desc((uint8_t *)descl, desclength, j++)) != NULL) {
-        bool valid = false;
+        bool valid = true;
         bool copy = false;
         switch (desc_get_tag(desc)) {
             case 0x2: /* Video stream descriptor */
             case 0x3: /* Audio stream descriptor */
             case 0x4: /* Hierarchy descriptor */
+                break;
+
             case 0x5: /* Registration descriptor */
-                    if ((valid = desc05_validate(desc))) {
-                        const uint8_t *identifier;
-                        if ((identifier = desc05_get_identifier(desc))) {
-                            if (!memcmp(identifier, "Opus", 4)){
-                                UBASE_FATAL(upipe, uref_flow_set_def(flow_def,
-                                            "block.opus.sound."))
-                                UBASE_FATAL(upipe, uref_flow_set_raw_def(flow_def,
-                                            "block.mpegts.mpegtspes.opus.sound."))
-                            }
+                if ((valid = desc05_validate(desc))) {
+                    const uint8_t *identifier;
+                    if ((identifier = desc05_get_identifier(desc))) {
+                        if (!memcmp(identifier, "Opus", 4)){
+                            UBASE_FATAL(upipe, uref_flow_set_def(flow_def,
+                                        "block.opus.sound."))
+                            UBASE_FATAL(upipe, uref_flow_set_raw_def(flow_def,
+                                        "block.mpegts.mpegtspes.opus.sound."))
                         }
                     }
+                }
+                break;
+
             case 0x6: /* Data stream alignment descriptor */
+            case 0x9: /* Conditional access descriptor */
                 break;
 
             case 0xa: /* ISO 639 language descriptor */
@@ -420,6 +257,9 @@ static void upipe_ts_pmtd_parse_descs(struct upipe *upipe,
                                 break;
                             case DESC0A_TYPE_VISUAL_IMP:
                                 UBASE_FATAL(upipe, uref_flow_set_visual_impaired(flow_def, j))
+                                break;
+                            case DESC0A_TYPE_CLEAN:
+                                UBASE_FATAL(upipe, uref_flow_set_audio_clean(flow_def, j))
                                 break;
                             default:
                                 break;
@@ -580,6 +420,41 @@ static void upipe_ts_pmtd_parse_descs(struct upipe *upipe,
     }
 }
 
+/** @internal @This builds the flow definition corresponding to an ES.
+ *
+ * @param upipe description structure of the pipe
+ * @param es es structure in PMT
+ */
+static void upipe_ts_pmtd_build_es(struct upipe *upipe, const uint8_t *es)
+{
+    struct upipe_ts_pmtd *upipe_ts_pmtd = upipe_ts_pmtd_from_upipe(upipe);
+    struct uref *flow_def = uref_dup(upipe_ts_pmtd->flow_def_input);
+    if (unlikely(flow_def == NULL)) {
+        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+        return;
+    }
+
+    uint16_t pid = pmtn_get_pid(es);
+    uint16_t streamtype = pmtn_get_streamtype(es);
+
+    uref_flow_delete_def(flow_def);
+    upipe_ts_pmtd_parse_streamtype(upipe, flow_def, streamtype);
+    upipe_ts_pmtd_parse_descs(upipe, flow_def,
+            descs_get_desc(pmtn_get_descs((uint8_t *)es), 0),
+            pmtn_get_desclength(es));
+    const char *def;
+    if (ubase_check(uref_flow_get_def(flow_def, &def))) {
+        UBASE_FATAL(upipe, uref_flow_set_id(flow_def, pid))
+        UBASE_FATAL(upipe, uref_ts_flow_set_pid(flow_def, pid))
+
+        ulist_add(&upipe_ts_pmtd->flows, uref_to_uchain(flow_def));
+    } else {
+        upipe_warn_va(upipe, "unhandled stream type %u for PID %u",
+                      streamtype, pid);
+        uref_free(flow_def);
+    }
+}
+
 /** @internal @This parses a new PSI section.
  *
  * @param upipe description structure of the pipe
@@ -599,81 +474,83 @@ static void upipe_ts_pmtd_input(struct upipe *upipe, struct uref *uref,
         return;
     }
 
-    if (!upipe_ts_pmtd_validate(upipe, uref)) {
+    const uint8_t *pmt;
+    int size = -1;
+    if (unlikely(!ubase_check(uref_block_merge(uref, upipe_ts_pmtd->ubuf_mgr,
+                                               0, -1)) ||
+                 !ubase_check(uref_block_read(uref, 0, &size, &pmt)))) {
         upipe_warn(upipe, "invalid PMT section received");
+        uref_free(uref);
+        return;
+    }
+
+    if (!pmt_validate(pmt)) {
+        upipe_warn(upipe, "invalid PMT section received");
+        uref_block_unmap(uref, 0);
         uref_free(uref);
         return;
     }
     upipe_throw_new_rap(upipe, uref);
 
-    UPIPE_TS_PMTD_HEADER(upipe, uref, header, header_desc, header_desclength)
-
-    if (unlikely(header == NULL)) {
-        upipe_warn(upipe, "invalid PMT section received");
+    struct uref *flow_def = upipe_ts_pmtd_alloc_flow_def_attr(upipe);
+    if (unlikely(flow_def == NULL)) {
+        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+        uref_block_unmap(uref, 0);
         uref_free(uref);
         return;
     }
-
-    uint16_t pcrpid = pmt_get_pcrpid(header);
-    bool compare = upipe_ts_pmtd_compare_header(upipe, header, header_desc,
-                                                header_desclength);
-
-    UPIPE_TS_PMTD_HEADER_UNMAP(upipe, uref, header, header_desc,
-                               header_desclength)
-
-    if (!compare) {
-        struct uref *flow_def = uref_dup(upipe_ts_pmtd->flow_def_input);
-        if (unlikely(flow_def == NULL)) {
-            upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-            uref_free(uref);
-            return;
-        }
-        UBASE_FATAL(upipe, uref_flow_set_def(flow_def, "void."))
-        UBASE_FATAL(upipe, uref_ts_flow_set_pcr_pid(flow_def, pcrpid))
-        UBASE_FATAL(upipe, uref_ts_flow_add_descriptor(flow_def, header_desc,
-                                                 header_desclength))
-        upipe_ts_pmtd_store_flow_def(upipe, flow_def);
-        /* Force sending flow def */
-        upipe_ts_pmtd_output(upipe, NULL, upump_p);
+    UBASE_FATAL(upipe, uref_flow_set_def(flow_def, "void."))
+    UBASE_FATAL(upipe, uref_ts_flow_set_pcr_pid(flow_def, pmt_get_pcrpid(pmt)))
+    UBASE_FATAL(upipe, uref_ts_flow_add_descriptor(flow_def,
+                descs_get_desc(pmt_get_descs((uint8_t *)pmt), 0),
+                pmt_get_desclength(pmt)))
+    flow_def = upipe_ts_pmtd_store_flow_def_attr(upipe, flow_def);
+    if (unlikely(flow_def == NULL)) {
+        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+        uref_block_unmap(uref, 0);
+        uref_free(uref);
+        return;
     }
+    upipe_ts_pmtd_store_flow_def(upipe, flow_def);
+    /* Force sending flow def */
+    upipe_ts_pmtd_output(upipe, NULL, upump_p);
 
     upipe_ts_pmtd_clean_flows(upipe);
 
-    UPIPE_TS_PMTD_PEEK(upipe, uref, offset, header_desclength, es, desc,
-                       desclength)
+    const uint8_t *es;
+    uint8_t j = 0;
+    while ((es = pmt_get_es((uint8_t *)pmt, j)) != NULL) {
+        j++;
+        upipe_ts_pmtd_build_es(upipe, es);
+    }
 
-    uint16_t pid = pmtn_get_pid(es);
-    uint16_t streamtype = pmtn_get_streamtype(es);
-
-    struct uref *flow_def = uref_dup(upipe_ts_pmtd->flow_def_input);
-    if (likely(flow_def != NULL)) {
-        uref_flow_delete_def(flow_def);
-        upipe_ts_pmtd_parse_streamtype(upipe, flow_def, streamtype);
-        upipe_ts_pmtd_parse_descs(upipe, flow_def, desc, desclength);
-        const char *def;
-        if (ubase_check(uref_flow_get_def(flow_def, &def))) {
-            UBASE_FATAL(upipe, uref_flow_set_id(flow_def, pid))
-            UBASE_FATAL(upipe, uref_ts_flow_set_pid(flow_def, pid))
-
-            ulist_add(&upipe_ts_pmtd->flows, uref_to_uchain(flow_def));
-        } else {
-            upipe_warn_va(upipe, "unhandled stream type %u for PID %u",
-                          streamtype, pid);
-            uref_free(flow_def);
-        }
-    } else
-        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-
-    UPIPE_TS_PMTD_PEEK_UNMAP(upipe, uref, offset, es, desc, desclength)
-
-    UPIPE_TS_PMTD_PEEK_END(upipe, uref, offset)
+    uref_block_unmap(uref, 0);
 
     /* Switch tables. */
-    if (upipe_ts_pmtd->pmt != NULL)
-        uref_free(upipe_ts_pmtd->pmt);
+    uref_free(upipe_ts_pmtd->pmt);
     upipe_ts_pmtd->pmt = uref;
 
     upipe_split_throw_update(upipe);
+}
+
+/** @internal @This receives an ubuf manager.
+ *
+ * @param upipe description structure of the pipe
+ * @param flow_format amended flow format
+ * @return an error code
+ */
+static int upipe_ts_pmtd_check(struct upipe *upipe, struct uref *flow_format)
+{
+    if (flow_format != NULL) {
+        flow_format = upipe_ts_pmtd_store_flow_def_input(upipe, flow_format);
+        if (flow_format != NULL) {
+            upipe_ts_pmtd_store_flow_def(upipe, flow_format);
+            /* Force sending flow def */
+            upipe_ts_pmtd_output(upipe, NULL, NULL);
+        }
+    }
+
+    return UBASE_ERR_NONE;
 }
 
 /** @internal @This sets the input flow definition.
@@ -693,10 +570,7 @@ static int upipe_ts_pmtd_set_flow_def(struct upipe *upipe,
         upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
         return UBASE_ERR_ALLOC;
     }
-    struct upipe_ts_pmtd *upipe_ts_pmtd = upipe_ts_pmtd_from_upipe(upipe);
-    if (upipe_ts_pmtd->flow_def_input != NULL)
-        uref_free(upipe_ts_pmtd->flow_def_input);
-    upipe_ts_pmtd->flow_def_input = flow_def_dup;
+    upipe_ts_pmtd_demand_ubuf_mgr(upipe, flow_def_dup);
     return UBASE_ERR_NONE;
 }
 
@@ -776,12 +650,11 @@ static void upipe_ts_pmtd_free(struct upipe *upipe)
     upipe_throw_dead(upipe);
 
     struct upipe_ts_pmtd *upipe_ts_pmtd = upipe_ts_pmtd_from_upipe(upipe);
-    if (upipe_ts_pmtd->pmt != NULL)
-        uref_free(upipe_ts_pmtd->pmt);
-    if (upipe_ts_pmtd->flow_def_input != NULL)
-        uref_free(upipe_ts_pmtd->flow_def_input);
+    uref_free(upipe_ts_pmtd->pmt);
     upipe_ts_pmtd_clean_flows(upipe);
     upipe_ts_pmtd_clean_output(upipe);
+    upipe_ts_pmtd_clean_ubuf_mgr(upipe);
+    upipe_ts_pmtd_clean_flow_def(upipe);
     upipe_ts_pmtd_clean_urefcount(upipe);
     upipe_ts_pmtd_free_void(upipe);
 }

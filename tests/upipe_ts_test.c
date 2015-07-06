@@ -277,6 +277,7 @@ static int catch_ts_demux(struct uprobe *uprobe, struct upipe *upipe,
                                             UPROBE_LOG_LEVEL,
                                             "ts mux program %"PRIu64, flow_id));
                 assert(program != NULL);
+                ubase_assert(upipe_ts_mux_set_version(program, 1));
                 upipe_release(program);
             }
             return UBASE_ERR_NONE;
@@ -303,6 +304,8 @@ static void usage(const char *argv0) {
 
 int main(int argc, char *argv[])
 {
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
     if (argc != 3)
         usage(argv[0]);
     src_file = argv[1];
@@ -396,6 +399,8 @@ int main(int argc, char *argv[])
     upipe_mgr_release(upipe_mpgaf_mgr);
     upipe_mgr_release(upipe_a52f_mgr);
     upipe_mgr_release(upipe_fsrc_mgr);
+    ubase_assert(upipe_ts_demux_set_conformance(upipe_ts,
+                                                UPIPE_TS_CONFORMANCE_ISO));
 
     /* TS mux */
     struct upipe_mgr *upipe_ts_mux_mgr = upipe_ts_mux_mgr_alloc();
@@ -408,6 +413,7 @@ int main(int argc, char *argv[])
     assert(upipe_ts != NULL);
     upipe_mgr_release(upipe_ts_mux_mgr);
     ubase_assert(upipe_ts_mux_set_mode(upipe_ts, UPIPE_TS_MUX_MODE_CAPPED));
+    ubase_assert(upipe_ts_mux_set_version(upipe_ts, 1));
     ubase_assert(upipe_ts_mux_set_cr_prog(upipe_ts, 0));
 
     /* file sink */
