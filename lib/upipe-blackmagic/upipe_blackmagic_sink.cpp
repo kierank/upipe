@@ -874,6 +874,10 @@ static struct upipe_mgr upipe_bmd_sink_mgr = {
     /* .refcount = */ NULL,
     /* .signature = */ UPIPE_BMD_SINK_SIGNATURE,
 
+    /* .upipe_err_str = */ NULL,
+    /* .upipe_command_str = */ NULL,
+    /* .upipe_event_str = */ NULL,
+
     /* .upipe_alloc = */ upipe_bmd_sink_alloc,
     /* .upipe_input = */ NULL,
     /* .upipe_control = */ upipe_bmd_sink_control,
