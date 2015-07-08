@@ -116,6 +116,7 @@ UPIPE_HELPER_UCLOCK(upipe_audio_merge, uclock, uclock_request, upipe_audio_merge
 
 UPIPE_HELPER_UPUMP_MGR(upipe_audio_merge, upump_mgr);
 UPIPE_HELPER_UPUMP(upipe_audio_merge, upump, upump_mgr);
+UPIPE_HELPER_FLOW(upipe_audio_merge, "sound.")
 
 UBASE_FROM_TO(upipe_audio_merge, urefcount, urefcount_real, urefcount_real)
 
@@ -184,8 +185,18 @@ static struct upipe *upipe_audio_merge_sub_alloc(struct upipe_mgr *mgr,
     return upipe;
 }
 
+static int upipe_audio_merge_sub_get_flow_def(struct upipe *upipe,
+                                              struct uref **p)
+{
+    struct upipe_audio_merge_sub *upipe_audio_merge_sub =
+        upipe_audio_merge_sub_from_upipe(upipe);
+    assert(upipe_audio_merge_sub != NULL);
+    *p = upipe_audio_merge_sub->flow_def;
+    return UBASE_ERR_NONE;
+}
+
 static int upipe_audio_merge_sub_set_flow_def(struct upipe *upipe,
-                                          struct uref *flow_def)
+                                              struct uref *flow_def)
 {
     struct upipe_audio_merge *upipe_audio_merge =
         upipe_audio_merge_from_sub_mgr(upipe->mgr);
@@ -199,7 +210,7 @@ static int upipe_audio_merge_sub_set_flow_def(struct upipe *upipe,
 
     flow_def = uref_dup(flow_def);
     UBASE_ALLOC_RETURN(flow_def)
-    upipe_input(upipe, flow_def, NULL);
+    upipe_audio_merge_sub->flow_def = flow_def;
     return UBASE_ERR_NONE;
 }
 
@@ -215,7 +226,6 @@ static int upipe_audio_merge_sub_control(struct upipe *upipe,
                                          int command, va_list args)
 {
     switch (command) {
-#if 0
         case UPIPE_GET_FLOW_DEF: {
             struct uref **p = va_arg(args, struct uref **);
             return upipe_audio_merge_sub_get_flow_def(upipe, p);
@@ -224,7 +234,12 @@ static int upipe_audio_merge_sub_control(struct upipe *upipe,
             struct uref *flow_def = va_arg(args, struct uref *);
             return upipe_audio_merge_sub_set_flow_def(upipe, flow_def);
         }
-#endif
+        case UPIPE_REGISTER_REQUEST: {
+            struct urequest *request = va_arg(args, struct urequest *);
+            return upipe_throw_provide_request(upipe, request);
+        }
+        case UPIPE_UNREGISTER_REQUEST:
+            return UBASE_ERR_NONE;
         case UPIPE_SUB_GET_SUPER: {
             struct upipe **p = va_arg(args, struct upipe **);
             return upipe_audio_merge_sub_get_super(upipe, p);
@@ -244,10 +259,14 @@ static int upipe_audio_merge_sub_control(struct upipe *upipe,
 static bool upipe_audio_merge_sub_output(struct upipe *upipe, struct uref *uref,
                                          struct upump **upump_p)
 {
-    struct upipe_audio_merge *upipe_audio_merge =
-                              upipe_audio_merge_from_upipe(upipe);
+  struct upipe_audio_merge *upipe_audio_merge =
+        upipe_audio_merge_from_sub_mgr(upipe->mgr);
+    struct upipe_audio_merge_sub *upipe_audio_merge_sub =
+                              upipe_audio_merge_sub_from_upipe(upipe);
     struct uchain *uchain;
-    if (unlikely(!upipe_audio_merge->flow_def)) {
+    const char *def;
+
+    if (unlikely(!upipe_audio_merge_sub->flow_def)) {
         upipe_warn(upipe, "received uref before flow definition, droppping");
         uref_free(uref);
         return false;
@@ -265,7 +284,7 @@ static bool upipe_audio_merge_sub_output(struct upipe *upipe, struct uref *uref,
  * @param upump_p reference to upump structure
  */
 static void upipe_audio_merge_sub_input(struct upipe *upipe, struct uref *uref,
-                                      struct upump **upump_p)
+                                        struct upump **upump_p)
 {
     struct upipe_audio_merge *upipe_audio_merge =
         upipe_audio_merge_from_sub_mgr(upipe->mgr);
@@ -306,6 +325,36 @@ static void upipe_audio_merge_init_sub_mgr(struct upipe *upipe)
     sub_mgr->upipe_mgr_control = NULL;
 }
 
+/** @internal @This changes the flow definition on all outputs.
+ *
+ * @param upipe description structure of the pipe
+ * @param flow_def new flow definition
+ * @return an error code
+ */
+static int upipe_audio_merge_set_flow_def(struct upipe *upipe,
+                                          struct uref *flow_def)
+{
+    if (flow_def == NULL)
+        return UBASE_ERR_INVALID;
+    UBASE_RETURN(uref_flow_match_def(flow_def, "sound."))
+//    UBASE_RETURN(uref_sound_flow_match_planes(flow_def, 2, 32))
+    struct uref *flow_def_audio_merge;
+
+    if ((flow_def_audio_merge = uref_dup(flow_def)) == NULL) {
+        return UBASE_ERR_ALLOC;
+    }
+
+    struct upipe_audio_merge *upipe_audio_merge =
+                              upipe_audio_merge_from_upipe(upipe);
+    if (upipe_audio_merge->flow_def != NULL)
+        uref_free(upipe_audio_merge->flow_def);
+    upipe_audio_merge->flow_def = flow_def_audio_merge;
+
+    upipe_audio_merge_require_ubuf_mgr(upipe, flow_def_audio_merge);
+
+    return UBASE_ERR_NONE;
+}
+
 /** @internal @This allocates an audio_merge pipe.
  *
  * @param mgr common management structure
@@ -318,8 +367,9 @@ static struct upipe *upipe_audio_merge_alloc(struct upipe_mgr *mgr,
                                              struct uprobe *uprobe,
                                              uint32_t signature, va_list args)
 {
-    struct upipe *upipe = upipe_audio_merge_alloc_void(mgr,
-                                    uprobe, signature, args);
+    struct uref *flow_def;
+    struct upipe *upipe = upipe_audio_merge_alloc_flow(mgr,
+                            uprobe, signature, args, &flow_def);
     if (unlikely(upipe == NULL))
         return NULL;
 
@@ -337,7 +387,8 @@ static struct upipe *upipe_audio_merge_alloc(struct upipe_mgr *mgr,
     upipe_audio_merge_init_sub_mgr(upipe);
     upipe_audio_merge_init_sub_inputs(upipe);
 
-    upipe_audio_merge->flow_def = NULL;
+    upipe_audio_merge_set_flow_def(upipe, flow_def);
+    upipe_audio_merge->flow_def = flow_def;
     upipe_throw_ready(upipe);
     return upipe;
 }
@@ -358,34 +409,6 @@ static int upipe_audio_merge_check(struct upipe *upipe, struct uref *flow_format
         return UBASE_ERR_NONE;
 
     // FIXME this is broke
-
-    return UBASE_ERR_NONE;
-}
-
-/** @internal @This changes the flow definition on all outputs.
- *
- * @param upipe description structure of the pipe
- * @param flow_def new flow definition
- * @return an error code
- */
-static int upipe_audio_merge_set_flow_def(struct upipe *upipe,
-                                          struct uref *flow_def)
-{
-    if (flow_def == NULL)
-        return UBASE_ERR_INVALID;
-    UBASE_RETURN(uref_flow_match_def(flow_def, "sound."))
-    UBASE_RETURN(uref_sound_flow_match_planes(flow_def, 2, 32))
-    struct uref *flow_def_audio_merge;
-
-    if ((flow_def_audio_merge = uref_dup(flow_def)) == NULL) {
-        return UBASE_ERR_ALLOC;
-    }
-
-    struct upipe_audio_merge *upipe_audio_merge =
-                              upipe_audio_merge_from_upipe(upipe);
-    if (upipe_audio_merge->flow_def != NULL)
-        uref_free(upipe_audio_merge->flow_def);
-    upipe_audio_merge->flow_def = flow_def_audio_merge;
 
     return UBASE_ERR_NONE;
 }
