@@ -26,6 +26,7 @@
 #include <upipe/ulist.h>
 #include <upipe/uprobe.h>
 #include <upipe/uref.h>
+#include <upipe/uref_dump.h>
 #include <upipe/ubuf.h>
 #include <upipe/upipe.h>
 #include <upipe/uclock.h>
@@ -38,10 +39,14 @@
 #include <upipe/upipe_helper_input.h>
 #include <upipe/upipe_helper_output.h>
 #include <upipe/upipe_helper_subpipe.h>
-#include <upipe/upipe_helper_ubuf_mgr.h>
 #include <upipe/upipe_helper_uclock.h>
 #include <upipe/upipe_helper_upump_mgr.h>
 #include <upipe/upipe_helper_upump.h>
+#include <upipe/umem.h>
+#include <upipe/umem_alloc.h>
+#include <upipe/ubuf.h>
+#include <upipe/ubuf_sound.h>
+#include <upipe/ubuf_sound_mem.h>
 #include <upipe-modules/upipe_audio_merge.h>
 
 #include <stdlib.h>
@@ -49,6 +54,8 @@
 #include <stdarg.h>
 #include <string.h>
 #include <assert.h>
+
+#define UBUF_POOL_DEPTH 2
 
 /** @hidden */
 static bool upipe_audio_merge_sub_output(struct upipe *upipe, struct uref *uref,
@@ -64,12 +71,10 @@ struct upipe_audio_merge {
     /** refcount management structure exported to the public structure */
     struct urefcount urefcount;
 
+    /** umem manager */
+    struct umem_mgr *umem_mgr;
     /** ubuf manager */
     struct ubuf_mgr *ubuf_mgr;
-    /** flow format packet */
-    struct uref *flow_format;
-    /** ubuf manager request */
-    struct urequest ubuf_mgr_request;
 
     /** uclock structure, if not NULL we are in live mode */
     struct uclock *uclock;
@@ -96,6 +101,9 @@ struct upipe_audio_merge {
     /** watcher */
     struct upump *upump;
 
+    /** lowest pts */
+    uint64_t lowest_pts;
+
     /** public upipe structure */
     struct upipe upipe;
 };
@@ -104,11 +112,6 @@ UPIPE_HELPER_UPIPE(upipe_audio_merge, upipe, UPIPE_AUDIO_MERGE_SIGNATURE)
 UPIPE_HELPER_UREFCOUNT(upipe_audio_merge, urefcount, upipe_audio_merge_no_input)
 UPIPE_HELPER_VOID(upipe_audio_merge)
 UPIPE_HELPER_OUTPUT(upipe_audio_merge, output, flow_def, output_state, request_list)
-
-UPIPE_HELPER_UBUF_MGR(upipe_audio_merge, ubuf_mgr, flow_format, ubuf_mgr_request,
-                      upipe_audio_merge_check,
-                      upipe_audio_merge_register_output_request,
-                      upipe_audio_merge_unregister_output_request)
 
 UPIPE_HELPER_UCLOCK(upipe_audio_merge, uclock, uclock_request, upipe_audio_merge_check,
                     upipe_audio_merge_register_output_request,
@@ -143,6 +146,9 @@ struct upipe_audio_merge_sub {
     /** list of blockers */
     struct uchain blockers;
 
+    /** uref queue */
+    struct uchain uref_queue;
+
     /** public upipe structure */
     struct upipe upipe;
 };
@@ -156,34 +162,6 @@ UPIPE_HELPER_FLOW(upipe_audio_merge_sub, "sound.")
 
 UPIPE_HELPER_SUBPIPE(upipe_audio_merge, upipe_audio_merge_sub, input,
                      sub_mgr, inputs, uchain)
-
-/** @internal @This allocates an output subpipe of an audio_merge pipe.
- *
- * @param mgr common management structure
- * @param uprobe structure used to raise events
- * @param signature signature of the pipe allocator
- * @param args optional arguments
- * @return pointer to upipe or NULL in case of allocation error
- */
-static struct upipe *upipe_audio_merge_sub_alloc(struct upipe_mgr *mgr,
-                                                 struct uprobe *uprobe,
-                                                 uint32_t signature, va_list args)
-{
-    struct uref *flow_def;
-    struct upipe *upipe = upipe_audio_merge_sub_alloc_flow(mgr,
-                            uprobe, signature, args, &flow_def);
-    if (unlikely(upipe == NULL)) {
-        return NULL;
-    }
-
-    struct upipe_audio_merge_sub *upipe_audio_merge_sub =
-                            upipe_audio_merge_sub_from_upipe(upipe);
-    upipe_audio_merge_sub_init_urefcount(upipe);
-    upipe_audio_merge_sub_init_input(upipe);
-    upipe_audio_merge_sub_init_sub(upipe);
-    upipe_throw_ready(upipe);
-    return upipe;
-}
 
 static int upipe_audio_merge_sub_get_flow_def(struct upipe *upipe,
                                               struct uref **p)
@@ -211,7 +189,43 @@ static int upipe_audio_merge_sub_set_flow_def(struct upipe *upipe,
     flow_def = uref_dup(flow_def);
     UBASE_ALLOC_RETURN(flow_def)
     upipe_audio_merge_sub->flow_def = flow_def;
+    uref_dump(flow_def, upipe->uprobe);
     return UBASE_ERR_NONE;
+}
+
+/** @internal @This allocates an output subpipe of an audio_merge pipe.
+ *
+ * @param mgr common management structure
+ * @param uprobe structure used to raise events
+ * @param signature signature of the pipe allocator
+ * @param args optional arguments
+ * @return pointer to upipe or NULL in case of allocation error
+ */
+static struct upipe *upipe_audio_merge_sub_alloc(struct upipe_mgr *mgr,
+                                                 struct uprobe *uprobe,
+                                                 uint32_t signature, va_list args)
+{
+    struct uref *flow_def;
+    struct upipe *upipe = upipe_audio_merge_sub_alloc_flow(mgr,
+                            uprobe, signature, args, &flow_def);
+    if (unlikely(upipe == NULL)) {
+        return NULL;
+    }
+
+    uref_dump(flow_def, upipe->uprobe);
+
+    struct upipe_audio_merge_sub *upipe_audio_merge_sub =
+                            upipe_audio_merge_sub_from_upipe(upipe);
+
+    upipe_audio_merge_sub_set_flow_def(upipe, flow_def);
+
+    ulist_init(&upipe_audio_merge_sub->uref_queue);
+
+    upipe_audio_merge_sub_init_urefcount(upipe);
+    upipe_audio_merge_sub_init_input(upipe);
+    upipe_audio_merge_sub_init_sub(upipe);
+    upipe_throw_ready(upipe);
+    return upipe;
 }
 
 /** @internal @This processes control commands on an input subpipe of an
@@ -263,16 +277,17 @@ static bool upipe_audio_merge_sub_output(struct upipe *upipe, struct uref *uref,
         upipe_audio_merge_from_sub_mgr(upipe->mgr);
     struct upipe_audio_merge_sub *upipe_audio_merge_sub =
                               upipe_audio_merge_sub_from_upipe(upipe);
-    struct uchain *uchain;
-    const char *def;
-
     if (unlikely(!upipe_audio_merge_sub->flow_def)) {
         upipe_warn(upipe, "received uref before flow definition, droppping");
         uref_free(uref);
         return false;
     }
 
-    // buffer frames and start timer if encessary
+    ulist_add(&upipe_audio_merge_sub->uref_queue, uref_to_uchain(uref));
+
+    uint8_t channel_idx;
+    uref_audio_merge_get_channel_index(upipe_audio_merge_sub->flow_def, &channel_idx);
+    printf("\n %i %u \n", ulist_depth(&upipe_audio_merge_sub->uref_queue), channel_idx);
 
     return true;
 }
@@ -300,6 +315,9 @@ static void upipe_audio_merge_sub_free(struct upipe *upipe)
 {
     struct upipe_audio_merge_sub *upipe_audio_merge_sub =
                               upipe_audio_merge_sub_from_upipe(upipe);
+
+    // FIXME clear ulist
+
     upipe_throw_dead(upipe);
 
     upipe_audio_merge_sub_clean_input(upipe);
@@ -337,7 +355,7 @@ static int upipe_audio_merge_set_flow_def(struct upipe *upipe,
     if (flow_def == NULL)
         return UBASE_ERR_INVALID;
     UBASE_RETURN(uref_flow_match_def(flow_def, "sound."))
-//    UBASE_RETURN(uref_sound_flow_match_planes(flow_def, 2, 32))
+    UBASE_RETURN(uref_sound_flow_match_planes(flow_def, 2, 32))
     struct uref *flow_def_audio_merge;
 
     if ((flow_def_audio_merge = uref_dup(flow_def)) == NULL) {
@@ -350,9 +368,82 @@ static int upipe_audio_merge_set_flow_def(struct upipe *upipe,
         uref_free(upipe_audio_merge->flow_def);
     upipe_audio_merge->flow_def = flow_def_audio_merge;
 
-    upipe_audio_merge_require_ubuf_mgr(upipe, flow_def_audio_merge);
-
     return UBASE_ERR_NONE;
+}
+
+static void upipe_audio_merge_cb(struct upump *upump)
+{
+    struct upipe *upipe = upump_get_opaque(upump, struct upipe *);
+    struct upipe_audio_merge *upipe_audio_merge = upipe_audio_merge_from_upipe(upipe);
+    uint64_t now = uclock_now(upipe_audio_merge->uclock);
+    struct uchain *uchain, *uchain2, *uchain_tmp;
+    struct uref *uref, *output_uref = NULL;
+    uint64_t pts_sys, lowest_pts_sys = UINT64_MAX;
+    int found = 0;
+    uint64_t samples = 0;
+    struct ubuf *ubuf;
+    uint32_t *data;
+
+    /* interate through input subpipes */
+    ulist_foreach (&upipe_audio_merge->inputs, uchain) {
+        struct upipe_audio_merge_sub *upipe_audio_merge_sub =
+            upipe_audio_merge_sub_from_uchain(uchain);
+
+        ulist_delete_foreach(&upipe_audio_merge_sub->uref_queue, uchain2, uchain_tmp) {
+            uref = uref_from_uchain(uchain2);
+            uref_clock_get_pts_sys(uref, &pts_sys);
+            if (pts_sys + 2700000 <= now) {
+                printf("\n late uref deleted \n");
+                ulist_delete(uchain2);
+            }
+            else if (pts_sys <= now) {
+                found = 1;
+                uref_sound_flow_get_samples(uref, &samples);
+                if (pts_sys < lowest_pts_sys )
+                    lowest_pts_sys = pts_sys;
+                break;
+            }
+            else {
+                break;
+            }
+        }
+    }
+
+    if (found) {
+        printf("\n HERE %"PRIu64" \n", lowest_pts_sys );
+        ubuf = ubuf_sound_alloc(upipe_audio_merge->ubuf_mgr, samples);
+        printf("\n ubufmgr %x \n", ubuf);
+        ubuf_sound_write_int32_t(ubuf, 0, -1, &data, 1);
+
+        ulist_foreach (&upipe_audio_merge->inputs, uchain) {
+            struct upipe_audio_merge_sub *upipe_audio_merge_sub =
+                upipe_audio_merge_sub_from_uchain(uchain);
+
+            ulist_delete_foreach(&upipe_audio_merge_sub->uref_queue, uchain2, uchain_tmp) {
+                uref = uref_from_uchain(uchain2);
+                uref_clock_get_pts_sys(uref, &pts_sys);
+                if( pts_sys == lowest_pts_sys || pts_sys - 100 < lowest_pts_sys ||
+                    pts_sys + 100 > lowest_pts_sys ) {
+                    if (!output_uref)
+                        output_uref = uref_dup(uref);
+
+                    uint8_t channel_idx;
+                    uref_audio_merge_get_channel_index(upipe_audio_merge_sub->flow_def, &channel_idx);
+
+                    // memcpy in
+                    // free uref
+                    uref_free(uref);
+                    ulist_delete(uchain2);
+                }
+            }
+        }
+
+        ubuf_sound_unmap(ubuf, 0, -1, 1);
+        uref_sound_flow_set_samples(output_uref, samples);
+
+        uref_attach_ubuf(output_uref, ubuf);
+        upipe_audio_merge_output(upipe, output_uref, &upump);
+    }
 }
 
 /** @internal @This allocates an audio_merge pipe.
@@ -372,6 +463,7 @@ static struct upipe *upipe_audio_merge_alloc(struct upipe_mgr *mgr,
                             uprobe, signature, args, &flow_def);
     if (unlikely(upipe == NULL))
         return NULL;
+    uint8_t channels = 0;
 
     struct upipe_audio_merge *upipe_audio_merge =
                               upipe_audio_merge_from_upipe(upipe);
@@ -381,13 +473,28 @@ static struct upipe *upipe_audio_merge_alloc(struct upipe_mgr *mgr,
 
     upipe_audio_merge_init_upump_mgr(upipe);
     upipe_audio_merge_init_upump(upipe);
-    upipe_audio_merge_init_ubuf_mgr(upipe);
     upipe_audio_merge_init_uclock(upipe);
     upipe_audio_merge_init_output(upipe);
     upipe_audio_merge_init_sub_mgr(upipe);
     upipe_audio_merge_init_sub_inputs(upipe);
 
+    // FIXME check this
     upipe_audio_merge_set_flow_def(upipe, flow_def);
+    uref_sound_flow_get_channels(flow_def, &channels);
+
+    upipe_audio_merge->umem_mgr = umem_alloc_mgr_alloc();
+    upipe_audio_merge->ubuf_mgr = ubuf_sound_mem_mgr_alloc(UBUF_POOL_DEPTH,
+                                  UBUF_POOL_DEPTH, upipe_audio_merge->umem_mgr,
+                                  4*16, 32);
+
+    upipe_audio_merge_check_upump_mgr(upipe);
+
+    struct upump *upump = upump_alloc_timer(upipe_audio_merge->upump_mgr,
+                                            upipe_audio_merge_cb, upipe,
+                                            27000000/150, 27000000/150);
+
+    upump_start(upump);
+
     upipe_audio_merge->flow_def = flow_def;
     upipe_throw_ready(upipe);
     return upipe;
@@ -476,12 +583,12 @@ static void upipe_audio_merge_free(struct urefcount *urefcount_real)
     struct upipe_audio_merge *upipe_audio_merge =
            upipe_audio_merge_from_urefcount_real(urefcount_real);
     struct upipe *upipe = upipe_audio_merge_to_upipe(upipe_audio_merge);
+
     upipe_throw_dead(upipe);
     upipe_audio_merge_clean_uclock(upipe);
     upipe_audio_merge_clean_upump(upipe);
     upipe_audio_merge_clean_upump_mgr(upipe);
     upipe_audio_merge_clean_output(upipe);
-    upipe_audio_merge_clean_ubuf_mgr(upipe);
     upipe_audio_merge_clean_sub_inputs(upipe);
     if (upipe_audio_merge->flow_def != NULL)
         uref_free(upipe_audio_merge->flow_def);

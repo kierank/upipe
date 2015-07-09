@@ -35,7 +35,7 @@ extern "C" {
 #define UPIPE_AUDIO_MERGE_SIGNATURE UBASE_FOURCC('a','m','g','l')
 #define UPIPE_AUDIO_MERGE_INPUT_SIGNATURE UBASE_FOURCC('a','m','g','i')
 
-UREF_ATTR_SMALL_UNSIGNED(audio_merge, orig_index, "audio_merge.", )
+UREF_ATTR_SMALL_UNSIGNED(audio_merge, channel_index, "audio_merge.channel_index", channel index to use)
 
 /** @This returns the management structure for all audio_merge pipes.
  *
