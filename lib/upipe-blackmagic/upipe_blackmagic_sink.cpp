@@ -340,7 +340,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
                           (now - pts) * 1000 / UCLOCK_FREQ);
             uref_free(uref);
             return true;
-        }   
+        }
     }
 
     if (upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe) {
@@ -419,12 +419,12 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
  * @param uref uref structure
  * @param upump_p reference to upump structure
  */
-static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref, 
+static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
                                       struct upump **upump_p)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
         upipe_bmd_sink_from_sub_mgr(upipe->mgr);
-    
+
     if (!upipe_bmd_sink->deckLink) {
         upipe_err_va(upipe, "DeckLink card not ready");
         return;
@@ -584,7 +584,7 @@ static uint64_t uclock_bmd_sink_now(struct uclock *uclock)
 {
     struct uclock_bmd_sink *uclock_bmd_sink = uclock_bmd_sink_from_uclock(uclock);
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_uclock_bmd_sink(uclock_bmd_sink);
-    
+
     BMDTimeValue hardware_time, time_in_frame, ticks_per_frame;
 
     if (upipe_bmd_sink->deckLinkOutput) {
