@@ -47,7 +47,8 @@ libupipe_modules_la_SOURCES = \
 	upipe_rtp_h264.c \
 	upipe_rtp_mpeg4.c \
 	upipe_dump.c \
-	upipe_ntsc_prepend.c
+	upipe_ntsc_prepend.c \
+	upipe_audio_merge.c
 
 if HAVE_WRITEV
 libupipe_modules_la_SOURCES += \

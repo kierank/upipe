@@ -46,4 +46,5 @@ myinclude_HEADERS = \
 	upipe_sine_wave_source.h \
 	upipe_stream_switcher.h \
 	upipe_dump.h \
-	upipe_ntsc_prepend.h
+	upipe_ntsc_prepend.h \
+	upipe_audio_merge.h
