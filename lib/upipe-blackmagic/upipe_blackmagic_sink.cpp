@@ -729,7 +729,7 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
         goto end;
     }
 
-    result = deckLinkOutput->EnableAudioOutput(48000, bmdAudioSampleType32bitInteger, 2, bmdAudioOutputStreamTimestamped);
+    result = deckLinkOutput->EnableAudioOutput(48000, bmdAudioSampleType32bitInteger, 16, bmdAudioOutputStreamTimestamped);
     if (result != S_OK)
     {
         fprintf(stderr, "Failed to enable audio output. Is another application using the card?\n");
