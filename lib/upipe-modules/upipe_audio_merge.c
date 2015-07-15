@@ -159,6 +159,9 @@ struct upipe_audio_merge_sub {
     /** uref queue */
     struct uchain uref_queue;
 
+    /** latency **/
+    uint64_t latency;
+
     /** public upipe structure */
     struct upipe upipe;
 };
