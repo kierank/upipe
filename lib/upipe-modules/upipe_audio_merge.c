@@ -293,11 +293,16 @@ static bool upipe_audio_merge_sub_output(struct upipe *upipe, struct uref *uref,
         return false;
     }
 
-    ulist_add(&upipe_audio_merge_sub->uref_queue, uref_to_uchain(uref));
+    const char *def;
+    if (unlikely(ubase_check(uref_flow_get_def(uref, &def)))) {
+        upipe_audio_merge_sub->latency = 0;
+        uref_clock_get_latency(uref, &upipe_audio_merge_sub->latency);
 
-    uint8_t channel_idx;
-    uref_audio_merge_get_channel_index(upipe_audio_merge_sub->flow_def, &channel_idx);
-    printf("\n %i %u \n", ulist_depth(&upipe_audio_merge_sub->uref_queue), channel_idx);
+        uref_free(uref);
+        return true;
+    }
+
+    ulist_add(&upipe_audio_merge_sub->uref_queue, uref_to_uchain(uref));
 
     return true;
 }
