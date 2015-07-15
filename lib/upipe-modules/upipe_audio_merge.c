@@ -436,9 +436,9 @@ static void upipe_audio_merge_cb(struct upump *upump)
 
             ulist_delete_foreach(&upipe_audio_merge_sub->uref_queue, uchain2, uchain_tmp) {
                 uref = uref_from_uchain(uchain2);
+                pts_sys = 0;
                 uref_clock_get_pts_sys(uref, &pts_sys);
-                if( pts_sys == lowest_pts_sys || pts_sys - 100 < lowest_pts_sys ||
-                    pts_sys + 100 > lowest_pts_sys ) {
+                if( pts_sys == lowest_pts_sys || lowest_pts_sys + 100 > pts_sys ) {
                     uref_sound_read_int32_t(uref, 0, -1, &in_data, 1);
 
                     uint8_t channel_idx = 0;
