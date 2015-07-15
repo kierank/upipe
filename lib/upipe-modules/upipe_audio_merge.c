@@ -202,7 +202,6 @@ static int upipe_audio_merge_sub_set_flow_def(struct upipe *upipe,
     flow_def = uref_dup(flow_def);
     UBASE_ALLOC_RETURN(flow_def)
     upipe_audio_merge_sub->flow_def = flow_def;
-    uref_dump(flow_def, upipe->uprobe);
     return UBASE_ERR_NONE;
 }
 
