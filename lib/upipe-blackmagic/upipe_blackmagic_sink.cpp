@@ -71,7 +71,8 @@
 #include "include/DeckLinkAPI.h"
 #include "include/DeckLinkAPIDispatch.cpp"
 
-/* FIXME: handle other pixel formats, Ancillary data etc*/
+#define CC_LINE 9
+
 class upipe_bmd_sink_frame : public IDeckLinkVideoFrame
 {
 public:
@@ -118,7 +119,13 @@ public:
     }
 
     virtual HRESULT STDMETHODCALLTYPE GetAncillaryData(IDeckLinkVideoFrameAncillary **ancillary) {
-        return S_FALSE;
+        *ancillary = frame_anc;
+        return S_OK;
+    }
+
+    virtual HRESULT STDMETHODCALLTYPE SetAncillaryData(IDeckLinkVideoFrameAncillary *ancillary) {
+        frame_anc = ancillary;
+        return S_OK;
     }
 
     virtual ULONG STDMETHODCALLTYPE AddRef(void) {
@@ -143,6 +150,7 @@ private:
     long height;
 
     uatomic_uint32_t refcount;
+    IDeckLinkVideoFrameAncillary *frame_anc;
 };
 
 /** @hidden */
@@ -219,6 +227,13 @@ struct upipe_bmd_sink {
     /** started flag **/
     int started;
 
+    /** vanc temporary buffer **/
+    uint16_t vanc_tmp[1920*2];
+    uint16_t *dc;
+
+    /** closed captioning **/
+    uint16_t cdp_hdr_sequence_cntr;
+
     /** handle to decklink card */
     IDeckLink *deckLink;
     /** handle to decklink card output */
@@ -250,6 +265,128 @@ UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, subpic_subpipe, subpic_subpipe
 
 UBASE_FROM_TO(upipe_bmd_sink, uclock_bmd_sink, uclock_bmd_sink, uclock)
 
+static const bool parity_tab[256] =
+{
+#   define P2(n) n, n^1, n^1, n
+#   define P4(n) P2(n), P2(n^1), P2(n^1), P2(n)
+#   define P6(n) P4(n), P4(n^1), P4(n^1), P4(n)
+    P6(0), P6(1), P6(1), P6(0)
+};
+
+#define ANC_START_LEN   6
+#define CDP_HEADER_SIZE 7
+
+/* XXX: put this somewhere */
+static void upipe_bmd_sink_start_anc(struct upipe *upipe, uint16_t *buf,
+                                     uint16_t did, uint16_t sdid)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink =
+        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+
+    /* reset variables */
+    upipe_bmd_sink->dc = 0;
+
+    /* ADF */
+    buf[0] = 0x000;
+    buf[1] = 0x3ff;
+    buf[2] = 0x3ff;
+    /* DID */
+    buf[3] = did;
+    /* SDID */
+    buf[4] = sdid;
+    /* DC */
+    buf[5] = 0;
+    upipe_bmd_sink->dc = &buf[5];
+}
+
+static void upipe_bmd_sink_write_cdp_header(struct upipe *upipe, uint16_t *dst)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink =
+        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+
+    /** XXX: Support crazy 25fps captions? **/
+    uint8_t fps = !strcmp(upipe_bmd_sink->mode, "ntsc") ||
+                  !strcmp(upipe_bmd_sink->mode, "Hi59") ? 0x4 : 0x7;
+
+    dst[0] = 0x96;
+    dst[1] = 0x69;
+    dst[2] = 0; // cdp_length
+    dst[3] = (fps << 4) | 0xf; // cdp_frame_rate | Reserved
+    dst[4] = (1 << 8) | (1 << 1) | 1; // ccdata_present | caption_service_active | Reserved
+    dst[5] = upipe_bmd_sink->cdp_hdr_sequence_cntr >> 8;
+    dst[6] = upipe_bmd_sink->cdp_hdr_sequence_cntr & 0xff;
+
+    upipe_bmd_sink->cdp_hdr_sequence_cntr++;
+
+    (*upipe_bmd_sink->dc) += CDP_HEADER_SIZE;
+}
+
+static void upipe_bmd_sink_write_ccdata_section(struct upipe *upipe, uint16_t *dst,
+                                                uint8_t *src, size_t src_size)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink =
+        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+    size_t i;
+
+    dst[0] = 0x72;
+    dst[1] = (0x7 << 5) | (src_size / 3);
+    dst += 2;;
+
+    for (i = 0; i < src_size; i++)
+        dst[i] = src[i];
+
+    (*upipe_bmd_sink->dc) += src_size+2;
+}
+
+static void upipe_bmd_sink_write_cdp_footer(struct upipe *upipe, uint16_t *dst)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink =
+        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+    uint8_t checksum = 0, cnt = 0;
+    int i;
+
+    dst[0] = 0x74;
+    dst[1] = upipe_bmd_sink->cdp_hdr_sequence_cntr >> 8;
+    dst[2] = upipe_bmd_sink->cdp_hdr_sequence_cntr & 0xff;
+
+    (*upipe_bmd_sink->dc) += 4;
+    cnt = *upipe_bmd_sink->dc - 1; // don't include checksum
+    for( i = 0; i < cnt; i++ )
+        checksum += upipe_bmd_sink->vanc_tmp[ANC_START_LEN+i];
+
+    dst[3] = checksum;
+}
+
+static void upipe_bmd_sink_write_cdp(struct upipe *upipe, uint8_t *src,
+                                     size_t src_size, uint16_t *dst)
+{
+    upipe_bmd_sink_write_cdp_header(upipe, dst);
+    upipe_bmd_sink_write_ccdata_section(upipe, &dst[CDP_HEADER_SIZE], src, src_size);
+    upipe_bmd_sink_write_cdp_footer(upipe, &dst[CDP_HEADER_SIZE+src_size+1]);
+}
+
+static void upipe_bmd_sink_calc_parity_checksum(struct upipe *upipe)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink =
+        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+    uint16_t i, dc = *upipe_bmd_sink->dc;
+    uint16_t checksum = 0;
+
+    /* +3 = did + sdid + dc itself */
+    for( i = 0; i < dc+3; i++ )
+    {
+        uint8_t parity = parity_tab[upipe_bmd_sink->vanc_tmp[3+i] & 0xff];
+        upipe_bmd_sink->vanc_tmp[3+i] |= (!parity << 9) | (parity << 8);
+
+        if( i >= 3 )
+            checksum += upipe_bmd_sink->vanc_tmp[3+i] & 0x1ff;
+    }
+
+    checksum &= 0x1ff;
+    checksum |= (!(checksum >> 8)) << 9;
+
+    upipe_bmd_sink->vanc_tmp[ANC_START_LEN+dc] = checksum;
+}
 
 /** @internal @This initializes an subpipe of a bmd sink pipe.
  *
@@ -312,6 +449,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         upipe_bmd_sink_sub_from_upipe(upipe);
 
     HRESULT result;
+    IDeckLinkVideoFrameAncillary *ancillary = NULL;
 
     const char *def;
     if (unlikely(ubase_check(uref_flow_get_def(uref, &def)))) {
@@ -374,12 +512,30 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         BMDTimeScale timeScale;
         upipe_bmd_sink->displayMode->GetFrameRate(&timeValue, &timeScale);
 
+        upipe_bmd_sink->deckLinkOutput->CreateAncillaryData(video_frame->GetPixelFormat(), &ancillary);
+
+        if( 0 )
+        {
+#if 0
+            // memset
+            // if sd do uyvy
+
+            upipe_bmd_sink_start_anc(upipe, upipe_bmd_sink->vanc_tmp, 0x61, 0x101);
+            upipe_bmd_sink_write_cdp(upipe, src, src_size, upipe_bmd_sink->vanc_tmp);
+            upipe_bmd_sink_calc_parity_checksum(upipe);
+            // encode to v210
+#endif
+        }
+
         if( pts > 0 )
         {
             result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
             if( result != S_OK )
                 upipe_err_va(upipe, "DROPPED FRAME %x", result);
         }
+
+        if (ancillary)
+            ancillary->Release();
 
         video_frame->Release();
     }
