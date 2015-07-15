@@ -433,10 +433,6 @@ static void upipe_audio_merge_cb(struct upump *upump)
         ubuf = ubuf_sound_alloc(upipe_audio_merge->ubuf_mgr, samples);
         int ret = ubuf_sound_write_int32_t(ubuf, 0, -1, &out_data, 1);
 
-        size_t size;
-        uint8_t sample_size;
-        ubuf_sound_size(ubuf, &size, &sample_size);
-
         ulist_foreach (&upipe_audio_merge->inputs, uchain) {
             struct upipe_audio_merge_sub *upipe_audio_merge_sub =
                 upipe_audio_merge_sub_from_uchain(uchain);
