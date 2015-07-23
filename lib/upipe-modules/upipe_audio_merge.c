@@ -459,8 +459,8 @@ static void upipe_audio_merge_cb(struct upump *upump)
                     }
                     uref_sound_unmap(uref, 0, -1, 1);
 
-                    uref_free(uref);
                     ulist_delete(uchain2);
+                    uref_free(uref);
                 }
             }
         }
