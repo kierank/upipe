@@ -333,7 +333,14 @@ static void upipe_audio_merge_sub_free(struct upipe *upipe)
     struct upipe_audio_merge_sub *upipe_audio_merge_sub =
                               upipe_audio_merge_sub_from_upipe(upipe);
 
-    // FIXME clear ulist
+    struct uchain *uchain2, *uchain_tmp;
+    struct uref *uref;
+
+    ulist_delete_foreach(&upipe_audio_merge_sub->uref_queue, uchain2, uchain_tmp) {
+        uref = uref_from_uchain(uchain2);
+        uref_free(uref);
+        ulist_delete(uchain2);
+    }
 
     upipe_throw_dead(upipe);
 
