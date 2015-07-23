@@ -508,7 +508,6 @@ static struct upipe *upipe_audio_merge_alloc(struct upipe_mgr *mgr,
                                   UBUF_POOL_DEPTH, upipe_audio_merge->umem_mgr,
                                   sizeof(int32_t)*channels, 32);
     ubuf_sound_mem_mgr_add_plane(upipe_audio_merge->ubuf_mgr, "sdi16");
-    printf("\n channels %i \n", channels );
 
     upipe_audio_merge_check_upump_mgr(upipe);
 
