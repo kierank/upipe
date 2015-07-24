@@ -338,8 +338,8 @@ static void upipe_audio_merge_sub_free(struct upipe *upipe)
 
     ulist_delete_foreach(&upipe_audio_merge_sub->uref_queue, uchain2, uchain_tmp) {
         uref = uref_from_uchain(uchain2);
-        uref_free(uref);
         ulist_delete(uchain2);
+        uref_free(uref);
     }
 
     upipe_throw_dead(upipe);
