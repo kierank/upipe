@@ -195,7 +195,17 @@ static int _upipe_zvbienc_set_pic_fmt(struct upipe *upipe, int pic_fmt)
 #endif
     }
     else if (pic_fmt == 1) {
-
+        upipe_zvbienc->sp.scanning         = 525; /* NTSC */
+        upipe_zvbienc->sp.sampling_format  = VBI_PIXFMT_YUV420;
+        upipe_zvbienc->sp.sampling_rate    = 13.5e6;
+        upipe_zvbienc->sp.bytes_per_line   = 720;
+        upipe_zvbienc->sp.offset       = 122;
+        upipe_zvbienc->sp.start[0]     = 21;
+        upipe_zvbienc->sp.count[0]     = 1;
+        upipe_zvbienc->sp.start[1]     = 284;
+        upipe_zvbienc->sp.count[1]     = 1;
+        upipe_zvbienc->sp.interlaced   = TRUE;
+        upipe_zvbienc->sp.synchronous  = TRUE;
     }
 
     return UBASE_ERR_NONE;
@@ -277,18 +287,6 @@ static struct upipe *upipe_zvbienc_alloc(struct upipe_mgr *mgr,
       /* user_data */ NULL);
 
     struct upipe_zvbienc *upipe_zvbienc = upipe_zvbienc_from_upipe(upipe);
-
-    upipe_zvbienc->sp.scanning     = 525; /* NTSC */
-    upipe_zvbienc->sp.sampling_format  = VBI_PIXFMT_YUV420;
-    upipe_zvbienc->sp.sampling_rate    = 13.5e6;
-    upipe_zvbienc->sp.bytes_per_line   = 720;
-    upipe_zvbienc->sp.offset       = 122;
-    upipe_zvbienc->sp.start[0]     = 21;
-    upipe_zvbienc->sp.count[0]     = 1;
-    upipe_zvbienc->sp.start[1]     = 284;
-    upipe_zvbienc->sp.count[1]     = 1;
-    upipe_zvbienc->sp.interlaced       = TRUE;
-    upipe_zvbienc->sp.synchronous      = TRUE;
 
     upipe_zvbienc_init_urefcount(upipe);
     upipe_zvbienc_init_output(upipe);
