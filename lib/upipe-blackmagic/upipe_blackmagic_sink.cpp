@@ -396,7 +396,7 @@ static void upipe_bmd_sink_write_cdp_footer(struct upipe *upipe, uint16_t *dst)
     for( i = 0; i < cnt-1; i++ ) // don't include checksum
         checksum += upipe_bmd_sink->vanc_tmp[ANC_START_LEN+i];
 
-    dst[3] = checksum;
+    dst[3] = checksum ? 256 - checksum : 0;
 }
 
 static void upipe_bmd_sink_write_cdp(struct upipe *upipe, const uint8_t *src,
