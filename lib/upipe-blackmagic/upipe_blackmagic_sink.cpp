@@ -619,7 +619,6 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
             upipe_bmd_sink_start_anc(upipe, upipe_bmd_sink->vanc_tmp, 0x61, 0x1);
             upipe_bmd_sink_write_cdp(upipe, pic_data, pic_data_size, &upipe_bmd_sink->vanc_tmp[ANC_START_LEN]);
             upipe_bmd_sink_calc_parity_checksum(upipe);
-            printf("\n %x %x %x %x \n", upipe_bmd_sink->vanc_tmp[0], upipe_bmd_sink->vanc_tmp[1], upipe_bmd_sink->vanc_tmp[2], upipe_bmd_sink->vanc_tmp[3] );
 
             upipe_bmd_sink_encode_v210(upipe, (uint32_t*)vanc, sd);
         }
