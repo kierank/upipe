@@ -86,6 +86,40 @@ UPIPE_HELPER_VOID(upipe_zvbienc);
 UPIPE_HELPER_OUTPUT(upipe_zvbienc, output, flow_def, output_state, request_list)
 UPIPE_HELPER_INPUT(upipe_zvbienc, urefs, nb_urefs, max_urefs, blockers, upipe_zvbienc_handle)
 
+static void upipe_zvbienc_process_captions(struct uref *uref, vbi_sliced *sliced,
+                                           const uint8_t *pic_data, size_t pic_data_size)
+{
+    uint8_t process, cc_count;
+
+    process = (pic_data[0] >> 6) & 1;
+    if (!process)
+        return;
+
+    cc_count = 
+
+    pic_data += 2;
+    pic_data_size =- 2;
+
+    if (cc_count*3 > pic_data_size)
+        return;
+
+    int i;
+    for (i = 0; i < pic_data_size/3; i++) {
+        uint8_t valid = (pic_data[3*i] >> 2) & 1;
+        if (valid){
+            uint8_t cc_type = pic_data[3*i] & 0x3;
+            if (cc_type == 0) {
+                sliced[0].data[0] = pic_data[3*i + 1];
+                sliced[0].data[1] = pic_data[3*i + 2];
+            }
+            else if (cc_type == 1) {
+                sliced[1].data[0] = pic_data[3*i + 1];
+                sliced[1].data[1] = pic_data[3*i + 2];
+            }
+        }
+    }
+}
+
 /** @internal @This handles data.
  *
  * @param upipe description structure of the pipe
@@ -98,18 +132,27 @@ static bool upipe_zvbienc_handle(struct upipe *upipe, struct uref *uref,
 {
     struct upipe_zvbienc *upipe_zvbienc = upipe_zvbienc_from_upipe(upipe);
     uint8_t *buf;
+    const uint8_t *pic_data = NULL;
+    size_t pic_data_size = 0;
 
     vbi_sliced sliced[2];
-    sliced[0].id = VBI_SLICED_CAPTION_525;
+    sliced[0].id = VBI_SLICED_CAPTION_525_F1;
     sliced[0].line = 21;
-    sliced[0].data[0] = 0x50;
-    sliced[0].data[1] = 0x99;
+    sliced[0].data[0] = 0x80;
+    sliced[0].data[1] = 0x80;
+    sliced[1].id = VBI_SLICED_CAPTION_525_F2;
+    sliced[1].line = 284;
+    sliced[1].data[0] = 0x80;
+    sliced[1].data[1] = 0x80;
+
+    uref_pic_get_cea_708(uref, &pic_data, &pic_data_size);
+    if( pic_data_size > 0 )
+        upipe_zvbienc_process_captions(uref, sliced, pic_data, pic_data_size);
 
     uref_pic_plane_write(uref, "y8", 0, 1, -1, 2, &buf);
     int success = vbi_raw_video_image (buf, 720*2, &upipe_zvbienc->sp,
                                        0, 0, 0, 0x000000FF, false,
                                        sliced, 1);
-    printf("\n %i \n", success );
     uref_pic_plane_unmap(uref, "y8", 0, 1, -1, 2);
 
     upipe_zvbienc_output(upipe, uref, upump_p);
@@ -279,7 +322,7 @@ static struct upipe *upipe_zvbienc_alloc(struct upipe_mgr *mgr,
     if (unlikely(upipe == NULL))
         return NULL;
 
-  vbi_set_log_fn ((VBI_LOG_NOTICE |
+    vbi_set_log_fn ((VBI_LOG_NOTICE |
         VBI_LOG_WARNING |
         VBI_LOG_ERROR |
         VBI_LOG_INFO),
