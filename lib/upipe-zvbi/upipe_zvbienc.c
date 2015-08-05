@@ -89,20 +89,6 @@ UPIPE_HELPER_INPUT(upipe_zvbienc, urefs, nb_urefs, max_urefs, blockers, upipe_zv
 static void upipe_zvbienc_process_captions(struct uref *uref, vbi_sliced *sliced,
                                            const uint8_t *pic_data, size_t pic_data_size)
 {
-    uint8_t process, cc_count;
-
-    process = (pic_data[0] >> 6) & 1;
-    if (!process)
-        return;
-
-    cc_count = 
-
-    pic_data += 2;
-    pic_data_size =- 2;
-
-    if (cc_count*3 > pic_data_size)
-        return;
-
     int i;
     for (i = 0; i < pic_data_size/3; i++) {
         uint8_t valid = (pic_data[3*i] >> 2) & 1;
@@ -135,6 +121,7 @@ static bool upipe_zvbienc_handle(struct upipe *upipe, struct uref *uref,
     const uint8_t *pic_data = NULL;
     size_t pic_data_size = 0;
 
+    /* Initialise VBI data with defaults */
     vbi_sliced sliced[2];
     sliced[0].id = VBI_SLICED_CAPTION_525_F1;
     sliced[0].line = 21;
@@ -150,9 +137,9 @@ static bool upipe_zvbienc_handle(struct upipe *upipe, struct uref *uref,
         upipe_zvbienc_process_captions(uref, sliced, pic_data, pic_data_size);
 
     uref_pic_plane_write(uref, "y8", 0, 1, -1, 2, &buf);
-    int success = vbi_raw_video_image (buf, 720*2, &upipe_zvbienc->sp,
-                                       0, 0, 0, 0x000000FF, false,
-                                       sliced, 1);
+    int success = vbi_raw_video_image(buf, 720*2, &upipe_zvbienc->sp,
+                                      0, 0, 0, 0x000000FF, false,
+                                      sliced, 1);
     uref_pic_plane_unmap(uref, "y8", 0, 1, -1, 2);
 
     upipe_zvbienc_output(upipe, uref, upump_p);
@@ -166,7 +153,7 @@ static bool upipe_zvbienc_handle(struct upipe *upipe, struct uref *uref,
  * @param upump_p reference to pump that generated the buffer
  */
 static void upipe_zvbienc_input(struct upipe *upipe, struct uref *uref,
-                                     struct upump **upump_p)
+                            struct upump **upump_p)
 {
     if (!upipe_zvbienc_check_input(upipe)) {
         upipe_zvbienc_hold_input(upipe, uref);
@@ -178,6 +165,32 @@ static void upipe_zvbienc_input(struct upipe *upipe, struct uref *uref,
          * have been sent. */
         upipe_use(upipe);
     }
+}
+
+/** @internal @This receives a provided ubuf manager.
+ *
+ * @param upipe description structure of the pipe
+ * @param flow_format amended flow format
+ * @return an error code
+ */
+static int upipe_zvbienc_check(struct upipe *upipe, struct uref *flow_format)
+{
+    struct upipe_zvbienc *upipe_zvbienc = upipe_zvbienc_from_upipe(upipe);
+    if (flow_format != NULL)
+        upipe_zvbienc_store_flow_def(upipe, flow_format);
+
+    if (upipe_zvbienc->flow_def == NULL)
+        return UBASE_ERR_NONE;
+
+    bool was_buffered = !upipe_zvbienc_check_input(upipe);
+    upipe_zvbienc_output_input(upipe);
+    upipe_zvbienc_unblock_input(upipe);
+    if (was_buffered && upipe_zvbienc_check_input(upipe)) {
+        /* All packets have been output, release again the pipe that has been
+         * used in @ref upipe_zvbienc_input. */
+        upipe_release(upipe);
+    }
+    return UBASE_ERR_NONE;
 }
 
 /** @internal @This sets the input flow definition.
