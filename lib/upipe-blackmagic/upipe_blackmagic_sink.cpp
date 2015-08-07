@@ -427,7 +427,6 @@ static void upipe_bmd_sink_calc_parity_checksum(struct upipe *upipe)
     checksum |= (!(checksum >> 8)) << 9;
 
     upipe_bmd_sink->vanc_tmp[ANC_START_LEN+dc] = checksum;
-    printf("\n %i \n", dc );
 }
 
 static void upipe_bmd_sink_encode_v210(struct upipe *upipe, uint32_t *dst, int sd)
