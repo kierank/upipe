@@ -162,6 +162,9 @@ struct upipe_audio_merge_sub {
     /** latency **/
     uint64_t latency;
 
+    /** channel index */
+    uint8_t channel_index;
+
     /** public upipe structure */
     struct upipe upipe;
 };
@@ -224,14 +227,14 @@ static struct upipe *upipe_audio_merge_sub_alloc(struct upipe_mgr *mgr,
         return NULL;
     }
 
-    uref_dump(flow_def, upipe->uprobe);
-
     struct upipe_audio_merge_sub *upipe_audio_merge_sub =
                             upipe_audio_merge_sub_from_upipe(upipe);
 
     upipe_audio_merge_sub_set_flow_def(upipe, flow_def);
 
     ulist_init(&upipe_audio_merge_sub->uref_queue);
+    uref_audio_merge_get_channel_index(upipe_audio_merge_sub->flow_def,
+                                       &upipe_audio_merge_sub->channel_index);
 
     upipe_audio_merge_sub_init_urefcount(upipe);
     upipe_audio_merge_sub_init_input(upipe);
@@ -413,9 +416,6 @@ static void upipe_audio_merge_cb(struct upump *upump)
         struct upipe_audio_merge_sub *upipe_audio_merge_sub =
             upipe_audio_merge_sub_from_uchain(uchain);
 
-        uint8_t channel_idx = 0;
-        int ret = uref_audio_merge_get_channel_index(upipe_audio_merge_sub->flow_def, &channel_idx);
-
         ulist_delete_foreach(&upipe_audio_merge_sub->uref_queue, uchain2, uchain_tmp) {
             uref = uref_from_uchain(uchain2);
             uref_clock_get_pts_sys(uref, &pts_sys);
@@ -451,8 +451,7 @@ static void upipe_audio_merge_cb(struct upump *upump)
                 if( pts_sys == lowest_pts_sys || lowest_pts_sys + 100 > pts_sys ) {
                     uref_sound_read_int32_t(uref, 0, -1, &in_data, 1);
 
-                    uint8_t channel_idx = 0;
-                    uref_audio_merge_get_channel_index(upipe_audio_merge_sub->flow_def, &channel_idx);
+                    uint8_t channel_idx = upipe_audio_merge_sub->channel_index;
                     for (i = 0; i < samples; i++) {
                         for( j = 0; j < 2; j++ ) // FIXME
                             out_data[16*i + channel_idx+j] = in_data[2*i+j];
