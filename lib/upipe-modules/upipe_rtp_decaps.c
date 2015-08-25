@@ -56,7 +56,7 @@
 
 #define EXPECTED_FLOW_DEF "block."
 
-/** upipe_rtpd structure */ 
+/** upipe_rtpd structure */
 struct upipe_rtpd {
     /** refcount management structure */
     struct urefcount urefcount;
@@ -124,7 +124,7 @@ static inline void upipe_rtpd_input(struct upipe *upipe, struct uref *uref,
 {
     struct upipe_rtpd *upipe_rtpd = upipe_rtpd_from_upipe(upipe);
     uint8_t rtp_buffer[RTP_HEADER_SIZE];
-    const uint8_t *rtp_header = uref_block_peek(uref, 0, RTP_HEADER_SIZE, 
+    const uint8_t *rtp_header = uref_block_peek(uref, 0, RTP_HEADER_SIZE,
                                                 rtp_buffer);
     if (unlikely(rtp_header == NULL)) {
         upipe_warn(upipe, "invalid buffer received");
@@ -137,6 +137,7 @@ static inline void upipe_rtpd_input(struct upipe *upipe, struct uref *uref,
     uint8_t cc = rtp_get_cc(rtp_header);
     uint8_t type = rtp_get_type(rtp_header);
     uint16_t seqnum = rtp_get_seqnum(rtp_header);
+    uint32_t timestamp = rtp_get_timestamp(rtp_header);
     ptrdiff_t extension_offset = rtp_extension((uint8_t *)rtp_header) -
                                  rtp_header;
     uref_block_peek_unmap(uref, 0, rtp_buffer, rtp_header);
@@ -163,9 +164,9 @@ static inline void upipe_rtpd_input(struct upipe *upipe, struct uref *uref,
 
     if (unlikely(upipe_rtpd->expected_seqnum != -1 &&
                  seqnum != upipe_rtpd->expected_seqnum)) {
-        upipe_warn_va(upipe, "potentially lost %d RTP packets",
+        upipe_warn_va(upipe, "potentially lost %d RTP packets, got %u expected %u",
                       (seqnum + UINT16_MAX + 1 - upipe_rtpd->expected_seqnum) &
-                      UINT16_MAX);
+                      UINT16_MAX, seqnum, upipe_rtpd->expected_seqnum);
         uref_flow_set_discontinuity(uref);
     }
     upipe_rtpd->expected_seqnum = seqnum + 1;
@@ -190,6 +191,9 @@ static inline void upipe_rtpd_input(struct upipe *upipe, struct uref *uref,
         upipe_rtpd->type = type;
         upipe_rtpd_store_flow_def(upipe, flow_def);
     }
+
+    uref_rtp_set_seqnum(uref, seqnum);
+    uref_rtp_set_timestamp(uref, timestamp);
 
     uref_block_resize(uref, offset, -1);
     upipe_rtpd_output(upipe, uref, upump_p);
