@@ -61,6 +61,7 @@
 #include <upipe-modules/upipe_file_source.h>
 #include <upipe-modules/upipe_udp_source.h>
 #include <upipe-modules/upipe_rtp_source.h>
+#include <upipe-modules/upipe_rtp_fec.h>
 #include <upipe-modules/upipe_http_source.h>
 #include <upipe-modules/upipe_null.h>
 #include <upipe-modules/upipe_play.h>
@@ -138,7 +139,13 @@ static struct upipe *play = NULL;
 /* trick play */
 static struct upipe *trickp = NULL;
 /* source pipe */
-static struct upipe *upipe_src = NULL;
+static struct upipe *upipe_main_src = NULL;
+/* source pipe */
+static struct upipe *upipe_row_src = NULL;
+/* source pipe */
+static struct upipe *upipe_col_src = NULL;
+/* source pipe */
+static struct upipe *upipe_fec = NULL;
 
 static void uplay_stop(struct upump *upump);
 
@@ -364,64 +371,39 @@ static void uplay_start(struct upump *upump)
     struct uprobe *uprobe_src = uprobe_xfer_alloc(uprobe_use(uprobe_main));
     uprobe_xfer_add(uprobe_src, UPROBE_XFER_VOID, UPROBE_SOURCE_END, 0);
 
-    /* try file source */
-    struct upipe_mgr *upipe_fsrc_mgr = upipe_fsrc_mgr_alloc();
-    upipe_src = upipe_void_alloc(upipe_fsrc_mgr,
-            uprobe_pfx_alloc(uprobe_use(uprobe_src),
-                             UPROBE_LOG_VERBOSE, "fsrc"));
-    upipe_mgr_release(upipe_fsrc_mgr);
+    uprobe_dejitter_set(uprobe_dejitter, DEJITTER_DIVIDER);
+    src_out_queue_length = SRC_OUT_QUEUE_LENGTH;
 
-    if (upipe_src != NULL && ubase_check(upipe_set_uri(upipe_src, uri))) {
-        need_trickp = true;
-    } else {
-        upipe_release(upipe_src);
-        uprobe_dejitter_set(uprobe_dejitter, DEJITTER_DIVIDER);
-        src_out_queue_length = SRC_OUT_QUEUE_LENGTH;
+    /* try rtp source */
+    struct upipe_mgr *upipe_rtpsrc_mgr;
+    upipe_rtpsrc_mgr = upipe_rtpsrc_mgr_alloc();
 
-        /* try rtp source */
-        struct upipe_mgr *upipe_rtpsrc_mgr;
-        if (!udp)
-            upipe_rtpsrc_mgr = upipe_rtpsrc_mgr_alloc();
-        else
-            upipe_rtpsrc_mgr = upipe_udpsrc_mgr_alloc();
-        upipe_src = upipe_void_alloc(upipe_rtpsrc_mgr,
-                uprobe_pfx_alloc(uprobe_use(uprobe_src),
-                                 UPROBE_LOG_VERBOSE,
-                                 udp ? "udpsrc" : "rtpsrc"));
-        upipe_mgr_release(upipe_rtpsrc_mgr);
+    upipe_main_src = upipe_void_alloc(upipe_rtpsrc_mgr,
+            uprobe_pfx_alloc(uprobe_use(&uprobe_src_s),
+                             UPROBE_LOG_VERBOSE,
+                             "rtpmainsrc"));
 
-        if (upipe_src != NULL && ubase_check(upipe_set_uri(upipe_src, uri))) {
-            upipe_attach_uclock(upipe_src);
-        } else {
-            upipe_release(upipe_src);
+    upipe_set_uri(upipe_main_src, "@:5000");
+    upipe_attach_uclock(upipe_main_src);
 
-            /* try http source */
-            struct upipe_mgr *upipe_http_src_mgr = upipe_http_src_mgr_alloc();
-            upipe_src = upipe_void_alloc(upipe_http_src_mgr,
-                uprobe_pfx_alloc(uprobe_use(uprobe_src),
-                                 UPROBE_LOG_VERBOSE, "httpsrc"));
-            upipe_mgr_release(upipe_http_src_mgr);
+    upipe_col_src = upipe_void_alloc(upipe_rtpsrc_mgr,
+            uprobe_pfx_alloc(uprobe_use(&uprobe_src_s),
+                             UPROBE_LOG_VERBOSE,
+                             "rtpcolsrc"));
 
-            if (upipe_src == NULL ||
-                !ubase_check(upipe_set_uri(upipe_src, uri))) {
-                upipe_release(upipe_src);
-                uprobe_err_va(uprobe_main, NULL, "unable to open \"%s\"", uri);
-                exit(EXIT_FAILURE);
-            }
-        }
-    }
-    uprobe_release(uprobe_src);
+    upipe_set_uri(upipe_col_src, "@:5002");
+    upipe_attach_uclock(upipe_col_src);
+
+    upipe_row_src = upipe_void_alloc(upipe_rtpsrc_mgr,
+            uprobe_pfx_alloc(uprobe_use(&uprobe_src_s),
+                             UPROBE_LOG_VERBOSE,
+                             "rtprowsrc"));
+
+    upipe_set_uri(upipe_row_src, "@:5004");
+    upipe_attach_uclock(upipe_row_src);
+    upipe_mgr_release(upipe_rtpsrc_mgr);
+
     uprobe_throw(uprobe_main, NULL, UPROBE_THAW_UPUMP_MGR);
-
-    if (need_trickp) {
-        struct upipe_mgr *upipe_trickp_mgr = upipe_trickp_mgr_alloc();
-        trickp = upipe_void_alloc(upipe_trickp_mgr,
-                uprobe_pfx_alloc(uprobe_use(uprobe_main),
-                                 UPROBE_LOG_VERBOSE, "trickp"));
-        assert(trickp != NULL);
-        upipe_mgr_release(upipe_trickp_mgr);
-        upipe_attach_uclock(trickp);
-    }
 
     struct upipe_mgr *upipe_play_mgr = upipe_play_mgr_alloc();
     play = upipe_void_alloc(upipe_play_mgr,
@@ -431,13 +413,49 @@ static void uplay_start(struct upump *upump)
     upipe_mgr_release(upipe_play_mgr);
 
     /* deport to the source thread */
-    upipe_src = upipe_wsrc_alloc(upipe_wsrc_mgr,
+    upipe_main_src = upipe_wsrc_alloc(upipe_wsrc_mgr,
             uprobe_pfx_alloc(uprobe_use(&uprobe_src_s),
                              UPROBE_LOG_VERBOSE, "wsrc"),
-            upipe_src,
+            upipe_main_src,
             uprobe_pfx_alloc(uprobe_use(uprobe_main),
                              UPROBE_LOG_VERBOSE, "wsrc_x"),
             src_out_queue_length);
+
+    /* deport to the source thread */
+    upipe_col_src = upipe_wsrc_alloc(upipe_wsrc_mgr,
+            uprobe_pfx_alloc(uprobe_use(&uprobe_src_s),
+                             UPROBE_LOG_VERBOSE, "wsrc"),
+            upipe_col_src,
+            uprobe_pfx_alloc(uprobe_use(uprobe_main),
+                             UPROBE_LOG_VERBOSE, "wsrc_x"),
+            src_out_queue_length);
+
+    /* deport to the source thread */
+    upipe_row_src = upipe_wsrc_alloc(upipe_wsrc_mgr,
+            uprobe_pfx_alloc(uprobe_use(&uprobe_src_s),
+                             UPROBE_LOG_VERBOSE, "wsrc"),
+            upipe_row_src,
+            uprobe_pfx_alloc(uprobe_use(uprobe_main),
+                             UPROBE_LOG_VERBOSE, "wsrc_x"),
+            src_out_queue_length);
+
+    struct upipe_mgr *upipe_rtp_fec_mgr;
+    upipe_rtp_fec_mgr = upipe_rtp_fec_mgr_alloc();
+
+    upipe_fec = upipe_rtp_fec_alloc(upipe_rtp_fec_mgr, uprobe_use(uprobe_main),
+                                    uprobe_use(uprobe_main), uprobe_use(uprobe_main),
+                                    uprobe_use(uprobe_main));
+
+    assert(upipe_fec);
+    upipe_attach_uclock(upipe_fec);
+
+    struct upipe *dst;
+    upipe_rtp_fec_get_main_sub(upipe_fec, &dst);
+    upipe_set_output(upipe_main_src, dst);
+    upipe_rtp_fec_get_col_sub(upipe_fec, &dst);
+    upipe_set_output(upipe_col_src, dst);
+    upipe_rtp_fec_get_row_sub(upipe_fec, &dst);
+    upipe_set_output(upipe_row_src, dst);
 
     /* ts demux */
     struct upipe_mgr *upipe_ts_demux_mgr = upipe_ts_demux_mgr_alloc();
@@ -453,7 +471,7 @@ static void uplay_start(struct upump *upump)
     struct upipe_mgr *upipe_a52f_mgr = upipe_a52f_mgr_alloc();
     upipe_ts_demux_mgr_set_a52f_mgr(upipe_ts_demux_mgr, upipe_a52f_mgr);
     upipe_mgr_release(upipe_a52f_mgr);
-    struct upipe *ts_demux = upipe_void_alloc_output(upipe_src,
+    struct upipe *ts_demux = upipe_void_alloc_output(upipe_fec,
             upipe_ts_demux_mgr,
             uprobe_pfx_alloc(
                 uprobe_selflow_alloc(uprobe_use(uprobe_main),
@@ -476,17 +494,17 @@ static void uplay_stop(struct upump *upump)
     upump_free(upump);
 
     uprobe_notice(uprobe_main, NULL, "running stop idler");
-    if (force_quit && upipe_src != NULL) {
+    if (force_quit && upipe_main_src != NULL) {
         struct upipe_mgr *upipe_null_mgr = upipe_null_mgr_alloc();
         struct upipe *null = upipe_void_alloc(upipe_null_mgr,
                 uprobe_pfx_alloc(uprobe_use(uprobe_main),
                                  UPROBE_LOG_VERBOSE, "null"));
         upipe_mgr_release(upipe_null_mgr);
-        upipe_set_output(upipe_src, null);
+        upipe_set_output(upipe_main_src, null);
         upipe_release(null);
     }
-    upipe_release(upipe_src);
-    upipe_src = NULL;
+    upipe_release(upipe_main_src);
+    upipe_main_src = NULL;
     upipe_mgr_release(upipe_wsrc_mgr);
     upipe_wsrc_mgr = NULL;
     upipe_mgr_release(upipe_wlin_mgr);

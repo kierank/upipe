@@ -15,6 +15,8 @@
 #include <upipe/uref_flow.h>
 #include <upipe/uref_dump.h>
 #include <upipe/upump.h>
+#include <upipe/upipe_helper_uclock.h>
+#include <upipe/upipe_helper_upipe.h>
 #include <upipe/upipe_helper_upipe.h>
 #include <upipe/upipe_helper_urefcount.h>
 #include <upipe/upipe_helper_flow.h>
@@ -67,8 +69,18 @@ struct upipe_rtp_fec {
     /** uref manager request */
     struct urequest uref_mgr_request;
 
+    /** uclock structure, if not NULL we are in live mode */
+    struct uclock *uclock;
+    /** uclock request */
+    struct urequest uclock_request;
+
     /** source manager */
     struct upipe_mgr sub_mgr;
+
+    /** upump manager */
+    struct upump_mgr *upump_mgr;
+    /** watcher */
+    struct upump *upump;
 
     int64_t pkts_since_last_fec;
 
@@ -120,6 +132,13 @@ UPIPE_HELPER_UREF_MGR(upipe_rtp_fec, uref_mgr, uref_mgr_request,
                       upipe_rtp_fec_check,
                       upipe_rtp_fec_register_output_request,
                       upipe_rtp_fec_unregister_output_request)
+
+UPIPE_HELPER_UCLOCK(upipe_rtp_fec, uclock, uclock_request, upipe_rtp_fec_check,
+                    upipe_rtp_fec_register_output_request,
+                    upipe_rtp_fec_unregister_output_request)
+
+UPIPE_HELPER_UPUMP_MGR(upipe_rtp_fec, upump_mgr);
+UPIPE_HELPER_UPUMP(upipe_rtp_fec, upump, upump_mgr);
 
 UPIPE_HELPER_UPIPE(upipe_rtp_fec_sub, upipe, UPIPE_RTP_FEC_INPUT_SIGNATURE)
 
@@ -357,7 +376,7 @@ static int upipe_rtp_fec_apply_row_fec(struct upipe_rtp_fec *upipe_rtp_fec,
         }
 
         uref_block_resize(fec_uref, FEC_HEADER_SIZE, -1);
-        uref_block_write(fec_uref, 0, &length_rec, &dst);
+        uref_block_write(fec_uref, 0, (int *)&length_rec, &dst);
 
         processed = 0;
         ulist_foreach (&upipe_rtp_fec->main_queue, uchain) {
@@ -546,8 +565,60 @@ static void upipe_rtp_fec_timer(struct upump *upump)
     struct upipe *upipe = upump_get_opaque(upump, struct upipe *);
     struct upipe_rtp_fec *upipe_rtp_fec = upipe_rtp_fec_from_upipe(upipe);
     struct uref *uref_out;
+    uint64_t now = uclock_now(upipe_rtp_fec->uclock);
+    uint64_t date_sys;
+    int type;
+    struct uchain *uchain, *uchain_tmp;
+    struct uref *uref;
 
+    printf("\n iter \n");
 
+    ulist_delete_foreach(&upipe_rtp_fec->main_queue, uchain, uchain_tmp) {
+        uref = uref_from_uchain(uchain);
+        uref_clock_get_date_sys(uref, &date_sys, &type);
+        date_sys += 2700000 * 3;
+        uint64_t seqnum = 0;
+        uref_rtp_get_seqnum(uref, &seqnum);
+
+        printf("\n check now %"PRIu64" date_sys %"PRIu64" seqnum %"PRIu64" \n", now, date_sys, seqnum );
+        if (now >= date_sys || date_sys == UINT64_MAX) {
+            printf("\n send now %"PRIu64" date_sys %"PRIu64" seqnum %"PRIu64" \n", now, date_sys, seqnum );
+
+            ulist_delete(uchain);
+            upipe_rtp_fec_output(upipe, uref, NULL);
+        }
+        else {
+            break;
+        }
+    }
+}
+
+/** @internal @This builds the flow definition packet.
+ *
+ * @param upipe description structure of the pipe
+ */
+static int upipe_rtp_fec_build_flow_def(struct upipe *upipe)
+{
+    struct upipe_rtp_fec *upipe_rtp_fec = upipe_rtp_fec_from_upipe(upipe);
+    if (upipe_rtp_fec->uref_mgr == NULL)
+        return UBASE_ERR_ALLOC;
+
+    struct uref *flow_def =
+        uref_block_flow_alloc_def(upipe_rtp_fec->uref_mgr, "block.mpegtsaligned.");
+    if (unlikely(flow_def == NULL)) {
+        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+        return UBASE_ERR_ALLOC;
+    }
+
+#if 0
+    if (upipe_rtp_fec->latency)
+        UBASE_FATAL(upipe, uref_clock_set_latency(flow_def,
+                                                  upipe_rtp_fec->latency))
+#endif
+    upipe_rtp_fec_store_flow_def(upipe, flow_def);
+    printf("\n store flow def \n");
+
+    return UBASE_ERR_NONE;
 }
 
 /** @internal @This receives a provided ubuf manager.
@@ -562,13 +633,12 @@ static int upipe_rtp_fec_check(struct upipe *upipe, struct uref *flow_format)
     if (flow_format != NULL)
         upipe_rtp_fec_store_flow_def(upipe, flow_format);
 
-    if (upipe_rtp_fec->flow_def == NULL)
-        return UBASE_ERR_NONE;
-
     if (upipe_rtp_fec->uref_mgr == NULL) {
         upipe_rtp_fec_require_uref_mgr(upipe);
         return UBASE_ERR_NONE;
     }
+
+    upipe_rtp_fec_build_flow_def(upipe);
 
     // FIXME this is broke
 
@@ -621,6 +691,27 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
             {
                 //printf("APPLY ROW delta %u queuelen %u \n", delta, ulist_depth(&upipe_rtp_fec->main_queue) );
                 upipe_rtp_fec_apply_row_fec(upipe_rtp_fec, last_row_fec_snbase);
+            }
+        }
+
+        if( upipe_rtp_fec->cols &&
+           !upipe_rtp_fec->pump_start &&
+            upipe_rtp_fec->last_matrix_snbase != UINT64_MAX )
+        {
+            uint64_t delta = (seqnum + UINT16_MAX - upipe_rtp_fec->last_matrix_snbase) & UINT16_MAX;
+            uint64_t seq_delta = (seqnum + UINT16_MAX - upipe_rtp_fec->first_seqnum) & UINT16_MAX;
+            if( !upipe_rtp_fec->pump_start && delta > 2*upipe_rtp_fec->cols*upipe_rtp_fec->rows &&
+                 seq_delta >= 2*upipe_rtp_fec->cols*upipe_rtp_fec->rows )
+            {
+                // FIXME clear old packets
+
+                printf("\n pump start depth %u delta %u seqdelta %u \n", ulist_depth(&upipe_rtp_fec->main_queue), delta, seq_delta );
+                struct upump *upump = upump_alloc_timer(upipe_rtp_fec->upump_mgr,
+                                                        upipe_rtp_fec_timer, &upipe_rtp_fec->upipe,
+                                                        0, UCLOCK_FREQ/300);
+                upipe_rtp_fec_set_upump(&upipe_rtp_fec->upipe, upump);
+                upump_start(upump);
+                upipe_rtp_fec->pump_start = 1;
             }
         }
 
@@ -768,31 +859,6 @@ static void upipe_rtp_fec_init_sub_mgr(struct upipe *upipe)
     sub_mgr->upipe_mgr_control = NULL;
 }
 
-/** @internal @This builds the flow definition packet.
- *
- * @param upipe description structure of the pipe
- */
-static void upipe_rtp_fec_build_flow_def(struct upipe *upipe)
-{
-    struct upipe_rtp_fec *upipe_rtp_fec = upipe_rtp_fec_from_upipe(upipe);
-    if (upipe_rtp_fec->uref_mgr == NULL)
-        return;
-
-    struct uref *flow_def =
-        uref_block_flow_alloc_def(upipe_rtp_fec->uref_mgr, "block.mpegtsaligned.");
-    if (unlikely(flow_def == NULL)) {
-        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-        return;
-    }
-
-#if 0
-    if (upipe_rtp_fec->latency)
-        UBASE_FATAL(upipe, uref_clock_set_latency(flow_def,
-                                                  upipe_rtp_fec->latency))
-#endif
-    upipe_rtp_fec_store_flow_def(upipe, flow_def);
-}
-
 /** @internal @This allocates a rtp-fec pipe.
  *
  * @param mgr common management structure
@@ -833,6 +899,9 @@ static struct upipe *_upipe_rtp_fec_alloc(struct upipe_mgr *mgr,
     struct upipe *upipe = upipe_rtp_fec_to_upipe(upipe_rtp_fec);
     upipe_init(upipe, mgr, uprobe);
 
+    upipe_rtp_fec_init_upump_mgr(upipe);
+    upipe_rtp_fec_init_upump(upipe);
+    upipe_rtp_fec_init_uclock(upipe);
     upipe_rtp_fec_init_urefcount(upipe);
     upipe_rtp_fec_init_uref_mgr(upipe);
     upipe_rtp_fec_init_sub_mgr(upipe);
@@ -848,6 +917,8 @@ static struct upipe *_upipe_rtp_fec_alloc(struct upipe_mgr *mgr,
 
     ulist_init(&upipe_rtp_fec->main_queue);
     ulist_init(&upipe_rtp_fec->row_queue);
+
+    upipe_rtp_fec_check_upump_mgr(upipe);
 
     upipe_throw_ready(upipe);
 
@@ -865,7 +936,13 @@ static struct upipe *_upipe_rtp_fec_alloc(struct upipe_mgr *mgr,
 static int upipe_rtp_fec_control(struct upipe *upipe, int command, va_list args)
 {
     switch (command) {
-        /* generic commands */
+        case UPIPE_ATTACH_UPUMP_MGR:
+            upipe_rtp_fec_set_upump(upipe, NULL);
+            return upipe_rtp_fec_attach_upump_mgr(upipe);
+        case UPIPE_ATTACH_UCLOCK:
+            upipe_rtp_fec_set_upump(upipe, NULL);
+            upipe_rtp_fec_require_uclock(upipe);
+            return UBASE_ERR_NONE;
         case UPIPE_REGISTER_REQUEST: {
             struct urequest *request = va_arg(args, struct urequest *);
             return upipe_throw_provide_request(upipe, request);
@@ -925,6 +1002,9 @@ static void upipe_rtp_fec_free(struct upipe *upipe)
 
     upipe_throw_dead(upipe);
 
+    upipe_rtp_fec_clean_uclock(upipe);
+    upipe_rtp_fec_clean_upump(upipe);
+    upipe_rtp_fec_clean_upump_mgr(upipe);
     upipe_rtp_fec_clean_urefcount(upipe);
     upipe_rtp_fec_clean_uref_mgr(upipe);
 
