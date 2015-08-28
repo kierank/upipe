@@ -149,8 +149,6 @@ struct upipe_avcenc {
 
     /** frame counter */
     uint64_t counter;
-    /** latency in the input flow */
-    uint64_t input_latency;
     /** chroma map */
     const char *chroma_map[UPIPE_AV_MAX_PLANES];
 
@@ -486,21 +484,6 @@ static bool upipe_avcenc_encode_frame(struct upipe *upipe,
             uref_sound_flow_set_samples(flow_def_attr, context->frame_size);
         }
     }
-    if (context->delay) {
-        struct urational fps;
-        uint64_t rate;
-        if (ubase_check(uref_pic_flow_get_fps(upipe_avcenc->flow_def_input,
-                                              &fps))) {
-            UBASE_FATAL(upipe, uref_clock_set_latency(flow_def_attr,
-                    upipe_avcenc->input_latency +
-                    context->delay * UCLOCK_FREQ * fps.den / fps.num));
-        } else if (ubase_check(uref_sound_flow_get_rate(
-                        upipe_avcenc->flow_def_input, &rate))) {
-            UBASE_FATAL(upipe, uref_clock_set_latency(flow_def_attr,
-                    upipe_avcenc->input_latency +
-                    context->delay * UCLOCK_FREQ / rate));
-        }
-    }
 
     if (unlikely(upipe_avcenc->ubuf_mgr == NULL)) {
         if (unlikely(!upipe_avcenc_demand_ubuf_mgr(upipe, flow_def_attr))) {
@@ -641,6 +624,10 @@ static void upipe_avcenc_encode_video(struct upipe *upipe,
         frame->data[i] = (uint8_t *)data;
         frame->linesize[i] = stride;
     }
+
+    /* set frame dimensions */
+    frame->width = hsize;
+    frame->height = vsize;
 
     /* set pts (needed for uref/avpkt mapping) */
     upipe_verbose_va(upipe, "input pts %"PRId64, upipe_avcenc->avcpts);
@@ -1069,10 +1056,6 @@ static int upipe_avcenc_set_flow_def(struct upipe *upipe, struct uref *flow_def)
         uref_pic_flow_clear_format(flow_def);
         upipe_avcenc_store_flow_def(upipe, flow_def);
     }
-
-    upipe_avcenc->input_latency = 0;
-    uref_clock_get_latency(upipe_avcenc->flow_def_input,
-                           &upipe_avcenc->input_latency);
     return UBASE_ERR_NONE;
 }
 

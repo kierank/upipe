@@ -49,6 +49,7 @@ libupipe_modules_la_SOURCES = \
 	upipe_dump.c \
 	upipe_ntsc_prepend.c \
 	upipe_audio_merge.c
+	upipe_rtp_opus.c
 
 if HAVE_WRITEV
 libupipe_modules_la_SOURCES += \

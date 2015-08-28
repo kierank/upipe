@@ -2893,7 +2893,7 @@ static void upipe_ts_mux_update_psig(struct upipe *upipe)
         if (program->pmt_interval > max_psi_interval)
             program->pmt_interval = max_psi_interval;
         if (program->pcr_interval > max_pcr_interval)
-            program->pcr_interval = max_psi_interval;
+            program->pcr_interval = max_pcr_interval;
     }
 }
 
@@ -3846,10 +3846,10 @@ static void upipe_ts_mux_no_input(struct upipe *upipe)
 
     upipe_ts_mux_clean_sub_programs(upipe);
     upipe_ts_mux_clean_bin_input(upipe);
-    upipe_ts_mux_psi_pid_release(upipe_ts_mux->psi_pid_pat);
-    upipe_ts_mux->psi_pid_pat = NULL;
     upipe_release(upipe_ts_mux->psig_nit);
     upipe_ts_mux->psig_nit = NULL;
+    upipe_ts_mux_psi_pid_release(upipe_ts_mux->psi_pid_pat);
+    upipe_ts_mux->psi_pid_pat = NULL;
     upipe_release(upipe_ts_mux->sig);
     upipe_ts_mux->sig = NULL;
     upipe_ts_mux_psi_pid_release(upipe_ts_mux->psi_pid_nit);
