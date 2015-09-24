@@ -422,7 +422,7 @@ static void upipe_audio_merge_cb(struct upump *upump)
             if (pts_sys + 2700000 <= now) {
                 ulist_delete(uchain2);
             }
-            else if (pts_sys <= now) {
+            else if (pts_sys + 648000 <= now) { // FIXME this is wrong
                 found = 1;
                 uref_sound_flow_get_samples(uref, &samples);
                 if (pts_sys < lowest_pts_sys )
