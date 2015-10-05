@@ -638,6 +638,7 @@ static struct uref *alloc_raw_video_def(struct uref_mgr *uref_mgr,
  * @return pointer to uref control packet, or NULL in case of error
  */
 static struct uref *alloc_video_def(struct uref_mgr *uref_mgr,
+                                    AVFormatContext *format,
                                     AVCodecContext *codec,
                                     AVStream *stream)
 {
@@ -661,7 +662,7 @@ static struct uref *alloc_video_def(struct uref_mgr *uref_mgr,
         urational_simplify(&fps);
         CHK(uref_pic_flow_set_fps(flow_def, fps))
     }
-    AVRational sample_ar = av_guess_sample_aspect_ratio(codec, stream, NULL);
+    AVRational sample_ar = av_guess_sample_aspect_ratio(format, stream, NULL);
     if (sample_ar.num) {
         struct urational sar = { .num = sample_ar.num,
                                  .den = sample_ar.den };
@@ -732,8 +733,7 @@ static void upipe_avfsrc_probe(struct upump *upump)
             upipe_notice_va(upipe, "closing URL %s", upipe_avfsrc->url);
         avformat_close_input(&upipe_avfsrc->context);
         upipe_avfsrc->context = NULL;
-        free(upipe_avfsrc->url);
-        upipe_avfsrc->url = NULL;
+        ubase_clean_str(&upipe_avfsrc->url);
         return;
     }
 
@@ -758,7 +758,9 @@ static void upipe_avfsrc_probe(struct upump *upump)
                 if (codec->codec_id == AV_CODEC_ID_RAWVIDEO)
                     flow_def = alloc_raw_video_def(upipe_avfsrc->uref_mgr, codec);
                 else
-                    flow_def = alloc_video_def(upipe_avfsrc->uref_mgr, codec, stream);
+                    flow_def = alloc_video_def(upipe_avfsrc->uref_mgr,
+					       upipe_avfsrc->context,
+					       codec, stream);
                 break;
             case AVMEDIA_TYPE_SUBTITLE:
                 flow_def = alloc_subtitles_def(upipe_avfsrc->uref_mgr, codec);
@@ -906,8 +908,7 @@ static int upipe_avfsrc_set_uri(struct upipe *upipe, const char *url)
         upipe_avfsrc_abort_av_deal(upipe);
         upipe_avfsrc_throw_sub_subs(upipe, UPROBE_SOURCE_END);
     }
-    free(upipe_avfsrc->url);
-    upipe_avfsrc->url = NULL;
+    ubase_clean_str(&upipe_avfsrc->url);
 
     if (unlikely(url == NULL))
         return UBASE_ERR_NONE;
