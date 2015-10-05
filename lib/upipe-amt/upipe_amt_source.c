@@ -346,8 +346,7 @@ static int upipe_amtsrc_set_uri(struct upipe *upipe, const char *uri)
         amt_closeChannel(upipe_amtsrc->handle);
         upipe_amtsrc->handle = NULL;
     }
-    free(upipe_amtsrc->uri);
-    upipe_amtsrc->uri = NULL;
+    ubase_clean_str(&upipe_amtsrc->uri);
     upipe_amtsrc_set_upump(upipe, NULL);
 
     if (unlikely(uri == NULL))
@@ -539,8 +538,8 @@ static int upipe_amtsrc_mgr_control(struct upipe_mgr *mgr,
     switch (command) {
         case UPIPE_AMTSRC_MGR_SET_TIMEOUT: {
             UBASE_SIGNATURE_CHECK(args, UPIPE_AMTSRC_SIGNATURE)
-            unsigned int timeout = va_arg(args, unsigned int);
             /* no longer present in libamt */
+            /* unsigned int timeout = va_arg(args, unsigned int); */
             /* amt_timeOut(timeout); */
             return UBASE_ERR_NONE;
         }
