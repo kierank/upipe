@@ -757,9 +757,9 @@ static void upipe_x264_input(struct upipe *upipe, struct uref *uref,
 
     /* rebase to dts as we're in encoded domain now */
     uint64_t dts = UINT64_MAX;
-    if (!ubase_check(uref_clock_get_dts_prog(uref, &dts)) ||
-        (upipe_x264->last_dts != UINT64_MAX &&
-               dts < upipe_x264->last_dts)) {
+    if ((!ubase_check(uref_clock_get_dts_prog(uref, &dts)) ||
+         dts < upipe_x264->last_dts) &&
+        upipe_x264->last_dts != UINT64_MAX) {
         upipe_warn_va(upipe, "DTS prog in the past, resetting (%"PRIu64" ms)",
                       (upipe_x264->last_dts - dts) * 1000 / UCLOCK_FREQ);
         dts = upipe_x264->last_dts + 1;
@@ -768,7 +768,8 @@ static void upipe_x264_input(struct upipe *upipe, struct uref *uref,
         uref_clock_rebase_dts_prog(uref);
 
     uint64_t dts_sys = UINT64_MAX;
-    if (upipe_x264->input_pts != UINT64_MAX &&
+    if (dts != UINT64_MAX &&
+        upipe_x264->input_pts != UINT64_MAX &&
         upipe_x264->input_pts_sys != UINT64_MAX) {
         dts_sys = (int64_t)upipe_x264->input_pts_sys +
             ((int64_t)dts - (int64_t)upipe_x264->input_pts) *
@@ -795,15 +796,14 @@ static void upipe_x264_input(struct upipe *upipe, struct uref *uref,
 
 #ifdef HAVE_X264_OBE
     /* speedcontrol */
-    if (ubase_check(uref_clock_get_dts_sys(uref, &dts))) {
-        if (upipe_x264->uclock != NULL && upipe_x264->sc_latency) {
-            uint64_t systime = uclock_now(upipe_x264->uclock);
-            int64_t buffer_state = dts + upipe_x264->initial_latency +
-                                   upipe_x264->sc_latency - systime;
-            float buffer_fill = (float)buffer_state /
-                                (float)upipe_x264->sc_latency;
-            x264_speedcontrol_sync(upipe_x264->encoder, buffer_fill, 0, 1 );
-        }
+    if (dts_sys != UINT64_MAX && upipe_x264->uclock != NULL &&
+        upipe_x264->sc_latency) {
+        uint64_t systime = uclock_now(upipe_x264->uclock);
+        int64_t buffer_state = dts_sys + upipe_x264->initial_latency +
+                               upipe_x264->sc_latency - systime;
+        float buffer_fill = (float)buffer_state /
+                            (float)upipe_x264->sc_latency;
+        x264_speedcontrol_sync(upipe_x264->encoder, buffer_fill, 0, 1);
     }
 #endif
 

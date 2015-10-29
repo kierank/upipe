@@ -745,7 +745,8 @@ static void upipe_avcdec_set_time_attributes(struct upipe *upipe,
     } else
         uref_clock_rebase_pts_prog(uref);
 
-    if (upipe_avcdec->input_dts != UINT64_MAX &&
+    if (pts != UINT64_MAX &&
+        upipe_avcdec->input_dts != UINT64_MAX &&
         upipe_avcdec->input_dts_sys != UINT64_MAX) {
         pts_sys = (int64_t)upipe_avcdec->input_dts_sys +
             ((int64_t)pts - (int64_t)upipe_avcdec->input_dts) *
@@ -1090,8 +1091,12 @@ static bool upipe_avcdec_decode(struct upipe *upipe, struct uref *uref,
 
     uref_pic_set_number(uref, upipe_avcdec->counter++);
     uref_clock_get_rate(uref, &upipe_avcdec->drift_rate);
-    uref_clock_get_dts_prog(uref, &upipe_avcdec->input_dts);
-    uref_clock_get_dts_sys(uref, &upipe_avcdec->input_dts_sys);
+    uint64_t input_dts, input_dts_sys;
+    if (ubase_check(uref_clock_get_dts_prog(uref, &input_dts)) &&
+        ubase_check(uref_clock_get_dts_sys(uref, &input_dts_sys))) {
+        upipe_avcdec->input_dts = input_dts;
+        upipe_avcdec->input_dts_sys = input_dts_sys;
+    }
 
     upipe_avcdec_store_uref(upipe, uref);
     upipe_avcdec_decode_avpkt(upipe, &avpkt, upump_p);
