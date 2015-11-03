@@ -673,9 +673,11 @@ static void upipe_h264f_handle_pps(struct upipe *upipe)
         return;
     }
 
-    if (upipe_h264f->active_pps == pps_id &&
-        !ubase_check(ubuf_block_equal(upipe_h264f->pps[pps_id], ubuf)))
+    if (upipe_h264f->active_sps == -1 ||
+        (upipe_h264f->active_pps == pps_id &&
+         !ubase_check(ubuf_block_equal(upipe_h264f->pps[pps_id], ubuf)))) {
         upipe_h264f->active_pps = -1;
+    }
 
     if (upipe_h264f->pps[pps_id] != NULL)
         ubuf_free(upipe_h264f->pps[pps_id]);
@@ -1733,11 +1735,9 @@ static void upipe_h264f_nal_end(struct upipe *upipe, struct upump **upump_p)
     }
 
     if (upipe_h264f->got_discontinuity) {
-        uref_flow_set_error(upipe_h264f->next_uref);
         /* discard the entire NAL */
-        uref_block_delete(upipe_h264f->next_uref,
-                      upipe_h264f->au_last_nal_offset,
-                      upipe_h264f->au_size - upipe_h264f->au_last_nal_offset);
+        upipe_h264f_consume_uref_stream(upipe, upipe_h264f->au_size);
+        upipe_h264f->au_size = 0;
         return;
     }
 
