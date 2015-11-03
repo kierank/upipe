@@ -200,7 +200,11 @@ static int upipe_audio_merge_sub_set_flow_def(struct upipe *upipe,
     if (flow_def == NULL)
         return UBASE_ERR_INVALID;
 
-    // FIXME check flow def
+    const char *def;
+    if (unlikely(ubase_check(uref_flow_get_def(flow_def, &def)))) {
+        upipe_audio_merge_sub->latency = 0;
+        uref_clock_get_latency(flow_def, &upipe_audio_merge_sub->latency);
+    }
 
     flow_def = uref_dup(flow_def);
     UBASE_ALLOC_RETURN(flow_def)
@@ -422,7 +426,7 @@ static void upipe_audio_merge_cb(struct upump *upump)
             if (pts_sys + 2700000 <= now) {
                 ulist_delete(uchain2);
             }
-            else if (pts_sys + 648000 <= now) { // FIXME this is wrong
+            else if (pts_sys + upipe_audio_merge_sub->latency <= now) {
                 found = 1;
                 uref_sound_flow_get_samples(uref, &samples);
                 if (pts_sys < lowest_pts_sys )
