@@ -699,17 +699,21 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
                 if (first_uchain) {
                     first_uref = uref_from_uchain(first_uchain);
                     uref_clock_get_date_sys(first_uref, &date_sys, &type);
-                    now = uclock_now(upipe_rtp_fec->uclock);
-                    upipe_rtp_fec->latency = now - date_sys;
 
-                    printf("\n pump start depth %u delta %u seqdelta %u latency %"PRIu64" \n", ulist_depth(&upipe_rtp_fec->main_queue), mat_delta, seq_delta, upipe_rtp_fec->latency );
-                    /* Start pump that clears the buffer */
-                    struct upump *upump = upump_alloc_timer(upipe_rtp_fec->upump_mgr,
-                                                            upipe_rtp_fec_timer, &upipe_rtp_fec->upipe,
-                                                            0, UCLOCK_FREQ/90000);
-                    upipe_rtp_fec_set_upump(&upipe_rtp_fec->upipe, upump);
-                    upump_start(upump);
-                    upipe_rtp_fec->pump_start = 1;
+                    /* First packet of matrix can be recovered packet and have no date_sys */
+                    if (date_sys != UINT64_MAX ) {
+                        now = uclock_now(upipe_rtp_fec->uclock);
+                        upipe_rtp_fec->latency = now - date_sys;
+
+                        printf("\n pump start depth %u delta %u seqdelta %u first_date_sys %"PRIu64" latency %"PRIu64" \n", ulist_depth(&upipe_rtp_fec->main_queue), mat_delta, seq_delta, date_sys, upipe_rtp_fec->latency );
+                        /* Start pump that clears the buffer */
+                        struct upump *upump = upump_alloc_timer(upipe_rtp_fec->upump_mgr,
+                                                                upipe_rtp_fec_timer, &upipe_rtp_fec->upipe,
+                                                                0, UCLOCK_FREQ/90000);
+                        upipe_rtp_fec_set_upump(&upipe_rtp_fec->upipe, upump);
+                        upump_start(upump);
+                        upipe_rtp_fec->pump_start = 1;
+                    }
                 }
             }
         }
