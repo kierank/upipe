@@ -182,6 +182,24 @@ static inline int seq_num_lt(uint16_t s1, uint16_t s2)
         return 0;
 }
 
+/* Clears the main queue of packets with seqnum < snbase */
+static void clear_main_list(struct uchain *main_list, uint64_t snbase)
+{
+    struct uchain *uchain, *uchain_tmp;
+
+    /* Delete main packets older than the reference point */
+    ulist_delete_foreach (main_list, uchain, uchain_tmp) {
+        struct uref *uref = uref_from_uchain(uchain);
+        uint64_t seqnum = 0;
+        uref_rtp_get_seqnum(uref, &seqnum);
+
+        if (seq_num_lt(seqnum, snbase)){
+            ulist_delete(uchain);
+            uref_free(uref);
+        }
+    }
+}
+
 static void clear_fec_list(struct uchain *fec_list, uint64_t last_fec_snbase)
 {
     struct uchain *uchain, *uchain_tmp;
@@ -542,12 +560,15 @@ static void upipe_rtp_fec_timer(struct upump *upump)
         uint64_t seqnum = 0;
         uref_rtp_get_seqnum(uref, &seqnum);
 
-        printf("\n check now %"PRIu64" date_sys %"PRIu64" seqnum %"PRIu64" \n", now, date_sys, seqnum );
+        printf("\n check now %"PRIu64" date_sys %"PRIu64" seqnum %"PRIu64" latency %"PRIu64"  \n", now, date_sys, seqnum, upipe_rtp_fec->latency );
         if (now >= date_sys + upipe_rtp_fec->latency || date_sys == UINT64_MAX) {
             printf("\n send now %"PRIu64" date_sys %"PRIu64" seqnum %"PRIu64" \n", now, date_sys, seqnum );
 
-            date_sys += upipe_rtp_fec->latency;
-            uref_clock_set_date_sys(uref, date_sys, type);
+            /* Don't overflow date_sys on error corrected frames */
+            if (date_sys != UINT64_MAX) {
+                date_sys += upipe_rtp_fec->latency;
+                uref_clock_set_date_sys(uref, date_sys, type);
+            }
             ulist_delete(uchain);
             upipe_rtp_fec_output(upipe, uref, NULL);
         }
@@ -661,29 +682,35 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
             /* Make sure we have at least two matrices of data as per the spec */
             uint64_t mat_delta = (seqnum + UINT16_MAX - upipe_rtp_fec->cur_matrix_snbase) & UINT16_MAX;
             uint64_t seq_delta = (seqnum + UINT16_MAX - upipe_rtp_fec->first_seqnum) & UINT16_MAX;
-            if (!upipe_rtp_fec->pump_start && mat_delta > 2*matrix_size &&
-                seq_delta >= 2*matrix_size) {
+            printf("\n mat_delta %u seq_delta %u cur_matrix_snbase %u first_seqnum %u \n", mat_delta, seq_delta,
+                   upipe_rtp_fec->cur_matrix_snbase, upipe_rtp_fec->first_seqnum);
+            if (mat_delta > 2*matrix_size && seq_delta >= 2*matrix_size) {
+                struct uchain *first_uchain;
                 struct uref *first_uref;
                 uint64_t date_sys, now;
                 int type;
 
                 /* Clear any old non-FEC packets */
-                clear_fec_list(&upipe_rtp_fec->main_queue, upipe_rtp_fec->cur_matrix_snbase);
+                clear_main_list(&upipe_rtp_fec->main_queue, upipe_rtp_fec->cur_matrix_snbase);
 
                 /* Calculate delay from first packet of matrix arriving to pump start time */
-                first_uref = uref_from_uchain(ulist_peek(&upipe_rtp_fec->main_queue));
-                uref_clock_get_date_sys(uref, &date_sys, type);
-                now = uclock_now(upipe_rtp_fec->uclock);
-                upipe_rtp_fec->latency = now - date_sys;
+                first_uchain = ulist_peek(&upipe_rtp_fec->main_queue);
+                printf("\n depth %i \n", ulist_depth(&upipe_rtp_fec->main_queue));
+                if (first_uchain) {
+                    first_uref = uref_from_uchain(first_uchain);
+                    uref_clock_get_date_sys(first_uref, &date_sys, &type);
+                    now = uclock_now(upipe_rtp_fec->uclock);
+                    upipe_rtp_fec->latency = now - date_sys;
 
-                printf("\n pump start depth %u delta %u seqdelta %u \n", ulist_depth(&upipe_rtp_fec->main_queue), mat_delta, seq_delta );
-                /* Start pump that clears the buffer */
-                struct upump *upump = upump_alloc_timer(upipe_rtp_fec->upump_mgr,
-                                                        upipe_rtp_fec_timer, &upipe_rtp_fec->upipe,
-                                                        0, UCLOCK_FREQ/90000);
-                upipe_rtp_fec_set_upump(&upipe_rtp_fec->upipe, upump);
-                upump_start(upump);
-                upipe_rtp_fec->pump_start = 1;
+                    printf("\n pump start depth %u delta %u seqdelta %u latency %"PRIu64" \n", ulist_depth(&upipe_rtp_fec->main_queue), mat_delta, seq_delta, upipe_rtp_fec->latency );
+                    /* Start pump that clears the buffer */
+                    struct upump *upump = upump_alloc_timer(upipe_rtp_fec->upump_mgr,
+                                                            upipe_rtp_fec_timer, &upipe_rtp_fec->upipe,
+                                                            0, UCLOCK_FREQ/90000);
+                    upipe_rtp_fec_set_upump(&upipe_rtp_fec->upipe, upump);
+                    upump_start(upump);
+                    upipe_rtp_fec->pump_start = 1;
+                }
             }
         }
 
@@ -735,6 +762,8 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
     if (fec_change) {
         upipe_rtp_fec_clear(upipe_rtp_fec);
         fec_change = 0;
+
+        printf("\n FEC change \n");
     }
 }
 
