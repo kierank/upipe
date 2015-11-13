@@ -398,7 +398,7 @@ static void upipe_rtp_fec_correct_packets(struct upipe_rtp_fec *upipe_rtp_fec,
         insert_ordered_uref(&upipe_rtp_fec->main_queue, fec_uref);
     }
     else {
-
+        uref_free(fec_uref);
     }
 }
 
