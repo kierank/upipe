@@ -114,6 +114,7 @@ struct upipe_rtp_fec {
     struct upipe_rtp_fec_sub row_subpipe;
 
     struct uchain main_queue;
+    struct uchain col_queue;
     struct uchain row_queue;
 
     int pump_start;
@@ -313,7 +314,8 @@ static void upipe_rtp_fec_correct_packets(struct upipe_rtp_fec *upipe_rtp_fec,
     uint64_t seqnum = 0;
     bool found_seqnum[50] = {0};
     uint8_t payload_buf[188*7];
-    
+
+    /* Build a list of expected packets */
     int processed = 0;
     uint64_t missing_seqnum = 0;
     ulist_foreach (&upipe_rtp_fec->main_queue, uchain) {
@@ -402,6 +404,52 @@ static void upipe_rtp_fec_correct_packets(struct upipe_rtp_fec *upipe_rtp_fec,
     }
 }
 
+static int upipe_rtp_fec_apply_col_fec(struct upipe_rtp_fec *upipe_rtp_fec)
+{
+    uint64_t snbase_low, ts_rec;
+    uint16_t length_rec;
+    uint16_t seqnum_list[50];
+
+    while (1) {
+        struct uchain *fec_uchain = ulist_peek(&upipe_rtp_fec->col_queue);
+        if (!fec_uchain)
+            break;
+        struct uref *fec_uref = uref_from_uchain(fec_uchain);
+
+        /* Extract parameters from FEC packet */
+        upipe_rtp_fec_extract_parameters(fec_uref, &snbase_low, &ts_rec, &length_rec); 
+        uint64_t col_delta = (upipe_rtp_fec->last_seqnum + UINT16_MAX - snbase_low) & UINT16_MAX;
+
+        /* Account for late column FEC packets by making sure at least one extra row exists */
+        if (col_delta > (upipe_rtp_fec->cols+1)*upipe_rtp_fec->rows) {
+            ulist_pop(&upipe_rtp_fec->col_queue);
+            /* If no current matrix is being processed and we have enough packets
+             * set existing matrix to the snbase value */
+            if (upipe_rtp_fec->cur_matrix_snbase == UINT64_MAX &&
+                seq_num_lt(upipe_rtp_fec->first_seqnum, snbase_low))
+                upipe_rtp_fec->cur_matrix_snbase = snbase_low;
+
+            uint16_t expected_seqnum = snbase_low;
+
+            printf("\n col queuelen %i snbaselow %u \n", ulist_depth(&upipe_rtp_fec->main_queue), expected_seqnum ); 
+
+            /* Build a list of the expected sequence numbers in matrix column */
+            for (int i = 0; i < upipe_rtp_fec->rows; i++) {
+                seqnum_list[i] = expected_seqnum;
+                expected_seqnum += upipe_rtp_fec->cols;
+            }
+
+            upipe_rtp_fec_correct_packets(upipe_rtp_fec, fec_uref, ts_rec,
+                                          length_rec, seqnum_list, upipe_rtp_fec->rows);
+        }
+        else {
+            break;
+        }
+    }
+
+    return 0;
+}
+
 static int upipe_rtp_fec_apply_row_fec(struct upipe_rtp_fec *upipe_rtp_fec,
                                        uint64_t cur_row_fec_snbase)
 {
@@ -440,42 +488,18 @@ static int upipe_rtp_fec_apply_row_fec(struct upipe_rtp_fec *upipe_rtp_fec,
     return 0;
 }
 
-static int upipe_rtp_fec_apply_col_fec(struct upipe_rtp_fec *upipe_rtp_fec,
-                                       struct uref *fec_uref)
-{
-    uint64_t snbase_low, ts_rec;
-    uint16_t length_rec;
-    uint16_t seqnum_list[50];
 
-    /* Extract parameters from FEC packet */
-    upipe_rtp_fec_extract_parameters(fec_uref, &snbase_low, &ts_rec, &length_rec); 
-
-    /* If no current matrix is being processed and we have enough packets
-     * set existing matrix to the snbase value */
-    if (upipe_rtp_fec->cur_matrix_snbase == UINT64_MAX &&
-        seq_num_lt(upipe_rtp_fec->first_seqnum, snbase_low))
-        upipe_rtp_fec->cur_matrix_snbase = snbase_low;
-
-    uint16_t expected_seqnum = snbase_low;
-
-    printf("\n col queuelen %i snbaselow %u \n", ulist_depth(&upipe_rtp_fec->main_queue), expected_seqnum ); 
-
-    /* Build a list of the expected sequence numbers in matrix column */
-    for (int i = 0; i < upipe_rtp_fec->rows; i++) {
-        seqnum_list[i] = expected_seqnum;
-        expected_seqnum += upipe_rtp_fec->cols;
-    }
-
-    upipe_rtp_fec_correct_packets(upipe_rtp_fec, fec_uref, ts_rec,
-                                  length_rec, seqnum_list, upipe_rtp_fec->rows);
-
-    return 0;
-}
 
 static void upipe_rtp_fec_clear(struct upipe_rtp_fec *upipe_rtp_fec)
 {
     struct uchain *uchain, *uchain_tmp;
     ulist_delete_foreach (&upipe_rtp_fec->main_queue, uchain, uchain_tmp) {
+        struct uref *uref = uref_from_uchain(uchain);
+        ulist_delete(uchain);
+        uref_free(uref);
+    }
+
+    ulist_delete_foreach (&upipe_rtp_fec->col_queue, uchain, uchain_tmp) {
         struct uref *uref = uref_from_uchain(uchain);
         ulist_delete(uchain);
         uref_free(uref);
@@ -659,6 +683,8 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
         }
 
         if (upipe_rtp_fec->cols && upipe_rtp_fec->rows) {
+            upipe_rtp_fec_apply_col_fec(upipe_rtp_fec);
+            
             uint64_t cur_row_fec_snbase = upipe_rtp_fec->cur_row_fec_snbase == UINT64_MAX ?
                                           upipe_rtp_fec->first_seqnum :
                                           upipe_rtp_fec->cur_row_fec_snbase;
@@ -750,10 +776,7 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
                 upipe_rtp_fec->rows = na;
                 fec_change = 1;
             }
-
-            /* In a compliant source, column FEC is guaranteed to arrive
-             * after the matrix so no need to buffer, apply immediately */
-            upipe_rtp_fec_apply_col_fec(upipe_rtp_fec, uref);
+            insert_ordered_uref(&upipe_rtp_fec->col_queue, uref);
         }
         else if (upipe_rtp_fec_sub == &upipe_rtp_fec->row_subpipe) {
             if (!d) {
@@ -929,6 +952,7 @@ static struct upipe *_upipe_rtp_fec_alloc(struct upipe_mgr *mgr,
                             &upipe_rtp_fec->sub_mgr, uprobe_row);
 
     ulist_init(&upipe_rtp_fec->main_queue);
+    ulist_init(&upipe_rtp_fec->col_queue);
     ulist_init(&upipe_rtp_fec->row_queue);
 
     upipe_rtp_fec_require_uref_mgr(upipe);
