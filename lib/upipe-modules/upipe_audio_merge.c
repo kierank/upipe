@@ -522,7 +522,7 @@ static struct upipe *upipe_audio_merge_alloc(struct upipe_mgr *mgr,
     upipe_audio_merge_check_upump_mgr(upipe);
 
     struct upump *upump = upump_alloc_timer(upipe_audio_merge->upump_mgr,
-                                            upipe_audio_merge_cb, upipe,
+                                            upipe_audio_merge_cb, upipe, upipe->refcount,
                                             27000000/1000, 27000000/1000);
 
     upump_start(upump);
