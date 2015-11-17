@@ -713,7 +713,7 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
                 uint64_t mat_delta = (seqnum + UINT16_MAX - upipe_rtp_fec->cur_matrix_snbase) & UINT16_MAX;
                 uint64_t seq_delta = (seqnum + UINT16_MAX - upipe_rtp_fec->first_seqnum) & UINT16_MAX;
                 //printf("\n mat_delta %u seq_delta %u cur_matrix_snbase %u first_seqnum %u \n", mat_delta, seq_delta,
-                       upipe_rtp_fec->cur_matrix_snbase, upipe_rtp_fec->first_seqnum);
+                       //upipe_rtp_fec->cur_matrix_snbase, upipe_rtp_fec->first_seqnum);
                 if (seq_delta >= 2*matrix_size && seq_delta != UINT16_MAX) {
 
                     uint64_t date_sys, now;
