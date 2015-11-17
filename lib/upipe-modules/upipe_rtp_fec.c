@@ -103,7 +103,8 @@ struct upipe_rtp_fec {
     /* Lowest (base) sequence number of current FEC row */
     uint64_t cur_row_fec_snbase;
 
-    struct seqnum_history recent[200];
+    struct seqnum_history *recent;
+    int recent_len;
     uint64_t latency;
 
     /** main subpipe **/
@@ -134,7 +135,6 @@ struct upipe_rtp_fec {
 
 UPIPE_HELPER_UPIPE(upipe_rtp_fec, upipe, UPIPE_RTP_FEC_SIGNATURE);
 UPIPE_HELPER_UREFCOUNT(upipe_rtp_fec, urefcount, upipe_rtp_fec_free);
-UPIPE_HELPER_VOID(upipe_rtp_fec);
 
 UPIPE_HELPER_OUTPUT(upipe_rtp_fec, output, flow_def, output_state, request_list)
 
@@ -173,7 +173,7 @@ static void upipe_rtp_fec_sub_init(struct upipe *upipe,
     upipe_throw_ready(upipe);
 }
 
-static void upipe_rtp_fec_xor_c(uint8_t *dst, uint8_t *src, size_t len)
+static void upipe_rtp_fec_xor_c(uint8_t *dst, const uint8_t *src, size_t len)
 {
     for (int i = 0; i < len; i++)
         dst[i] ^= src[i];
@@ -238,18 +238,18 @@ static void insert_ordered_uref(struct uchain *queue, struct uref *uref)
     uint64_t new_seqnum = 0;
     uref_rtp_get_seqnum(uref, &new_seqnum);
 
-    printf("\n INSERT \n");
+    //printf("\n INSERT \n");
 
     ulist_delete_foreach_reverse(queue, uchain, uchain_tmp) {
         struct uref *cur_uref = uref_from_uchain(uchain);
         uint64_t seqnum = 0;
         uref_rtp_get_seqnum(cur_uref, &seqnum);
 
-        printf("\n checking seqnum %u new_seqnum %u \n", seqnum, new_seqnum);
+        //printf("\n checking seqnum %u new_seqnum %u \n", seqnum, new_seqnum);
         if (seq_num_lt(new_seqnum, seqnum)) {
             /* Inserting first needs a special case */
             if (ulist_is_first(queue, uchain)){
-                printf("\n FIRST insert %u before %u \n", new_seqnum, seqnum );
+                //printf("\n FIRST insert %u before %u \n", new_seqnum, seqnum );
                 uref_clock_delete_date_sys(uref);
                 ulist_insert(uchain->prev, uchain, uref_to_uchain(uref));
                 ooo = 1;
@@ -260,7 +260,7 @@ static void insert_ordered_uref(struct uchain *queue, struct uref *uref)
                 uint64_t prev_seqnum = 0;
                 uref_rtp_get_seqnum(prev_uref, &prev_seqnum);
                 if (!seq_num_lt(new_seqnum, prev_seqnum) && !(new_seqnum == prev_seqnum)) {
-                    printf("\n insert %u before %u \n", new_seqnum, seqnum );
+                    //printf("\n insert %u before %u \n", new_seqnum, seqnum );
                     uref_clock_delete_date_sys(uref);
                     ulist_insert(uchain->prev, uchain, uref_to_uchain(uref));
                     ooo = 1;
@@ -270,7 +270,7 @@ static void insert_ordered_uref(struct uchain *queue, struct uref *uref)
         }
         /* Duplicate packet */
         else if (new_seqnum == seqnum) {
-            printf("\n duplicate \n");
+            //printf("\n duplicate \n");
             dup = 1;
             uref_free(uref);
             break;
@@ -282,7 +282,7 @@ static void insert_ordered_uref(struct uchain *queue, struct uref *uref)
     /* Add to end if normal packet */
     if ((!dup && !ooo)) {
         ulist_add(queue, uref_to_uchain(uref));
-        printf("\n adding %u \n", new_seqnum);
+        //printf("\n adding %u \n", new_seqnum);
     }
 }
 
@@ -317,7 +317,6 @@ static void upipe_rtp_fec_correct_packets(struct upipe_rtp_fec *upipe_rtp_fec,
 
     /* Build a list of expected packets */
     int processed = 0;
-    uint64_t missing_seqnum = 0;
     ulist_foreach (&upipe_rtp_fec->main_queue, uchain) {
         struct uref *uref = uref_from_uchain(uchain);
         uref_rtp_get_seqnum(uref, &seqnum);
@@ -333,7 +332,7 @@ static void upipe_rtp_fec_correct_packets(struct upipe_rtp_fec *upipe_rtp_fec,
         }
     }
 
-    printf("\n items %i processed %i snbase %u \n", items, processed, seqnum_list[0] );
+    //printf("\n items %i processed %i snbase %u \n", items, processed, seqnum_list[0] );
     /* Recoverable packet */
     if (processed == items-1) {
         uint64_t missing_seqnum = 0;
@@ -352,14 +351,14 @@ static void upipe_rtp_fec_correct_packets(struct upipe_rtp_fec *upipe_rtp_fec,
                     uref_block_size(uref, &uref_len);
                     length_rec ^= uref_len;
                     ts_rec ^= timestamp;
-                    printf("\n applying items %u length rec %u seqnum %u \n", items, uref_len, seqnum );
+                    //printf("\n applying items %u length rec %u seqnum %u \n", items, uref_len, seqnum );
                 }
             }
         }
 
         if( length_rec != 1316 )
         {
-            printf("\n DUBIOUS REC LEN %i \n", length_rec );
+            //printf("\n DUBIOUS REC LEN %i \n", length_rec );
         }
 
         for (int i = 0; i < items; i++) {
@@ -375,7 +374,7 @@ static void upipe_rtp_fec_correct_packets(struct upipe_rtp_fec *upipe_rtp_fec,
         processed = 0;
         ulist_foreach (&upipe_rtp_fec->main_queue, uchain) {
             struct uref *uref = uref_from_uchain(uchain);
-            size_t size;
+            size_t size = 0;
             uref_rtp_get_seqnum(uref, &seqnum);
 
             for (int i = 0; i < items; i++) {
@@ -392,7 +391,7 @@ static void upipe_rtp_fec_correct_packets(struct upipe_rtp_fec *upipe_rtp_fec,
                 break;
         }
 
-        printf("\n items %i correctheader %x not-lost seqnum %u timestamp %u \n", items, dst[0], missing_seqnum, ts_rec );
+        //printf("\n items %i correctheader %x not-lost seqnum %u timestamp %u \n", items, dst[0], missing_seqnum, ts_rec );
         uref_block_unmap(fec_uref, 0);
         uref_rtp_set_seqnum(fec_uref, missing_seqnum);
         uref_rtp_set_timestamp(fec_uref, ts_rec);
@@ -431,7 +430,7 @@ static int upipe_rtp_fec_apply_col_fec(struct upipe_rtp_fec *upipe_rtp_fec)
 
             uint16_t expected_seqnum = snbase_low;
 
-            printf("\n col queuelen %i snbaselow %u \n", ulist_depth(&upipe_rtp_fec->main_queue), expected_seqnum ); 
+            //printf("\n col queuelen %i snbaselow %u \n", ulist_depth(&upipe_rtp_fec->main_queue), expected_seqnum ); 
 
             /* Build a list of the expected sequence numbers in matrix column */
             for (int i = 0; i < upipe_rtp_fec->rows; i++) {
@@ -460,7 +459,7 @@ static int upipe_rtp_fec_apply_row_fec(struct upipe_rtp_fec *upipe_rtp_fec,
     /* get rid of old row FEC packets */
     clear_fec_list(&upipe_rtp_fec->row_queue, cur_row_fec_snbase);
 
-    printf("\n try row depth %i \n", ulist_depth(&upipe_rtp_fec->row_queue));
+    //printf("\n try row depth %i \n", ulist_depth(&upipe_rtp_fec->row_queue));
 
     /* Row FEC packets are optional so may not actually exist */
     struct uchain *fec_uchain = ulist_pop(&upipe_rtp_fec->row_queue);
@@ -475,8 +474,8 @@ static int upipe_rtp_fec_apply_row_fec(struct upipe_rtp_fec *upipe_rtp_fec,
 
     upipe_rtp_fec->cur_row_fec_snbase = snbase_low;
 
-    printf("\n row processing %"PRIu64" \n", snbase_low);
-    printf("\n row queuelen %i snbaselow %u length-rec %u \n", ulist_depth(&upipe_rtp_fec->main_queue), expected_seqnum, length_rec );
+    //printf("\n row processing %"PRIu64" \n", snbase_low);
+    //printf("\n row queuelen %i snbaselow %u length-rec %u \n", ulist_depth(&upipe_rtp_fec->main_queue), expected_seqnum, length_rec );
 
     /* Build a list of the expected sequence numbers */
     for (int i = 0; i < upipe_rtp_fec->cols; i++)
@@ -516,23 +515,22 @@ static void upipe_rtp_fec_timer(struct upump *upump)
 {
     struct upipe *upipe = upump_get_opaque(upump, struct upipe *);
     struct upipe_rtp_fec *upipe_rtp_fec = upipe_rtp_fec_from_upipe(upipe);
-    struct uref *uref_out;
     uint64_t now = uclock_now(upipe_rtp_fec->uclock);
     uint64_t date_sys, seqnum = 0;
     int type;
     struct uchain *uchain, *uchain_tmp;
     struct uref *uref;
 
-    printf("\n iter \n");
+    //printf("\n iter \n");
 
     ulist_delete_foreach (&upipe_rtp_fec->main_queue, uchain, uchain_tmp) {
         uref = uref_from_uchain(uchain);
         uref_clock_get_date_sys(uref, &date_sys, &type);
         uref_rtp_get_seqnum(uref, &seqnum);
 
-        printf("\n check now %"PRIu64" date_sys %"PRIu64" seqnum %"PRIu64" latency %"PRIu64"  \n", now, date_sys, seqnum, upipe_rtp_fec->latency );
+        //printf("\n check now %"PRIu64" date_sys %"PRIu64" seqnum %"PRIu64" latency %"PRIu64"  \n", now, date_sys, seqnum, upipe_rtp_fec->latency );
         if (now >= date_sys + upipe_rtp_fec->latency || date_sys == UINT64_MAX) {
-            printf("\n send now %"PRIu64" date_sys %"PRIu64" seqnum %"PRIu64" \n", now, date_sys, seqnum );
+            //printf("\n send now %"PRIu64" date_sys %"PRIu64" seqnum %"PRIu64" \n", now, date_sys, seqnum );
 
             /* Don't overflow date_sys on error corrected frames */
             if (date_sys != UINT64_MAX) {
@@ -544,7 +542,7 @@ static void upipe_rtp_fec_timer(struct upump *upump)
 
             if (upipe_rtp_fec->last_send_seqnum != UINT64_MAX &&
                 ((upipe_rtp_fec->last_send_seqnum+1) & UINT16_MAX) != seqnum) {
-                printf("\n FEC LOST expected seqnum %u got %u \n", ((upipe_rtp_fec->last_send_seqnum+1) & UINT16_MAX), seqnum);
+                //printf("\n FEC LOST expected seqnum %u got %u \n", ((upipe_rtp_fec->last_send_seqnum+1) & UINT16_MAX), seqnum);
             }
 
             upipe_rtp_fec->last_send_seqnum = seqnum;
@@ -573,7 +571,7 @@ static int upipe_rtp_fec_build_flow_def(struct upipe *upipe)
     }
 
     upipe_rtp_fec_store_flow_def(upipe, flow_def);
-    printf("\n store flow def \n");
+    //printf("\n store flow def \n");
 
     return UBASE_ERR_NONE;
 }
@@ -618,20 +616,18 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
     uint8_t fec_buffer[SMPTE_2022_FEC_HEADER_SIZE];
     int fec_change = 0;
 
-    // FIXME handle discontinuity
-
     if (upipe_rtp_fec_sub == &upipe_rtp_fec->main_subpipe) {
         int type;
-        uint64_t seqnum, date_sys;
+        uint64_t seqnum = 0, date_sys = 0;
         uref_rtp_get_seqnum(uref, &seqnum);
         uref_clock_get_date_sys(uref, &date_sys, &type);
 
         if (upipe_rtp_fec->first_seqnum == UINT64_MAX) {
             upipe_rtp_fec->first_seqnum = seqnum;
-            printf("\n FIRST seqnum %"PRIu64" \n", seqnum );
+            //printf("\n FIRST seqnum %"PRIu64" \n", seqnum );
         }
 
-        printf("\n arrived %"PRIu64" ts %"PRIu64" \n", seqnum, date_sys);
+        //printf("\n arrived %"PRIu64" ts %"PRIu64" \n", seqnum, date_sys);
 
         /* Output packets immediately if no FEC packets found as per spec */
         if (!upipe_rtp_fec->cols && !upipe_rtp_fec->rows) {
@@ -672,7 +668,7 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
                     uint64_t latency = date_sys - prev_date_sys;
                     if (upipe_rtp_fec->latency < latency) {
                         upipe_rtp_fec->latency = latency + UPIPE_FEC_JITTER;
-                        printf("\n UPDATING LATENCY %"PRIu64" using cur %u old %u \n", upipe_rtp_fec->latency, seqnum, prev_seqnum);
+                        upipe_warn_va(upipe, "Late packets increasing buffer-size/latency to %f seconds", (double)upipe_rtp_fec->latency / UCLOCK_FREQ);
                     }
                 }
                 
@@ -692,7 +688,7 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
             /* Wait for two rows to arrive to allow for late row FEC packets */
             uint64_t row_delta = (seqnum + UINT16_MAX - cur_row_fec_snbase) & UINT16_MAX;
             if (row_delta > 2*upipe_rtp_fec->cols) {
-                //printf("APPLY ROW delta %u queuelen %u \n", delta, ulist_depth(&upipe_rtp_fec->main_queue) );
+                ////printf("APPLY ROW delta %u queuelen %u \n", delta, ulist_depth(&upipe_rtp_fec->main_queue) );
                 upipe_rtp_fec_apply_row_fec(upipe_rtp_fec, cur_row_fec_snbase);
             }
         }
@@ -709,14 +705,14 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
 
             first_uchain = ulist_peek(&upipe_rtp_fec->main_queue);
             if (first_uchain) {
-                printf("\n depth %i \n", ulist_depth(&upipe_rtp_fec->main_queue));
+                //printf("\n depth %i \n", ulist_depth(&upipe_rtp_fec->main_queue));
                 first_uref = uref_from_uchain(first_uchain);
                 uref_rtp_get_seqnum(first_uref, &upipe_rtp_fec->first_seqnum);
                 
                 /* Make sure we have at least two matrices of data as per the spec */
                 uint64_t mat_delta = (seqnum + UINT16_MAX - upipe_rtp_fec->cur_matrix_snbase) & UINT16_MAX;
                 uint64_t seq_delta = (seqnum + UINT16_MAX - upipe_rtp_fec->first_seqnum) & UINT16_MAX;
-                printf("\n mat_delta %u seq_delta %u cur_matrix_snbase %u first_seqnum %u \n", mat_delta, seq_delta,
+                //printf("\n mat_delta %u seq_delta %u cur_matrix_snbase %u first_seqnum %u \n", mat_delta, seq_delta,
                        upipe_rtp_fec->cur_matrix_snbase, upipe_rtp_fec->first_seqnum);
                 if (seq_delta >= 2*matrix_size && seq_delta != UINT16_MAX) {
 
@@ -726,14 +722,14 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
                     /* Calculate delay from first packet of matrix arriving to pump start time */
                     uref_clock_get_date_sys(first_uref, &date_sys, &type);
 
-                    printf("\n date_sys %"PRIu64" seqnum %u \n", date_sys, seqnum);
+                    //printf("\n date_sys %"PRIu64" seqnum %u \n", date_sys, seqnum);
 
                     /* First packet of matrix can be recovered packet and have no date_sys */
                     if (date_sys != UINT64_MAX) {
                         now = uclock_now(upipe_rtp_fec->uclock);
                         upipe_rtp_fec->latency = now - date_sys + UPIPE_FEC_JITTER;
 
-                        printf("\n pump start depth %u delta %u seqdelta %u first_date_sys %"PRIu64" latency %"PRIu64" \n", ulist_depth(&upipe_rtp_fec->main_queue), mat_delta, seq_delta, date_sys, upipe_rtp_fec->latency );
+                        //printf("\n pump start depth %u delta %u seqdelta %u first_date_sys %"PRIu64" latency %"PRIu64" \n", ulist_depth(&upipe_rtp_fec->main_queue), mat_delta, seq_delta, date_sys, upipe_rtp_fec->latency );
                         /* Start pump that clears the buffer */
                         struct upump *upump = upump_alloc_timer(upipe_rtp_fec->upump_mgr,
                                                                 upipe_rtp_fec_timer, &upipe_rtp_fec->upipe,
@@ -775,6 +771,7 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
                 upipe_rtp_fec->cols = offset;
                 upipe_rtp_fec->rows = na;
                 fec_change = 1;
+                upipe_warn(upipe, "No FEC Packets received for a while, disabling FEC");
             }
             insert_ordered_uref(&upipe_rtp_fec->col_queue, uref);
         }
@@ -795,6 +792,8 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
        (upipe_rtp_fec->rows || upipe_rtp_fec->cols)) {
         upipe_rtp_fec->rows = upipe_rtp_fec->cols = 0;
         fec_change = 1;
+        upipe_warn_va(upipe, "FEC detected %u rows and %u columns", upipe_rtp_fec->rows,
+                      upipe_rtp_fec->cols);
     }
 
     /* Clear matrices if change of FEC */
@@ -805,10 +804,20 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
         upipe_rtp_fec->first_seqnum = UINT64_MAX;
         upipe_rtp_fec->last_seqnum = UINT64_MAX;
 
-        memset(upipe_rtp_fec->recent, 0xff, sizeof(upipe_rtp_fec->recent));
+        free(upipe_rtp_fec->recent);
+        if (upipe_rtp_fec->rows && upipe_rtp_fec->cols) {
+            upipe_rtp_fec->recent_len = 2 * upipe_rtp_fec->rows * upipe_rtp_fec->cols;
+            upipe_rtp_fec->recent = malloc(upipe_rtp_fec->recent_len * sizeof(*upipe_rtp_fec->recent));
+            if (!upipe_rtp_fec->recent) {
+                upipe_err(upipe, "Malloc failed");
+                return;
+            }
+
+            memset(upipe_rtp_fec->recent, 0xff, upipe_rtp_fec->recent_len * sizeof(*upipe_rtp_fec->recent));
+        }
         upipe_rtp_fec->latency = 0;
 
-        printf("\n FEC change \n");
+        //printf("\n FEC change \n");
     }
 }
 
@@ -874,8 +883,6 @@ static void upipe_rtp_fec_sub_clean(struct upipe *upipe)
         upipe_rtp_fec_from_sub_mgr(upipe->mgr);
     upipe_throw_dead(upipe);
 
-    // FIXME
-
     upipe_clean(upipe);
 }
 
@@ -927,8 +934,6 @@ static struct upipe *_upipe_rtp_fec_alloc(struct upipe_mgr *mgr,
     upipe_rtp_fec->last_send_seqnum = UINT64_MAX;
     upipe_rtp_fec->cur_matrix_snbase = UINT64_MAX;
     upipe_rtp_fec->cur_row_fec_snbase = UINT64_MAX;
-
-    memset(upipe_rtp_fec->recent, 0xff, sizeof(upipe_rtp_fec->recent));
 
     upipe_rtp_fec->pump_start = 0;
 
@@ -1038,6 +1043,14 @@ static void upipe_rtp_fec_free(struct upipe *upipe)
 {
     struct upipe_rtp_fec *upipe_rtp_fec = upipe_rtp_fec_from_upipe(upipe);
 
+    if (upipe_rtp_fec->pump_start)
+        upump_stop(upipe_rtp_fec->upump);
+
+    upipe_rtp_fec_clear(upipe_rtp_fec);
+
+    upipe_rtp_fec_sub_clean(upipe_rtp_fec_sub_to_upipe(upipe_rtp_fec_to_main_subpipe(upipe_rtp_fec)));
+    upipe_rtp_fec_sub_clean(upipe_rtp_fec_sub_to_upipe(upipe_rtp_fec_to_col_subpipe(upipe_rtp_fec)));
+    upipe_rtp_fec_sub_clean(upipe_rtp_fec_sub_to_upipe(upipe_rtp_fec_to_row_subpipe(upipe_rtp_fec)));
 
     upipe_throw_dead(upipe);
 
@@ -1049,7 +1062,9 @@ static void upipe_rtp_fec_free(struct upipe *upipe)
 
     upipe_rtp_fec_clean_output(upipe);
     upipe_rtp_fec_clean_urefcount(upipe);
-    //upipe_rtp_fec_free_flow(upipe);
+
+    upipe_clean(upipe);
+    free(upipe_rtp_fec);
 }
 
 /** module manager static descriptor */
