@@ -1061,7 +1061,6 @@ static void upipe_rtp_fec_free(struct upipe *upipe)
     upipe_rtp_fec_clean_uref_mgr(upipe);
 
     upipe_rtp_fec_clean_output(upipe);
-    upipe_rtp_fec_clean_urefcount(upipe);
 
     upipe_clean(upipe);
     free(upipe_rtp_fec);
