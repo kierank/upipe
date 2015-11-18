@@ -152,6 +152,12 @@ struct upipe_avcdec {
     uint64_t next_pts_sys;
     /** latency in the input flow */
     uint64_t input_latency;
+    /** drift rate */
+    struct urational drift_rate;
+    /** last input DTS */
+    uint64_t input_dts;
+    /** last input DTS (system time) */
+    uint64_t input_dts_sys;
 
     /** avcodec context */
     AVCodecContext *context;
@@ -279,10 +285,11 @@ static int upipe_avcdec_get_buffer_pic(struct AVCodecContext *context,
     UBASE_FATAL(upipe, uref_pic_flow_set_vsize(flow_def_attr, context->height))
     UBASE_FATAL(upipe, uref_pic_flow_set_hsize_visible(flow_def_attr, context->width))
     UBASE_FATAL(upipe, uref_pic_flow_set_vsize_visible(flow_def_attr, context->height))
-    if (context->time_base.den && context->time_base.num) {
+    if (context->framerate.num && context->framerate.den) {
+
         struct urational fps = {
-            .num = context->time_base.den,
-            .den = context->time_base.num * context->ticks_per_frame
+            .num = context->framerate.num,
+            .den = context->framerate.den
         };
         urational_simplify(&fps);
         UBASE_FATAL(upipe, uref_pic_flow_set_fps(flow_def_attr, fps))
@@ -652,7 +659,7 @@ static void upipe_avcdec_start_av_deal(struct upipe *upipe)
     upipe_dbg(upipe, "upump_mgr present, using udeal");
     struct upump *upump_av_deal =
         upipe_av_deal_upump_alloc(upipe_avcdec->upump_mgr,
-                                  upipe_avcdec_cb_av_deal, upipe);
+                upipe_avcdec_cb_av_deal, upipe, upipe->refcount);
     if (unlikely(!upump_av_deal)) {
         upipe_err(upipe, "can't create dealer");
         upipe_throw_fatal(upipe, UBASE_ERR_UPUMP);
@@ -738,7 +745,15 @@ static void upipe_avcdec_set_time_attributes(struct upipe *upipe,
     } else
         uref_clock_rebase_pts_prog(uref);
 
-    if (!ubase_check(uref_clock_get_pts_sys(uref, &pts_sys))) {
+    if (pts != UINT64_MAX &&
+        upipe_avcdec->input_dts != UINT64_MAX &&
+        upipe_avcdec->input_dts_sys != UINT64_MAX) {
+        pts_sys = (int64_t)upipe_avcdec->input_dts_sys +
+            ((int64_t)pts - (int64_t)upipe_avcdec->input_dts) *
+            (int64_t)upipe_avcdec->drift_rate.num /
+            (int64_t)upipe_avcdec->drift_rate.den;
+        uref_clock_set_pts_sys(uref, pts_sys);
+    } else if (!ubase_check(uref_clock_get_pts_sys(uref, &pts_sys))) {
         pts_sys = upipe_avcdec->next_pts_sys;
         if (pts_sys != UINT64_MAX) {
             uref_clock_set_pts_sys(uref, pts_sys);
@@ -754,6 +769,7 @@ static void upipe_avcdec_set_time_attributes(struct upipe *upipe,
         uref_clock_rebase_pts_sys(uref);
 
     uref_clock_rebase_pts_orig(uref);
+    uref_clock_set_rate(uref, upipe_avcdec->drift_rate);
 
     /* compute next pts based on current frame duration */
     if (pts != UINT64_MAX && ubase_check(uref_clock_get_duration(uref, &duration))) {
@@ -1074,6 +1090,13 @@ static bool upipe_avcdec_decode(struct upipe *upipe, struct uref *uref,
     memset(avpkt.data + avpkt.size, 0, FF_INPUT_BUFFER_PADDING_SIZE);
 
     uref_pic_set_number(uref, upipe_avcdec->counter++);
+    uref_clock_get_rate(uref, &upipe_avcdec->drift_rate);
+    uint64_t input_dts, input_dts_sys;
+    if (ubase_check(uref_clock_get_dts_prog(uref, &input_dts)) &&
+        ubase_check(uref_clock_get_dts_sys(uref, &input_dts_sys))) {
+        upipe_avcdec->input_dts = input_dts;
+        upipe_avcdec->input_dts_sys = input_dts_sys;
+    }
 
     upipe_avcdec_store_uref(upipe, uref);
     upipe_avcdec_decode_avpkt(upipe, &avpkt, upump_p);
@@ -1223,7 +1246,7 @@ static bool upipe_avcdec_check_option(struct upipe *upipe, const char *option,
     if (!strcmp(option, "lowres")) {
         if (!content) return true;
         uint8_t lowres = strtoul(content, NULL, 10);
-        if (lowres > upipe_avcdec->context->codec->max_lowres) {
+        if (lowres > av_codec_get_max_lowres(upipe_avcdec->context->codec)) {
             return false;
         }
     }
@@ -1395,6 +1418,9 @@ static struct upipe *upipe_avcdec_alloc(struct upipe_mgr *mgr,
     upipe_avcdec->next_pts = UINT64_MAX;
     upipe_avcdec->next_pts_sys = UINT64_MAX;
     upipe_avcdec->input_latency = 0;
+    upipe_avcdec->drift_rate.num = upipe_avcdec->drift_rate.den = 1;
+    upipe_avcdec->input_dts = UINT64_MAX;
+    upipe_avcdec->input_dts_sys = UINT64_MAX;
 
     upipe_throw_ready(upipe);
     return upipe;

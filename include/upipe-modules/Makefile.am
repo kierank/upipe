@@ -38,6 +38,7 @@ myinclude_HEADERS = \
 	upipe_rtp_h264.h \
 	upipe_rtp_mpeg4.h \
 	upipe_rtp_fec.h \
+	upipe_rtp_opus.h \
 	upipe_rtcp.h \
 	upipe_blit.h \
 	upipe_audio_split.h \
@@ -47,5 +48,10 @@ myinclude_HEADERS = \
 	upipe_sine_wave_source.h \
 	upipe_stream_switcher.h \
 	upipe_dump.h \
+	uprobe_http_redirect.h \
+	upipe_m3u_reader.h \
+	upipe_m3u_playlist.h \
+	upipe_auto_source.h \
+	upipe_buffer.h \
 	upipe_ntsc_prepend.h \
 	upipe_audio_merge.h

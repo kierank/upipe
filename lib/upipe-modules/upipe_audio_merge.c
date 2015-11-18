@@ -162,6 +162,9 @@ struct upipe_audio_merge_sub {
     /** latency **/
     uint64_t latency;
 
+    /** channel index */
+    uint8_t channel_index;
+
     /** public upipe structure */
     struct upipe upipe;
 };
@@ -197,7 +200,11 @@ static int upipe_audio_merge_sub_set_flow_def(struct upipe *upipe,
     if (flow_def == NULL)
         return UBASE_ERR_INVALID;
 
-    // FIXME check flow def
+    const char *def;
+    if (unlikely(ubase_check(uref_flow_get_def(flow_def, &def)))) {
+        upipe_audio_merge_sub->latency = 0;
+        uref_clock_get_latency(flow_def, &upipe_audio_merge_sub->latency);
+    }
 
     flow_def = uref_dup(flow_def);
     UBASE_ALLOC_RETURN(flow_def)
@@ -224,14 +231,14 @@ static struct upipe *upipe_audio_merge_sub_alloc(struct upipe_mgr *mgr,
         return NULL;
     }
 
-    uref_dump(flow_def, upipe->uprobe);
-
     struct upipe_audio_merge_sub *upipe_audio_merge_sub =
                             upipe_audio_merge_sub_from_upipe(upipe);
 
     upipe_audio_merge_sub_set_flow_def(upipe, flow_def);
 
     ulist_init(&upipe_audio_merge_sub->uref_queue);
+    uref_audio_merge_get_channel_index(upipe_audio_merge_sub->flow_def,
+                                       &upipe_audio_merge_sub->channel_index);
 
     upipe_audio_merge_sub_init_urefcount(upipe);
     upipe_audio_merge_sub_init_input(upipe);
@@ -413,16 +420,13 @@ static void upipe_audio_merge_cb(struct upump *upump)
         struct upipe_audio_merge_sub *upipe_audio_merge_sub =
             upipe_audio_merge_sub_from_uchain(uchain);
 
-        uint8_t channel_idx = 0;
-        int ret = uref_audio_merge_get_channel_index(upipe_audio_merge_sub->flow_def, &channel_idx);
-
         ulist_delete_foreach(&upipe_audio_merge_sub->uref_queue, uchain2, uchain_tmp) {
             uref = uref_from_uchain(uchain2);
             uref_clock_get_pts_sys(uref, &pts_sys);
             if (pts_sys + 2700000 <= now) {
                 ulist_delete(uchain2);
             }
-            else if (pts_sys <= now) {
+            else if (pts_sys + upipe_audio_merge_sub->latency <= now) {
                 found = 1;
                 uref_sound_flow_get_samples(uref, &samples);
                 if (pts_sys < lowest_pts_sys )
@@ -451,8 +455,7 @@ static void upipe_audio_merge_cb(struct upump *upump)
                 if( pts_sys == lowest_pts_sys || lowest_pts_sys + 100 > pts_sys ) {
                     uref_sound_read_int32_t(uref, 0, -1, &in_data, 1);
 
-                    uint8_t channel_idx = 0;
-                    uref_audio_merge_get_channel_index(upipe_audio_merge_sub->flow_def, &channel_idx);
+                    uint8_t channel_idx = upipe_audio_merge_sub->channel_index;
                     for (i = 0; i < samples; i++) {
                         for( j = 0; j < 2; j++ ) // FIXME
                             out_data[16*i + channel_idx+j] = in_data[2*i+j];
@@ -519,7 +522,7 @@ static struct upipe *upipe_audio_merge_alloc(struct upipe_mgr *mgr,
     upipe_audio_merge_check_upump_mgr(upipe);
 
     struct upump *upump = upump_alloc_timer(upipe_audio_merge->upump_mgr,
-                                            upipe_audio_merge_cb, upipe,
+                                            upipe_audio_merge_cb, upipe, upipe->refcount,
                                             27000000/1000, 27000000/1000);
 
     upump_start(upump);

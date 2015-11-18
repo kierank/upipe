@@ -637,11 +637,11 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         size_t size = 0;
         uref_sound_size(uref, &size, NULL);
         const int32_t *buffers[1];
-        uref_sound_read_int32_t(uref, 0, size, buffers, 1);
+        uref_sound_read_int32_t(uref, 0, -1, buffers, 1);
 
         uint32_t written;
         result = upipe_bmd_sink->deckLinkOutput->ScheduleAudioSamples((void*)buffers[0], size, pts, UCLOCK_FREQ, &written);
-        uref_sound_unmap(uref, 0, size, 1);
+        uref_sound_unmap(uref, 0, -1, 1);
 
         if( result != S_OK )
             upipe_err_va(upipe, "DROPPED AUDIO");

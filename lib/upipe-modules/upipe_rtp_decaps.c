@@ -191,6 +191,7 @@ static inline void upipe_rtpd_input(struct upipe *upipe, struct uref *uref,
         upipe_rtpd->type = type;
         upipe_rtpd_store_flow_def(upipe, flow_def);
     }
+    uref_rtp_set_timestamp(uref, timestamp);
 
     uref_rtp_set_seqnum(uref, seqnum);
     uref_rtp_set_timestamp(uref, timestamp);

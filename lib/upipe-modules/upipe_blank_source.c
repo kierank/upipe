@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 OpenHeadend S.A.R.L.
+ * Copyright (C) 2014-2015 OpenHeadend S.A.R.L.
  *
  * Authors: Benjamin Cohen
  *
@@ -218,9 +218,6 @@ static void upipe_blksrc_worker(struct upump *upump)
         upipe_blksrc->pts = uclock_now(upipe_blksrc->uclock);
     }
 
-    /* increment refcount */
-    upipe_use(upipe);
-
     current_time = uclock_now(upipe_blksrc->uclock);
     upipe_verbose_va(upipe, "delay %"PRId64, current_time - upipe_blksrc->pts);
 
@@ -238,6 +235,10 @@ static void upipe_blksrc_worker(struct upump *upump)
 
     /* missed ticks */
     while (wait < 0) {
+        /* check if we have been released in the meantime */
+        if (upipe_single(upipe))
+            return;
+
         upipe_warn_va(upipe, "late packet wait %"PRId64, wait);
 
         struct uref *uref = uref_dup(upipe_blksrc->blank_uref);
@@ -257,9 +258,6 @@ static void upipe_blksrc_worker(struct upump *upump)
 
     /* realloc oneshot timer */
     upipe_blksrc_wait_upump(upipe, wait, upipe_blksrc_worker);
-
-    /* decrement refcount */
-    upipe_release(upipe);
 }
 
 /** @internal @This handles input.
@@ -314,7 +312,8 @@ static int upipe_blksrc_check(struct upipe *upipe, struct uref *flow_format)
 
     if (upipe_blksrc->upump == NULL) {
         struct upump *upump = upump_alloc_timer(upipe_blksrc->upump_mgr,
-            upipe_blksrc_worker, upipe, upipe_blksrc->interval, 0);
+            upipe_blksrc_worker, upipe, upipe->refcount,
+            upipe_blksrc->interval, 0);
         if (unlikely(upump == NULL)) {
             upipe_throw_fatal(upipe, UBASE_ERR_UPUMP);
             return UBASE_ERR_UPUMP;
@@ -392,6 +391,14 @@ static int _upipe_blksrc_control(struct upipe *upipe, int command, va_list args)
         case UPIPE_ATTACH_UPUMP_MGR:
             upipe_blksrc_set_upump(upipe, NULL);
             return upipe_blksrc_attach_upump_mgr(upipe);
+        case UPIPE_REGISTER_REQUEST: {
+            struct urequest *request = va_arg(args, struct urequest *);
+            return upipe_blksrc_alloc_output_proxy(upipe, request);
+        }
+        case UPIPE_UNREGISTER_REQUEST: {
+            struct urequest *request = va_arg(args, struct urequest *);
+            return upipe_blksrc_free_output_proxy(upipe, request);
+        }
         case UPIPE_SET_FLOW_DEF: {
             struct uref *flow_def = va_arg(args, struct uref *);
             return upipe_blksrc_set_flow_def(upipe, flow_def);

@@ -97,7 +97,6 @@
 #define UBUF_SHARED_POOL_DEPTH  50
 #define UPUMP_POOL              10
 #define UPUMP_BLOCKER_POOL      10
-#define DEJITTER_DIVIDER        100
 #define XFER_QUEUE              255
 #define XFER_POOL               20
 #define FSRC_OUT_QUEUE_LENGTH   5
@@ -169,8 +168,7 @@ static int catch_glx(struct uprobe *uprobe, struct upipe *upipe,
                 upipe_notice_va(upipe, "exit key pressed (%d), exiting",
                                 key);
                 struct upump *idler_stop = upump_alloc_idler(main_upump_mgr,
-                                                             uplay_stop,
-                                                             (void *)1);
+                        uplay_stop, (void *)1, NULL);
                 upump_start(idler_stop);
             }
             break;
@@ -350,7 +348,7 @@ static int catch_src(struct uprobe *uprobe, struct upipe *upipe,
     if (event == UPROBE_SOURCE_END && main_upump_mgr != NULL) {
         upipe_dbg(upipe, "caught source end, dying");
         struct upump *idler_stop = upump_alloc_idler(main_upump_mgr,
-                                                     uplay_stop, (void *)0);
+                uplay_stop, (void *)0, NULL);
         upump_start(idler_stop);
         return UBASE_ERR_NONE;
     }
@@ -613,7 +611,7 @@ int main(int argc, char **argv)
     umem_mgr_release(umem_mgr);
     uprobe_pthread_upump_mgr_set(uprobe_main, main_upump_mgr);
 
-    uprobe_dejitter = uprobe_dejitter_alloc(uprobe_use(uprobe_main), 0);
+    uprobe_dejitter = uprobe_dejitter_alloc(uprobe_use(uprobe_main), false, 0);
     assert(uprobe_dejitter != NULL);
     uprobe_init(&uprobe_src_s, catch_src, uprobe_use(uprobe_main));
     uprobe_init(&uprobe_video_s, catch_video, uprobe_use(uprobe_dejitter));
@@ -655,7 +653,7 @@ int main(int argc, char **argv)
 
     /* start */
     struct upump *idler_start = upump_alloc_idler(main_upump_mgr, uplay_start,
-                                                  (void *)uri);
+                                                  (void *)uri, NULL);
     upump_start(idler_start);
 
     /* main loop */
