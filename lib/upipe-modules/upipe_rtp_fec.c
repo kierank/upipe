@@ -157,7 +157,7 @@ UBASE_FROM_TO(upipe_rtp_fec, upipe_rtp_fec_sub, main_subpipe, main_subpipe)
 UBASE_FROM_TO(upipe_rtp_fec, upipe_rtp_fec_sub, col_subpipe, col_subpipe)
 UBASE_FROM_TO(upipe_rtp_fec, upipe_rtp_fec_sub, row_subpipe, row_subpipe)
 
-/** @internal @This initializes an subpipe of a bmd sink pipe.
+/** @internal @This initializes an subpipe of a rtp fec pipe.
  *
  * @param upipe pointer to subpipe
  * @param sub_mgr manager of the subpipe
@@ -771,7 +771,8 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
                 upipe_rtp_fec->cols = offset;
                 upipe_rtp_fec->rows = na;
                 fec_change = 1;
-                upipe_warn(upipe, "No FEC Packets received for a while, disabling FEC");
+                upipe_warn_va(upipe, "FEC detected %u rows and %u columns", upipe_rtp_fec->rows,
+                              upipe_rtp_fec->cols);
             }
             insert_ordered_uref(&upipe_rtp_fec->col_queue, uref);
         }
@@ -792,8 +793,7 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
        (upipe_rtp_fec->rows || upipe_rtp_fec->cols)) {
         upipe_rtp_fec->rows = upipe_rtp_fec->cols = 0;
         fec_change = 1;
-        upipe_warn_va(upipe, "FEC detected %u rows and %u columns", upipe_rtp_fec->rows,
-                      upipe_rtp_fec->cols);
+        upipe_warn(upipe, "No FEC Packets received for a while, disabling FEC");
     }
 
     /* Clear matrices if change of FEC */
