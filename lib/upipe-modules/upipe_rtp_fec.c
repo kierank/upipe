@@ -391,7 +391,7 @@ static void upipe_rtp_fec_correct_packets(struct upipe_rtp_fec *upipe_rtp_fec,
                 break;
         }
 
-        upipe_warn_va(upipe, "Corrected packet. Sequence number: %u", missing_seqnum);
+        upipe_warn_va(&upipe_rtp_fec->upipe, "Corrected packet. Sequence number: %u", missing_seqnum);
         //printf("\n items %i correctheader %x not-lost seqnum %u timestamp %u \n", items, dst[0], missing_seqnum, ts_rec );
         uref_block_unmap(fec_uref, 0);
         uref_rtp_set_seqnum(fec_uref, missing_seqnum);
