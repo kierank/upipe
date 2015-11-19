@@ -733,6 +733,7 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
                         /* Start pump that clears the buffer */
                         struct upump *upump = upump_alloc_timer(upipe_rtp_fec->upump_mgr,
                                                                 upipe_rtp_fec_timer, &upipe_rtp_fec->upipe,
+                                                                &upipe_rtp_fec->upipe.refcount,
                                                                 0, UCLOCK_FREQ/90000);
                         upipe_rtp_fec_set_upump(&upipe_rtp_fec->upipe, upump);
                         upump_start(upump);
