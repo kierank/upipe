@@ -769,7 +769,8 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
                 uref_free(uref);
                 return;
             }
-            if (upipe_rtp_fec->cols != offset) {
+            if (upipe_rtp_fec->cols != offset && upipe_rtp_fec->cols <= 50 &&
+                upipe_rtp_fec->rows <= 50) {
                 upipe_rtp_fec->cols = offset;
                 upipe_rtp_fec->rows = na;
                 fec_change = 1;
