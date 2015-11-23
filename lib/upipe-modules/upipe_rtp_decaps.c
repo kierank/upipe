@@ -164,9 +164,9 @@ static inline void upipe_rtpd_input(struct upipe *upipe, struct uref *uref,
 
     if (unlikely(upipe_rtpd->expected_seqnum != -1 &&
                  seqnum != upipe_rtpd->expected_seqnum)) {
-        upipe_warn_va(upipe, "potentially lost %d RTP packets",
+        upipe_warn_va(upipe, "potentially lost %d RTP packets, got %u expected %u",
                       (seqnum + UINT16_MAX + 1 - upipe_rtpd->expected_seqnum) &
-                      UINT16_MAX);
+                      UINT16_MAX, seqnum, upipe_rtpd->expected_seqnum);
         uref_flow_set_discontinuity(uref);
     }
     upipe_rtpd->expected_seqnum = seqnum + 1;
@@ -191,6 +191,9 @@ static inline void upipe_rtpd_input(struct upipe *upipe, struct uref *uref,
         upipe_rtpd->type = type;
         upipe_rtpd_store_flow_def(upipe, flow_def);
     }
+    uref_rtp_set_timestamp(uref, timestamp);
+
+    uref_rtp_set_seqnum(uref, seqnum);
     uref_rtp_set_timestamp(uref, timestamp);
 
     uref_block_resize(uref, offset, -1);

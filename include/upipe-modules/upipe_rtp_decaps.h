@@ -38,13 +38,14 @@ extern "C" {
 
 #define UPIPE_RTPD_SIGNATURE UBASE_FOURCC('r','t','p','d')
 
+UREF_ATTR_UNSIGNED(rtp, timestamp, "timestamp", TIMESTAMP)
+UREF_ATTR_UNSIGNED(rtp, seqnum, "seqnum", SEQNUM)
+
 /** @This returns the management structure for rtpd pipes.
  *
  * @return pointer to manager
  */
 struct upipe_mgr *upipe_rtpd_mgr_alloc(void);
-
-UREF_ATTR_UNSIGNED(rtp, timestamp, "timestamp", TIMESTAMP)
 
 #ifdef __cplusplus
 }
