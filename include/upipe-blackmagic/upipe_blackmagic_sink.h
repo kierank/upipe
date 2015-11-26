@@ -34,6 +34,12 @@ extern "C" {
 #define UPIPE_BMD_SINK_SIGNATURE UBASE_FOURCC('b','m','d','k')
 #define UPIPE_BMD_SINK_INPUT_SIGNATURE UBASE_FOURCC('b','m','d','i')
 
+enum upipe_bmd_sink_genlock {
+    UPIPE_BMD_SINK_GENLOCK_UNLOCKED,
+    UPIPE_BMD_SINK_GENLOCK_LOCKED,
+    UPIPE_BMD_SINK_GENLOCK_UNSUPPORTED,    
+};
+
 /** @This extends upipe_command with specific commands for avformat source. */
 enum upipe_bmd_sink_command {
     UPIPE_BMD_SINK_SENTINEL = UPIPE_CONTROL_LOCAL,
@@ -46,7 +52,14 @@ enum upipe_bmd_sink_command {
     UPIPE_BMD_SINK_GET_SUBPIC_SUB,
 
     /** returns the uclock (struct uclock *) **/
-    UPIPE_BMD_SINK_GET_UCLOCK
+    UPIPE_BMD_SINK_GET_UCLOCK,
+
+    /** returns the genlock status (int) **/
+    UPIPE_BMD_SINK_GET_GENLOCK_STATUS,
+    /** returns the genlock offset (int) **/
+    UPIPE_BMD_SINK_GET_GENLOCK_OFFSET,
+    /** sets the genlock offset (int) **/
+    UPIPE_BMD_SINK_SET_GENLOCK_OFFSET,
 };
 
 /** @This returns the management structure for all bmd sinks.
@@ -97,8 +110,7 @@ static inline int upipe_bmd_sink_get_subpic_sub(struct upipe *upipe,
                           UPIPE_BMD_SINK_SIGNATURE, upipe_p);
 }
 
-/** @This returns the bmd_sink uclock. The refcount is not incremented so you
- * have to use it if you want to keep the pointer.
+/** @This returns the bmd_sink uclock. 
  *
  * @param upipe description structure of the super pipe
  * @param upipe_p filled in with a pointer to the subpic subpipe
@@ -109,6 +121,45 @@ static inline int upipe_bmd_sink_get_uclock(struct upipe *upipe,
 {
     return upipe_control(upipe, UPIPE_BMD_SINK_GET_UCLOCK,
                           UPIPE_BMD_SINK_SIGNATURE, uclock_p);
+}
+
+/** @This returns the bmd_sink genlock status. 
+ *
+ * @param upipe description structure of the super pipe
+ * @param status filled with a upipe_bmd_sink_genlock value 
+ * @return an error code
+ */
+static inline int upipe_bmd_sink_get_genlock_status(struct upipe *upipe,
+                                                    int *status)
+{
+    return upipe_control(upipe, UPIPE_BMD_SINK_GET_GENLOCK_STATUS,
+                          UPIPE_BMD_SINK_SIGNATURE, status);
+}
+
+/** @This returns the bmd_sink genlock offset. 
+ *
+ * @param upipe description structure of the super pipe
+ * @param offset filled with the genlock offset in pixels
+ * @return an error code
+ */
+static inline int upipe_bmd_sink_get_genlock_offset(struct upipe *upipe,
+                                                    int64_t *offset)
+{
+    return upipe_control(upipe, UPIPE_BMD_SINK_GET_GENLOCK_OFFSET,
+                          UPIPE_BMD_SINK_SIGNATURE, offset);
+}
+
+/** @This sets the bmd_sink genlock offset. 
+ *
+ * @param upipe description structure of the super pipe
+ * @param offset filled with the genlock offset in pixels
+ * @return an error code
+ */
+static inline int upipe_bmd_sink_set_genlock_offset(struct upipe *upipe,
+                                                    int64_t offset)
+{
+    return upipe_control(upipe, UPIPE_BMD_SINK_SET_GENLOCK_OFFSET,
+                          UPIPE_BMD_SINK_SIGNATURE, offset);
 }
 
 /** @This allocates and initializes a bmd sink pipe.

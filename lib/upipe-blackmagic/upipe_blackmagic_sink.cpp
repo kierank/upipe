@@ -1031,6 +1031,104 @@ static int upipe_bmd_sink_set_option(struct upipe *upipe,
     return UBASE_ERR_NONE;
 }
 
+/** @internal @This returns the bmd_sink genlock status. 
+ *
+ * @param upipe description structure of the pipe
+ * @param pointer to integer for genlock status
+ * @return an error code
+ */
+static int _upipe_bmd_sink_get_genlock_status(struct upipe *upipe, int *status)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
+    BMDReferenceStatus reference_status;
+
+    HRESULT result = upipe_bmd_sink->deckLinkOutput->GetReferenceStatus(&reference_status);
+    if (reference_status & bmdReferenceNotSupportedByHardware) {
+        *status = UPIPE_BMD_SINK_GENLOCK_UNSUPPORTED;
+        return UBASE_ERR_NONE;
+    }
+
+    if (reference_status & bmdReferenceLocked) {
+        *status = UPIPE_BMD_SINK_GENLOCK_LOCKED;
+        return UBASE_ERR_NONE;
+    }
+
+    *status = UPIPE_BMD_SINK_GENLOCK_UNLOCKED;
+    return UBASE_ERR_NONE;
+}
+
+/** @internal @This returns the bmd_sink genlock offset. 
+ *
+ * @param upipe description structure of the pipe
+ * @param pointer to int64_t for genlock offset
+ * @return an error code
+ */
+static int _upipe_bmd_sink_get_genlock_offset(struct upipe *upipe, int64_t *offset)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
+    BMDReferenceStatus reference_status;
+    IDeckLinkConfiguration *decklink_configuration;
+    HRESULT result;
+
+    result = upipe_bmd_sink->deckLinkOutput->GetReferenceStatus(&reference_status);
+    if ((reference_status & bmdReferenceNotSupportedByHardware) ||
+        !(reference_status & bmdReferenceLocked)) {
+        *offset = 0;
+        return UBASE_ERR_EXTERNAL;
+    }
+
+    result = upipe_bmd_sink->deckLink->QueryInterface(IID_IDeckLinkConfiguration, (void**)&decklink_configuration);
+    if (result != S_OK) {
+        *offset = 0;
+        return UBASE_ERR_EXTERNAL;
+    }
+
+    result = decklink_configuration->GetInt(bmdDeckLinkConfigReferenceInputTimingOffset, offset);
+    if (result != S_OK) {
+        *offset = 0;
+        decklink_configuration->Release();
+        return UBASE_ERR_EXTERNAL;
+    }
+    decklink_configuration->Release();
+
+    return UBASE_ERR_NONE;
+}
+
+/** @internal @This sets the bmd_sink genlock offset. 
+ *
+ * @param upipe description structure of the pipe
+ * @param int64_t requested genlock offset
+ * @return an error code
+ */
+static int _upipe_bmd_sink_set_genlock_offset(struct upipe *upipe, int64_t offset)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
+    BMDReferenceStatus reference_status;
+    IDeckLinkConfiguration *decklink_configuration;
+    HRESULT result;
+
+    result = upipe_bmd_sink->deckLinkOutput->GetReferenceStatus(&reference_status);
+    if ((reference_status & bmdReferenceNotSupportedByHardware)) {
+        return UBASE_ERR_EXTERNAL;
+    }
+
+    result = upipe_bmd_sink->deckLink->QueryInterface(IID_IDeckLinkConfiguration, (void**)&decklink_configuration);
+    if (result != S_OK) {
+        return UBASE_ERR_EXTERNAL;
+    }
+
+    result = decklink_configuration->SetInt(bmdDeckLinkConfigReferenceInputTimingOffset, offset);
+    if (result != S_OK) {
+        decklink_configuration->Release();
+        return UBASE_ERR_EXTERNAL;
+    }
+
+    decklink_configuration->Release();
+
+    return UBASE_ERR_NONE;
+}
+
+
 /** @internal @This processes control commands on an bmd_sink source pipe.
  *
  * @param upipe description structure of the pipe
@@ -1077,6 +1175,21 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
             struct uclock *uclock = uclock_bmd_sink_to_uclock(uclock_bmd_sink);
             *pp_uclock = uclock;
             return UBASE_ERR_NONE;
+        }
+        case UPIPE_BMD_SINK_GET_GENLOCK_STATUS: {
+            UBASE_SIGNATURE_CHECK(args, UPIPE_BMD_SINK_SIGNATURE)
+            int *status = va_arg(args, int *);
+            return _upipe_bmd_sink_get_genlock_status(upipe, status);
+        }
+        case UPIPE_BMD_SINK_GET_GENLOCK_OFFSET: {
+            UBASE_SIGNATURE_CHECK(args, UPIPE_BMD_SINK_SIGNATURE)
+            int64_t *offset = va_arg(args, int64_t *);
+            return _upipe_bmd_sink_get_genlock_offset(upipe, offset);
+        }
+        case UPIPE_BMD_SINK_SET_GENLOCK_OFFSET: {
+            UBASE_SIGNATURE_CHECK(args, UPIPE_BMD_SINK_SIGNATURE)
+            int64_t offset = va_arg(args, int64_t);
+            return _upipe_bmd_sink_set_genlock_offset(upipe, offset);
         }
         case UPIPE_SET_OPTION: {
             const char *k = va_arg(args, const char *);
