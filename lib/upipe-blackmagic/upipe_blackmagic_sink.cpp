@@ -1123,6 +1123,7 @@ static int _upipe_bmd_sink_set_genlock_offset(struct upipe *upipe, int64_t offse
         return UBASE_ERR_EXTERNAL;
     }
 
+    decklink_configuration->WriteConfigurationToPreferences();
     decklink_configuration->Release();
 
     return UBASE_ERR_NONE;
