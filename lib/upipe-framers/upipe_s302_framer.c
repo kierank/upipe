@@ -158,11 +158,11 @@ static void upipe_s302f_work(struct upipe *upipe, struct upump **upump_p)
     num_channels = ((header[2] >> 6) + 1) * 2;
     bits_per_sample = (header[3] >> 4) & 0x3;
 
-    if (audio_packet_size + S302_HEADER_SIZE != upipe_s302f->next_uref_size)
+    if (audio_packet_size != upipe_s302f->next_uref_size)
         goto upipe_s302f_work_err;
 
     pair_length = pair_lengths[bits_per_sample];
-    num_samples = (audio_packet_size - S302_HEADER_SIZE) / (pair_length * num_channels);
+    num_samples = audio_packet_size / (pair_length * num_channels);
     octetrate = S302_FREQUENCY * audio_packet_size / num_samples;
 
     /* Avoid jitter on NTSC patterns */
