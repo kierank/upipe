@@ -3109,7 +3109,7 @@ struct upipe_mgr *upipe_ts_demux_mgr_alloc(void)
     ts_demux_mgr->telxf_mgr = NULL;
     ts_demux_mgr->dvbsubf_mgr = NULL;
     ts_demux_mgr->opusf_mgr = NULL;
-    ts_demux_mgr->s302_mgr = NULL;
+    ts_demux_mgr->s302f_mgr = NULL;
 
     urefcount_init(upipe_ts_demux_mgr_to_urefcount(ts_demux_mgr),
                    upipe_ts_demux_mgr_free);
