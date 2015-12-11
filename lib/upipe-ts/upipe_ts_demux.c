@@ -853,7 +853,7 @@ static int upipe_ts_demux_output_plumber(struct upipe *upipe,
         return UBASE_ERR_NONE;
     }
 
-    if (!ubase_ncmp(def, "block.s302.") &&
+    if (!ubase_ncmp(def, "block.s302m.") &&
         ts_demux_mgr->s302f_mgr != NULL) {
         /* allocate s302f inner */
         struct upipe *output =
