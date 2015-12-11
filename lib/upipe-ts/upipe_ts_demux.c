@@ -174,6 +174,8 @@ struct upipe_ts_demux_mgr {
     struct upipe_mgr *dvbsubf_mgr;
     /** pointer to opusf manager */
     struct upipe_mgr *opusf_mgr;
+    /** pointer to s302f manager */
+    struct upipe_mgr *s302f_mgr;
 
     /** public upipe_mgr structure */
     struct upipe_mgr mgr;
@@ -845,6 +847,20 @@ static int upipe_ts_demux_output_plumber(struct upipe *upipe,
                 uprobe_pfx_alloc(
                     uprobe_use(&upipe_ts_demux_output->last_inner_probe),
                     UPROBE_LOG_VERBOSE, "opusf"));
+        if (unlikely(output == NULL))
+            return UBASE_ERR_ALLOC;
+        upipe_ts_demux_output_store_last_inner(upipe, output);
+        return UBASE_ERR_NONE;
+    }
+
+    if (!ubase_ncmp(def, "block.s302.") &&
+        ts_demux_mgr->s302f_mgr != NULL) {
+        /* allocate s302f inner */
+        struct upipe *output =
+            upipe_void_alloc_output(inner, ts_demux_mgr->s302f_mgr,
+                uprobe_pfx_alloc(
+                    uprobe_use(&upipe_ts_demux_output->last_inner_probe),
+                    UPROBE_LOG_VERBOSE, "s302f"));
         if (unlikely(output == NULL))
             return UBASE_ERR_ALLOC;
         upipe_ts_demux_output_store_last_inner(upipe, output);
