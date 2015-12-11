@@ -29,8 +29,7 @@
 #include <upipe/uref_flow.h>
 #include <upipe/uref_block.h>
 #include <upipe/uref_block_flow.h>
-#include <upipe/uref_pic.h>
-#include <upipe/uref_pic_flow.h>
+#include <upipe/uref_sound_flow.h>
 #include <upipe/uref_clock.h>
 #include <upipe/uclock.h>
 #include <upipe/ubuf.h>
@@ -152,42 +151,50 @@ static void upipe_s302f_work(struct upipe *upipe, struct upump **upump_p)
 
     if (!ubase_check(uref_block_extract(upipe_s302f->next_uref,
                                         0, S302_HEADER_SIZE, header))) {
-        goto upipe_s302f_work_err;
+        return;
     }
     audio_packet_size = (header[0] << 8) | header[1];
     num_channels = ((header[2] >> 6) + 1) * 2;
     bits_per_sample = (header[3] >> 4) & 0x3;
 
-    if (audio_packet_size != upipe_s302f->next_uref_size)
+    if (audio_packet_size + S302_HEADER_SIZE < upipe_s302f->next_uref_size)
+        return;
+
+    if(audio_packet_size + S302_HEADER_SIZE > upipe_s302f->next_uref_size)
         goto upipe_s302f_work_err;
 
     pair_length = pair_lengths[bits_per_sample];
-    num_samples = audio_packet_size / (pair_length * num_channels);
+    num_samples = audio_packet_size / (pair_length * (num_channels / 2));
     octetrate = S302_FREQUENCY * audio_packet_size / num_samples;
 
     /* Avoid jitter on NTSC patterns */
-    if ((octetrate > upipe_s302f->octetrate + 100) ||
-        (octetrate < upipe_s302f->octetrate - 100)) {
+    if ((octetrate > upipe_s302f->octetrate + 500) ||
+        (octetrate < upipe_s302f->octetrate - 500)) {
         upipe_s302f->octetrate = octetrate;
-
-        struct uref *flow_def = upipe_s302f_alloc_flow_def_attr(upipe);
-        if (unlikely(flow_def == NULL)) {
-            upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-            uref_free(upipe_s302f->next_uref);
-            goto upipe_s302f_work_err;
-        }
-
-        UBASE_FATAL(upipe, uref_block_flow_set_octetrate(flow_def,
-                                upipe_s302f->octetrate))
-
-        flow_def = upipe_s302f_store_flow_def_attr(upipe, flow_def);
-        if (unlikely(flow_def == NULL)) {
-            upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-            uref_free(upipe_s302f->next_uref);
-            goto upipe_s302f_work_err;
-        }
-        upipe_s302f_store_flow_def(upipe, flow_def);
     }
+
+    struct uref *flow_def = upipe_s302f_alloc_flow_def_attr(upipe);
+    if (unlikely(flow_def == NULL)) {
+        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+        uref_free(upipe_s302f->next_uref);
+        goto upipe_s302f_work_err;
+    }
+
+    UBASE_FATAL(upipe, uref_flow_set_def(flow_def, "block.s302m.sound."))
+    UBASE_FATAL(upipe, uref_block_flow_set_octetrate(flow_def,
+                            upipe_s302f->octetrate))
+    UBASE_FATAL(upipe, uref_sound_flow_set_rate(flow_def,
+                            S302_FREQUENCY))
+    UBASE_FATAL(upipe, uref_sound_flow_set_channels(flow_def,
+                            num_channels))
+
+    flow_def = upipe_s302f_store_flow_def_attr(upipe, flow_def);
+    if (unlikely(flow_def == NULL)) {
+        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+        uref_free(upipe_s302f->next_uref);
+        goto upipe_s302f_work_err;
+    }
+    upipe_s302f_store_flow_def(upipe, flow_def);
     upipe_s302f_sync_acquired(upipe);
 
     uint64_t duration = num_samples * UCLOCK_FREQ / S302_FREQUENCY;
@@ -213,6 +220,8 @@ static void upipe_s302f_work(struct upipe *upipe, struct upump **upump_p)
     uref_clock_set_dts_pts_delay(upipe_s302f->next_uref, 0);
     if (drift_rate.den)
         uref_clock_set_rate(upipe_s302f->next_uref, drift_rate);
+
+    upipe_s302f_output(upipe, upipe_s302f->next_uref, upump_p);
 upipe_s302f_work_err:
     upipe_s302f->next_uref = NULL;
     upipe_s302f->next_uref_size = 0;
