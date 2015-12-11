@@ -3065,6 +3065,7 @@ static int upipe_ts_demux_mgr_control(struct upipe_mgr *mgr,
         GET_SET_MGR(telxf, TELXF)
         GET_SET_MGR(dvbsubf, DVBSUBF)
         GET_SET_MGR(opusf, OPUSF)
+        GET_SET_MGR(s302f, S302F)
 #undef GET_SET_MGR
 
         default:
