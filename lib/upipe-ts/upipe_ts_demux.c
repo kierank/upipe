@@ -174,6 +174,8 @@ struct upipe_ts_demux_mgr {
     struct upipe_mgr *dvbsubf_mgr;
     /** pointer to opusf manager */
     struct upipe_mgr *opusf_mgr;
+    /** pointer to s302f manager */
+    struct upipe_mgr *s302f_mgr;
 
     /** public upipe_mgr structure */
     struct upipe_mgr mgr;
@@ -403,6 +405,8 @@ struct upipe_ts_demux_output {
     /** structure for double-linked lists */
     struct uchain uchain;
 
+    /** flow definition of the input */
+    struct uref *flow_def_input;
     /** PID */
     uint64_t pid;
     /** true if the output is used for PCR */
@@ -849,6 +853,20 @@ static int upipe_ts_demux_output_plumber(struct upipe *upipe,
         return UBASE_ERR_NONE;
     }
 
+    if (!ubase_ncmp(def, "block.s302m.") &&
+        ts_demux_mgr->s302f_mgr != NULL) {
+        /* allocate s302f inner */
+        struct upipe *output =
+            upipe_void_alloc_output(inner, ts_demux_mgr->s302f_mgr,
+                uprobe_pfx_alloc(
+                    uprobe_use(&upipe_ts_demux_output->last_inner_probe),
+                    UPROBE_LOG_VERBOSE, "s302f"));
+        if (unlikely(output == NULL))
+            return UBASE_ERR_ALLOC;
+        upipe_ts_demux_output_store_last_inner(upipe, output);
+        return UBASE_ERR_NONE;
+    }
+
     upipe_warn_va(upipe, "unframed output flow definition: %s", def);
     /* allocate idem inner */
     struct upipe *output =
@@ -915,6 +933,7 @@ static struct upipe *upipe_ts_demux_output_alloc(struct upipe_mgr *mgr,
     urefcount_init(upipe_ts_demux_output_to_urefcount_real(upipe_ts_demux_output), upipe_ts_demux_output_free);
     upipe_ts_demux_output_init_bin_output(upipe,
             upipe_ts_demux_output_to_urefcount_real(upipe_ts_demux_output));
+    upipe_ts_demux_output->flow_def_input = flow_def;
     upipe_ts_demux_output->pcr = false;
     upipe_ts_demux_output->split_output = NULL;
     upipe_ts_demux_output->setrap = NULL;
@@ -934,7 +953,6 @@ static struct upipe *upipe_ts_demux_output_alloc(struct upipe_mgr *mgr,
                  !ubase_check(uref_flow_get_raw_def(flow_def, &def)) ||
                  !ubase_check(uref_flow_set_def(flow_def, def)) ||
                  !ubase_check(uref_flow_delete_raw_def(flow_def)))) {
-        uref_free(flow_def);
         upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
         return upipe;
     }
@@ -963,7 +981,6 @@ static struct upipe *upipe_ts_demux_output_alloc(struct upipe_mgr *mgr,
                                    upipe_ts_demux_output->pid))) == NULL))
         upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
 
-    uref_free(flow_def);
     upipe_ts_demux_program_check_pcr(upipe_ts_demux_program_to_upipe(program));
     return upipe;
 }
@@ -1018,6 +1035,20 @@ static int upipe_ts_demux_output_control(struct upipe *upipe,
             struct upipe **p = va_arg(args, struct upipe **);
             return upipe_ts_demux_output_get_super(upipe, p);
         }
+        case UPIPE_GET_FLOW_DEF: {
+            int err = upipe_ts_demux_output_control_bin_output(upipe, command,
+                                                               args);
+            if (err != UBASE_ERR_UNHANDLED)
+                return err;
+
+            /* We always want to return a flow definition even without
+             * framer */
+            struct upipe_ts_demux_output *upipe_ts_demux_output =
+                upipe_ts_demux_output_from_upipe(upipe);
+            struct uref **p = va_arg(args, struct uref **);
+            *p = upipe_ts_demux_output->flow_def_input;
+            return UBASE_ERR_NONE;
+        }
 
         default:
             return upipe_ts_demux_output_control_bin_output(upipe, command,
@@ -1036,6 +1067,7 @@ static void upipe_ts_demux_output_free(struct urefcount *urefcount_real)
     struct upipe *upipe = upipe_ts_demux_output_to_upipe(upipe_ts_demux_output);
 
     upipe_throw_dead(upipe);
+    uref_free(upipe_ts_demux_output->flow_def_input);
     uprobe_clean(&upipe_ts_demux_output->probe);
     urefcount_clean(urefcount_real);
     upipe_ts_demux_output_clean_urefcount(upipe);
@@ -1096,8 +1128,14 @@ static void upipe_ts_demux_program_build_flow_def(struct upipe *upipe)
         upipe_ts_demux_program_from_upipe(upipe);
     struct uref *flow_def_pmt;
     if (!ubase_check(upipe_get_flow_def(upipe_ts_demux_program->pmtd,
-                                        &flow_def_pmt)) || flow_def_pmt == NULL)
+                                        &flow_def_pmt)) ||
+        flow_def_pmt == NULL) {
+        /* Use input flow def, it is still better than nothing */
+        upipe_ts_demux_program_store_flow_def(upipe,
+                uref_dup(upipe_ts_demux_program->flow_def_input));
+        /* Do not force sending flow def as it is not the real one */
         return;
+    }
 
     struct uref *flow_def = NULL;
     if (upipe_ts_demux_program->eitd != NULL &&
@@ -1631,6 +1669,7 @@ static struct upipe *upipe_ts_demux_program_alloc(struct upipe_mgr *mgr,
         upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
         return upipe;
     }
+    upipe_ts_demux_program_build_flow_def(upipe);
 
     return upipe;
 }
@@ -2963,6 +3002,7 @@ static void upipe_ts_demux_mgr_free(struct urefcount *urefcount)
     upipe_mgr_release(ts_demux_mgr->telxf_mgr);
     upipe_mgr_release(ts_demux_mgr->dvbsubf_mgr);
     upipe_mgr_release(ts_demux_mgr->opusf_mgr);
+    upipe_mgr_release(ts_demux_mgr->s302f_mgr);
 
     urefcount_clean(urefcount);
     free(ts_demux_mgr);
@@ -3025,6 +3065,7 @@ static int upipe_ts_demux_mgr_control(struct upipe_mgr *mgr,
         GET_SET_MGR(telxf, TELXF)
         GET_SET_MGR(dvbsubf, DVBSUBF)
         GET_SET_MGR(opusf, OPUSF)
+        GET_SET_MGR(s302f, S302F)
 #undef GET_SET_MGR
 
         default:
@@ -3069,6 +3110,7 @@ struct upipe_mgr *upipe_ts_demux_mgr_alloc(void)
     ts_demux_mgr->telxf_mgr = NULL;
     ts_demux_mgr->dvbsubf_mgr = NULL;
     ts_demux_mgr->opusf_mgr = NULL;
+    ts_demux_mgr->s302f_mgr = NULL;
 
     urefcount_init(upipe_ts_demux_mgr_to_urefcount(ts_demux_mgr),
                    upipe_ts_demux_mgr_free);

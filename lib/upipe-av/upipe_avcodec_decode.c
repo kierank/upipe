@@ -90,7 +90,7 @@ struct upipe_avcdec {
 
     /** input flow */
     struct uref *flow_def_input;
-    /** attributes describing picture format */
+    /** attributes describing output format */
     struct uref *flow_def_format;
     /** attributes added by the pipe */
     struct uref *flow_def_attr;
@@ -317,7 +317,16 @@ static int upipe_avcdec_get_buffer_pic(struct AVCodecContext *context,
         UBASE_FATAL(upipe, uref_pic_flow_set_sar(flow_def_attr, sar))
     }
 
+    if (unlikely(upipe_avcdec->ubuf_mgr != NULL &&
+                 udict_cmp(upipe_avcdec->flow_def_format->udict,
+                           flow_def_attr->udict))) {
+        /* flow format changed */
+        ubuf_mgr_release(upipe_avcdec->ubuf_mgr);
+        upipe_avcdec->ubuf_mgr = NULL;
+    }
+
     if (unlikely(upipe_avcdec->ubuf_mgr == NULL)) {
+        upipe_avcdec->flow_def_format = uref_dup(flow_def_attr);
         if (unlikely(!upipe_avcdec_demand_ubuf_mgr(upipe, flow_def_attr))) {
             uref_free(uref);
             return -1;
@@ -482,8 +491,6 @@ static int upipe_avcdec_get_buffer_sound(struct AVCodecContext *context,
     if (context->frame_size)
         UBASE_FATAL(upipe, uref_sound_flow_set_samples(flow_def_attr,
                                                  context->frame_size))
-    UBASE_FATAL(upipe, uref_sound_flow_set_sample_size(flow_def_attr,
-                     av_get_bytes_per_sample(context->sample_fmt)))
     UBASE_FATAL(upipe, uref_sound_flow_set_align(flow_def_attr, 32))
 
     if (unlikely(upipe_avcdec->ubuf_mgr == NULL)) {
@@ -524,6 +531,9 @@ static int upipe_avcdec_get_buffer_sound(struct AVCodecContext *context,
 
     frame->linesize[0] = av_get_bytes_per_sample(context->sample_fmt) *
                          frame->nb_samples;
+
+    if (!av_sample_fmt_is_planar(context->sample_fmt))
+        frame->linesize[0] *= context->channels;
 
     frame->extended_data = frame->data;
     frame->type = FF_BUFFER_TYPE_USER;
@@ -1357,6 +1367,7 @@ static void upipe_avcdec_free(struct upipe *upipe)
 
     upipe_throw_dead(upipe);
     uref_free(upipe_avcdec->uref);
+    uref_free(upipe_avcdec->flow_def_format);
     uref_free(upipe_avcdec->flow_def_provided);
     upipe_avcdec_abort_av_deal(upipe);
     upipe_avcdec_clean_input(upipe);
@@ -1409,6 +1420,7 @@ static struct upipe *upipe_avcdec_alloc(struct upipe_mgr *mgr,
     upipe_avcdec->sample_fmt = AV_SAMPLE_FMT_NONE;
     upipe_avcdec->channels = 0;
     upipe_avcdec->uref = NULL;
+    upipe_avcdec->flow_def_format = NULL;
     upipe_avcdec->flow_def_provided = NULL;
 
     upipe_avcdec->index_rap = 0;
