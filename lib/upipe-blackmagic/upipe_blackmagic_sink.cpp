@@ -356,8 +356,6 @@ static void upipe_bmd_sink_write_cdp_header(struct upipe *upipe, uint16_t *dst)
     dst[5] = upipe_bmd_sink->cdp_hdr_sequence_cntr >> 8;
     dst[6] = upipe_bmd_sink->cdp_hdr_sequence_cntr & 0xff;
 
-    upipe_bmd_sink->cdp_hdr_sequence_cntr++;
-
     *upipe_bmd_sink->dc += CDP_HEADER_SIZE;
 }
 
@@ -388,6 +386,8 @@ static void upipe_bmd_sink_write_cdp_footer(struct upipe *upipe, uint16_t *dst)
     dst[0] = 0x74;
     dst[1] = upipe_bmd_sink->cdp_hdr_sequence_cntr >> 8;
     dst[2] = upipe_bmd_sink->cdp_hdr_sequence_cntr & 0xff;
+
+    upipe_bmd_sink->cdp_hdr_sequence_cntr++;
 
     *upipe_bmd_sink->dc += 4;
     cnt = *upipe_bmd_sink->dc;
