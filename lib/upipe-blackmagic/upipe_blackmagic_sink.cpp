@@ -352,7 +352,7 @@ static void upipe_bmd_sink_write_cdp_header(struct upipe *upipe, uint16_t *dst)
     dst[1] = 0x69;
     dst[2] = 0; // cdp_length
     dst[3] = (fps << 4) | 0xf; // cdp_frame_rate | Reserved
-    dst[4] = (1 << 8) | (1 << 1) | 1; // ccdata_present | caption_service_active | Reserved
+    dst[4] = (1 << 6) | (1 << 1) | 1; // ccdata_present | caption_service_active | Reserved
     dst[5] = upipe_bmd_sink->cdp_hdr_sequence_cntr >> 8;
     dst[6] = upipe_bmd_sink->cdp_hdr_sequence_cntr & 0xff;
 
