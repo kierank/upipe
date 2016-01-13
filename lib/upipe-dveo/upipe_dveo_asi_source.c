@@ -24,91 +24,417 @@
  */
 
 /** @file
- * @short Upipe source for DVEO ASI cards
+ * @short Upipe source module DVEO ASI cards
  */
 
 #include <upipe/ubase.h>
 #include <upipe/uprobe.h>
+#include <upipe/urequest.h>
+#include <upipe/uclock.h>
 #include <upipe/uref.h>
-#include <upipe/upipe.h>
+#include <upipe/uref_block.h>
+#include <upipe/uref_block_flow.h>
+#include <upipe/uref_clock.h>
+#include <upipe/upump.h>
+#include <upipe/ubuf.h>
 #include <upipe/upipe.h>
 #include <upipe/upipe_helper_upipe.h>
 #include <upipe/upipe_helper_urefcount.h>
 #include <upipe/upipe_helper_void.h>
+#include <upipe/upipe_helper_uref_mgr.h>
+#include <upipe/upipe_helper_ubuf_mgr.h>
 #include <upipe/upipe_helper_output.h>
-#include <upipe-modules/upipe_dveo_asi_src.h>
+#include <upipe/upipe_helper_upump_mgr.h>
+#include <upipe/upipe_helper_upump.h>
+#include <upipe/upipe_helper_uclock.h>
+#include <upipe/upipe_helper_output_size.h>
+#include <upipe-dveo/upipe_dveo_asi_source.h>
 
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <errno.h>
 #include <assert.h>
 
-/** upipe_dveo_asi_src structure */
+#ifndef O_CLOEXEC
+#   define O_CLOEXEC 0
+#endif
+
+const char dev_fmt[] = "/dev/asirx%u";
+const char sys_fmt[] = "/sys/class/asi/asirx%u/%s";
+
+/** default size of buffers when unspecified, extra 8-byte timestamp on capture */
+#define CAPTURE_DEFAULT_SIZE  (((188+8)*49) / 8)
+#define RX_DEFAULT_SIZE       (CAPTURE_DEFAULT_SIZE * 8)
+#define GRANULARITY           (8)
+#define BUFFERS               (2)
+#define OPERATING_MODE        (1)
+#define TIMESTAMP_MODE        (2)
+#define TS_PACKETS            (7)
+
+/** @hidden */
+static int upipe_dveo_asi_src_check(struct upipe *upipe, struct uref *flow_format);
+
+/** @internal @This is the private context of a file source pipe. */
 struct upipe_dveo_asi_src {
     /** refcount management structure */
     struct urefcount urefcount;
 
-    /** output pipe */
+    /** uref manager */
+    struct uref_mgr *uref_mgr;
+    /** uref manager request */
+    struct urequest uref_mgr_request;
+
+    /** ubuf manager */
+    struct ubuf_mgr *ubuf_mgr;
+    /** flow format packet */
+    struct uref *flow_format;
+    /** ubuf manager request */
+    struct urequest ubuf_mgr_request;
+
+    /** uclock structure, if not NULL we are in live mode */
+    struct uclock *uclock;
+    /** uclock request */
+    struct urequest uclock_request;
+
+    /** pipe acting as output */
     struct upipe *output;
-    /** flow_definition packet */
+    /** flow definition packet */
     struct uref *flow_def;
     /** output state */
     enum upipe_helper_output_state output_state;
     /** list of output requests */
     struct uchain request_list;
 
+    /** upump manager */
+    struct upump_mgr *upump_mgr;
+    /** read watcher */
+    struct upump *upump;
+    /** read size */
+    unsigned int output_size;
+
+    /** card index **/
+    int card_idx;
+
+    /** file descriptor */
+    int fd;
+
+    /** last timestamp **/
+    int64_t last_ts;
+
     /** public upipe structure */
     struct upipe upipe;
 };
 
-UPIPE_HELPER_UPIPE(upipe_dveo_asi_src, upipe, UPIPE_DVEO_ASI_SRC_SIGNATURE);
+UPIPE_HELPER_UPIPE(upipe_dveo_asi_src, upipe, UPIPE_DVEO_ASI_SRC_SIGNATURE)
 UPIPE_HELPER_UREFCOUNT(upipe_dveo_asi_src, urefcount, upipe_dveo_asi_src_free)
-UPIPE_HELPER_VOID(upipe_dveo_asi_src);
-UPIPE_HELPER_OUTPUT(upipe_dveo_asi_src, output, flow_def, output_state, request_list)
+UPIPE_HELPER_VOID(upipe_dveo_asi_src)
 
-/** @internal @This sets the input flow definition.
+UPIPE_HELPER_OUTPUT(upipe_dveo_asi_src, output, flow_def, output_state, request_list)
+UPIPE_HELPER_UREF_MGR(upipe_dveo_asi_src, uref_mgr, uref_mgr_request, upipe_dveo_asi_src_check,
+                      upipe_dveo_asi_src_register_output_request,
+                      upipe_dveo_asi_src_unregister_output_request)
+UPIPE_HELPER_UBUF_MGR(upipe_dveo_asi_src, ubuf_mgr, flow_format, ubuf_mgr_request,
+                      upipe_dveo_asi_src_check,
+                      upipe_dveo_asi_src_register_output_request,
+                      upipe_dveo_asi_src_unregister_output_request)
+UPIPE_HELPER_UCLOCK(upipe_dveo_asi_src, uclock, uclock_request, upipe_dveo_asi_src_check,
+                    upipe_dveo_asi_src_register_output_request,
+                    upipe_dveo_asi_src_unregister_output_request)
+
+UPIPE_HELPER_UPUMP_MGR(upipe_dveo_asi_src, upump_mgr)
+UPIPE_HELPER_UPUMP(upipe_dveo_asi_src, upump, upump_mgr)
+UPIPE_HELPER_OUTPUT_SIZE(upipe_dveo_asi_src, output_size)
+
+/* From the example code */
+ssize_t util_read(const char *name, char *buf, size_t count)
+{
+    ssize_t fd, ret;
+
+    if ((fd = open (name, O_RDONLY)) < 0) {
+        return fd;
+    }
+    ret = read (fd, buf, count);
+    close (fd);
+    return ret;
+}
+
+ssize_t util_write(const char *name, const char *buf, size_t count)
+{
+    ssize_t fd, ret;
+
+    if ((fd = open (name, O_WRONLY)) < 0) {
+        return fd;
+    }
+    ret = write (fd, buf, count);
+    close (fd);
+    return ret;
+}
+
+/** @internal @This allocates a dveo_asi source pipe.
+ *
+ * @param mgr common management structure
+ * @param uprobe structure used to raise events
+ * @param signature signature of the pipe allocator
+ * @param args optional arguments
+ * @return pointer to upipe or NULL in case of allocation error
+ */
+static struct upipe *upipe_dveo_asi_src_alloc(struct upipe_mgr *mgr,
+                                      struct uprobe *uprobe, uint32_t signature,
+                                      va_list args)
+{
+    struct upipe *upipe = upipe_dveo_asi_src_alloc_void(mgr, uprobe, signature, args);
+    struct upipe_dveo_asi_src *upipe_dveo_asi_src = upipe_dveo_asi_src_from_upipe(upipe);
+    upipe_dveo_asi_src_init_urefcount(upipe);
+    upipe_dveo_asi_src_init_uref_mgr(upipe);
+    upipe_dveo_asi_src_init_ubuf_mgr(upipe);
+    upipe_dveo_asi_src_init_output(upipe);
+    upipe_dveo_asi_src_init_upump_mgr(upipe);
+    upipe_dveo_asi_src_init_upump(upipe);
+    upipe_dveo_asi_src_init_uclock(upipe);
+    upipe_dveo_asi_src_init_output_size(upipe, RX_DEFAULT_SIZE);
+    upipe_dveo_asi_src->fd = -1;
+    upipe_dveo_asi_src->card_idx = 0;
+    upipe_dveo_asi_src->last_ts = -1;
+    upipe_throw_ready(upipe);
+    return upipe;
+}
+
+/** @internal @This reads data from the source and outputs it.
+*   @param upump description structure of the read watcher
+ */
+static void upipe_dveo_asi_src_worker(struct upump *upump)
+{
+    struct upipe *upipe = upump_get_opaque(upump, struct upipe *);
+    struct upipe_dveo_asi_src *upipe_dveo_asi_src = upipe_dveo_asi_src_from_upipe(upipe);
+    uint64_t systime = 0; /* to keep gcc quiet */
+    if (upipe_dveo_asi_src->uclock != NULL)
+        systime = uclock_now(upipe_dveo_asi_src->uclock);
+
+    struct uref *uref = uref_block_alloc(upipe_dveo_asi_src->uref_mgr,
+                                         upipe_dveo_asi_src->ubuf_mgr,
+                                         upipe_dveo_asi_src->output_size);
+    if (unlikely(uref == NULL)) {
+        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+        return;
+    }
+
+    uint8_t *buffer;
+    int output_size = -1;
+    if (unlikely(!ubase_check(uref_block_write(uref, 0, &output_size,
+                                               &buffer)))) {
+        uref_free(uref);
+        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+        return;
+    }
+    assert(output_size == upipe_dveo_asi_src->output_size);
+
+    ssize_t ret = read(upipe_dveo_asi_src->fd, buffer, upipe_dveo_asi_src->output_size);
+    uref_block_unmap(uref, 0);
+
+    if (unlikely(ret == -1)) {
+        uref_free(uref);
+        switch (errno) {
+            case EINTR:
+            case EAGAIN:
+#if EAGAIN != EWOULDBLOCK
+            case EWOULDBLOCK:
+#endif
+                /* not an issue, try again later */
+                return;
+            case EBADF:
+            case EINVAL:
+            case EIO:
+            default:
+                break;
+        }
+        upipe_err_va(upipe, "read error from device %i", upipe_dveo_asi_src->card_idx);
+        upipe_dveo_asi_src_set_upump(upipe, NULL);
+        upipe_throw_source_end(upipe);
+        return;
+    }
+    if (upipe_dveo_asi_src->uclock != NULL)
+        uref_clock_set_cr_sys(uref, systime);
+    if (unlikely(ret != upipe_dveo_asi_src->output_size))
+        uref_block_resize(uref, 0, ret);
+
+    while (ret > 0) {
+        int size = 8, discontinuity;
+        union ts {
+            int64_t i64;
+            uint8_t u8[8];
+        } ts;
+        uref_block_read(uref, 0, &size, (const uint8_t **)&ts.u8);
+        discontinuity = ts.i64 < upipe_dveo_asi_src->last_ts;
+        upipe_throw_clock_ref(upipe, uref, ts.i64, discontinuity);
+        upipe_dveo_asi_src->last_ts = ts.i64;
+
+        /* Delete rest of timestamps */
+        for (int i = 0; i < TS_PACKETS; i++)
+            uref_block_delete(uref, 188*i, 8);
+
+        struct uref *output = uref_block_splice(uref, 0, 188*TS_PACKETS);
+        if (unlikely(output == NULL)) {
+            uref_free(uref);
+            upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+            return;
+        }
+
+        upipe_dveo_asi_src_output(upipe, output, &upipe_dveo_asi_src->upump);
+    }
+}
+
+/** @internal @This checks if the pump may be allocated.
  *
  * @param upipe description structure of the pipe
- * @param flow_def flow definition packet
+ * @param flow_format amended flow format
  * @return an error code
  */
-static int upipe_dveo_asi_src_set_flow_def(struct upipe *upipe, struct uref *flow_def)
+static int upipe_dveo_asi_src_check(struct upipe *upipe, struct uref *flow_format)
 {
-    if (flow_def == NULL)
-        return UBASE_ERR_INVALID;
-    struct uref *flow_def_dup;
-    if (unlikely((flow_def_dup = uref_dup(flow_def)) == NULL))
-        return UBASE_ERR_ALLOC;
-    upipe_dveo_asi_src_store_flow_def(upipe, flow_def_dup);
+    struct upipe_dveo_asi_src *upipe_dveo_asi_src = upipe_dveo_asi_src_from_upipe(upipe);
+    if (flow_format != NULL)
+        upipe_dveo_asi_src_store_flow_def(upipe, flow_format);
+
+    upipe_dveo_asi_src_check_upump_mgr(upipe);
+    if (upipe_dveo_asi_src->upump_mgr == NULL)
+        return UBASE_ERR_NONE;
+
+    if (upipe_dveo_asi_src->uref_mgr == NULL) {
+        upipe_dveo_asi_src_require_uref_mgr(upipe);
+        return UBASE_ERR_NONE;
+    }
+
+    if (upipe_dveo_asi_src->ubuf_mgr == NULL) {
+        struct uref *flow_format =
+            uref_block_flow_alloc_def(upipe_dveo_asi_src->uref_mgr, NULL);
+        uref_block_flow_set_size(flow_format, upipe_dveo_asi_src->output_size);
+        if (unlikely(flow_format == NULL)) {
+            upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+            return UBASE_ERR_ALLOC;
+        }
+        upipe_dveo_asi_src_require_ubuf_mgr(upipe, flow_format);
+        return UBASE_ERR_NONE;
+    }
+
+    if (upipe_dveo_asi_src->uclock == NULL &&
+        urequest_get_opaque(&upipe_dveo_asi_src->uclock_request, struct upipe *)
+            != NULL)
+        return UBASE_ERR_NONE;
+
+    if (upipe_dveo_asi_src->fd != -1 && upipe_dveo_asi_src->upump == NULL) {
+        struct upump *upump;
+            upump = upump_alloc_fd_read(upipe_dveo_asi_src->upump_mgr,
+                                        upipe_dveo_asi_src_worker, upipe,
+                                        upipe->refcount, upipe_dveo_asi_src->fd);
+        if (unlikely(upump == NULL)) {
+            upipe_throw_fatal(upipe, UBASE_ERR_UPUMP);
+            return UBASE_ERR_UPUMP;
+        }
+        upipe_dveo_asi_src_set_upump(upipe, upump);
+        upump_start(upump);
+    }
     return UBASE_ERR_NONE;
 }
 
-/** @internal @This processes control commands on an dveo_asi_src pipe.
+/** @internal @This asks to open the given device.
+ *
+ * @param upipe description structure of the pipe
+ * @param path relative or absolute path of the file
+ * @return an error code
+ */
+static int upipe_dveo_asi_src_open(struct upipe *upipe)
+{
+    struct upipe_dveo_asi_src *upipe_dveo_asi_src = upipe_dveo_asi_src_from_upipe(upipe);
+    char path[20], sys[50], buf[20];
+    int ret;
+
+    snprintf(sys, sizeof(sys), sys_fmt, upipe_dveo_asi_src->card_idx, "granularity");
+    snprintf(buf, sizeof(buf), "%u", GRANULARITY);
+    if (util_write(sys, buf, sizeof(buf)) < 0) {
+        upipe_err_va(upipe, "Couldn't set granularity");
+        return UBASE_ERR_EXTERNAL;
+    }
+
+    snprintf(sys, sizeof(sys), sys_fmt, upipe_dveo_asi_src->card_idx, "buffers");
+    snprintf(buf, sizeof(buf), "%u", BUFFERS);
+    if (util_write(sys, buf, sizeof(buf)) < 0) {
+        upipe_err_va(upipe, "Couldn't set buffers");
+        return UBASE_ERR_EXTERNAL;
+    }
+
+    snprintf(sys, sizeof(sys), sys_fmt, upipe_dveo_asi_src->card_idx, "bufsize");
+    snprintf(buf, sizeof(buf), "%u", CAPTURE_DEFAULT_SIZE);
+    if (util_write(sys, buf, sizeof(buf)) < 0) {
+        upipe_err_va(upipe, "Couldn't set buffer size");
+        return UBASE_ERR_EXTERNAL;
+    }
+
+    snprintf(sys, sizeof(sys), sys_fmt, upipe_dveo_asi_src->card_idx, "mode");
+    snprintf(buf, sizeof(buf), "%u", OPERATING_MODE);
+    if (util_write(sys, buf, sizeof(buf)) < 0) {
+        upipe_err_va(upipe, "Couldn't set mode");
+        return UBASE_ERR_EXTERNAL;
+    }
+
+    snprintf(sys, sizeof(sys), sys_fmt, upipe_dveo_asi_src->card_idx, "timestamps");
+    snprintf(buf, sizeof(buf), "%u", TIMESTAMP_MODE);
+    if (util_write(sys, buf, sizeof(buf)) < 0) {
+        upipe_err_va(upipe, "Couldn't set timestamp mode");
+        return UBASE_ERR_EXTERNAL;
+    }
+
+    snprintf(path, sizeof(path), dev_fmt, upipe_dveo_asi_src->card_idx);
+    int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (unlikely(fd < 0)) {
+        upipe_err_va(upipe, "can't open file %s (%m)", path);
+        return UBASE_ERR_EXTERNAL;
+    }
+
+    upipe_dveo_asi_src->fd = fd;
+    upipe_notice_va(upipe, "opening file %s", path);
+    return UBASE_ERR_NONE;
+}
+
+static void upipe_dveo_asi_src_close(struct upipe *upipe)
+{
+    struct upipe_dveo_asi_src *upipe_dveo_asi_src = upipe_dveo_asi_src_from_upipe(upipe);
+
+    if (unlikely(upipe_dveo_asi_src->fd != -1)) {
+        upipe_notice_va(upipe, "closing card %i", upipe_dveo_asi_src->card_idx);
+        ubase_clean_fd(&upipe_dveo_asi_src->fd);
+    }
+    upipe_dveo_asi_src_set_upump(upipe, NULL);
+}
+
+/** @internal @This processes control commands on a file source pipe.
  *
  * @param upipe description structure of the pipe
  * @param command type of command to process
  * @param args arguments of the command
  * @return an error code
  */
-static int upipe_dveo_asi_src_control(struct upipe *upipe, int command, va_list args)
+static int _upipe_dveo_asi_src_control(struct upipe *upipe, int command, va_list args)
 {
     switch (command) {
-        case UPIPE_REGISTER_REQUEST: {
-            struct urequest *request = va_arg(args, struct urequest *);
-            return upipe_dveo_asi_src_alloc_output_proxy(upipe, request);
-        }
-        case UPIPE_UNREGISTER_REQUEST: {
-            struct urequest *request = va_arg(args, struct urequest *);
-            return upipe_dveo_asi_src_free_output_proxy(upipe, request);
-        }
+        case UPIPE_ATTACH_UPUMP_MGR:
+            upipe_dveo_asi_src_set_upump(upipe, NULL);
+            return upipe_dveo_asi_src_attach_upump_mgr(upipe);
+        case UPIPE_ATTACH_UCLOCK:
+            upipe_dveo_asi_src_set_upump(upipe, NULL);
+            upipe_dveo_asi_src_require_uclock(upipe);
+            return UBASE_ERR_NONE;
+
         case UPIPE_GET_FLOW_DEF: {
             struct uref **p = va_arg(args, struct uref **);
             return upipe_dveo_asi_src_get_flow_def(upipe, p);
-        }
-        case UPIPE_SET_FLOW_DEF: {
-            struct uref *flow_def = va_arg(args, struct uref *);
-            return upipe_dveo_asi_src_set_flow_def(upipe, flow_def);
         }
         case UPIPE_GET_OUTPUT: {
             struct upipe **p = va_arg(args, struct upipe **);
@@ -118,59 +444,61 @@ static int upipe_dveo_asi_src_control(struct upipe *upipe, int command, va_list 
             struct upipe *output = va_arg(args, struct upipe *);
             return upipe_dveo_asi_src_set_output(upipe, output);
         }
+
         default:
-            return UBASE_ERR_UNHANDLED;
+            return UBASE_ERR_NONE;
     }
 }
 
-/** @internal @This allocates an dveo_asi_src pipe.
+/** @internal @This processes control commands on a file source pipe, and
+ * checks the status of the pipe afterwards.
  *
- * @param mgr common management structure
- * @param uprobe structure used to raise events
- * @param signature signature of the pipe allocator
- * @param args optional arguments
- * @return pointer to upipe or NULL in case of allocation error
+ * @param upipe description structure of the pipe
+ * @param command type of command to process
+ * @param args arguments of the command
+ * @return an error code
  */
-static struct upipe *upipe_dveo_asi_src_alloc(struct upipe_mgr *mgr,
-                                      struct uprobe *uprobe,
-                                      uint32_t signature, va_list args)
+static int upipe_dveo_asi_src_control(struct upipe *upipe, int command, va_list args)
 {
-    struct upipe *upipe = upipe_dveo_asi_src_alloc_void(mgr, uprobe, signature, args);
-    if (unlikely(upipe == NULL))
-        return NULL;
+    UBASE_RETURN(_upipe_dveo_asi_src_control(upipe, command, args))
 
-    upipe_dveo_asi_src_init_urefcount(upipe);
-    upipe_dveo_asi_src_init_output(upipe);
-
-    upipe_throw_ready(upipe);
-    return upipe;
+    return upipe_dveo_asi_src_check(upipe, NULL);
 }
 
-/** @internal @This frees all resources allocated.
+/** @This frees a upipe.
  *
  * @param upipe description structure of the pipe
  */
 static void upipe_dveo_asi_src_free(struct upipe *upipe)
 {
+    upipe_dveo_asi_src_close(upipe);
+
     upipe_throw_dead(upipe);
 
+    upipe_dveo_asi_src_clean_output_size(upipe);
+    upipe_dveo_asi_src_clean_uclock(upipe);
+    upipe_dveo_asi_src_clean_upump(upipe);
+    upipe_dveo_asi_src_clean_upump_mgr(upipe);
     upipe_dveo_asi_src_clean_output(upipe);
+    upipe_dveo_asi_src_clean_ubuf_mgr(upipe);
+    upipe_dveo_asi_src_clean_uref_mgr(upipe);
     upipe_dveo_asi_src_clean_urefcount(upipe);
     upipe_dveo_asi_src_free_void(upipe);
 }
 
+/** module manager static descriptor */
 static struct upipe_mgr upipe_dveo_asi_src_mgr = {
     .refcount = NULL,
     .signature = UPIPE_DVEO_ASI_SRC_SIGNATURE,
 
     .upipe_alloc = upipe_dveo_asi_src_alloc,
-    .upipe_input = upipe_dveo_asi_src_output,
+    .upipe_input = NULL,
     .upipe_control = upipe_dveo_asi_src_control,
 
     .upipe_mgr_control = NULL
 };
 
-/** @This returns the management structure for dveo_asi_src pipes.
+/** @This returns the management structure for all file source pipes.
  *
  * @return pointer to manager
  */
