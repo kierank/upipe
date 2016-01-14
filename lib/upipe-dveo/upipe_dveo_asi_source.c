@@ -71,9 +71,8 @@ const char dev_fmt[] = "/dev/asirx%u";
 const char sys_fmt[] = "/sys/class/asi/asirx%u/%s";
 
 /** default size of buffers when unspecified, extra 8-byte timestamp on capture */
-#define CAPTURE_DEFAULT_SIZE  (((188+8)*49) / 8)
-#define RX_DEFAULT_SIZE       (CAPTURE_DEFAULT_SIZE * 8)
-#define GRANULARITY           (8)
+#define CAPTURE_DEFAULT_SIZE  ((188+8)*112)
+#define RX_DEFAULT_SIZE       (188*7)
 #define BUFFERS               (2)
 #define OPERATING_MODE        (1)
 #define TIMESTAMP_MODE        (2)
@@ -81,6 +80,8 @@ const char sys_fmt[] = "/sys/class/asi/asirx%u/%s";
 
 /** @hidden */
 static int upipe_dveo_asi_src_check(struct upipe *upipe, struct uref *flow_format);
+
+static int upipe_dveo_asi_src_open(struct upipe *upipe);
 
 /** @internal @This is the private context of a file source pipe. */
 struct upipe_dveo_asi_src {
@@ -204,6 +205,10 @@ static struct upipe *upipe_dveo_asi_src_alloc(struct upipe_mgr *mgr,
     upipe_dveo_asi_src->card_idx = 0;
     upipe_dveo_asi_src->last_ts = -1;
     upipe_throw_ready(upipe);
+
+    upipe_dveo_asi_src_open(upipe);
+    //upipe_dveo_asi_src_check(upipe, NULL);
+    
     return upipe;
 }
 
@@ -220,7 +225,7 @@ static void upipe_dveo_asi_src_worker(struct upump *upump)
 
     struct uref *uref = uref_block_alloc(upipe_dveo_asi_src->uref_mgr,
                                          upipe_dveo_asi_src->ubuf_mgr,
-                                         upipe_dveo_asi_src->output_size);
+                                         CAPTURE_DEFAULT_SIZE);
     if (unlikely(uref == NULL)) {
         upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
         return;
@@ -234,9 +239,7 @@ static void upipe_dveo_asi_src_worker(struct upump *upump)
         upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
         return;
     }
-    assert(output_size == upipe_dveo_asi_src->output_size);
-
-    ssize_t ret = read(upipe_dveo_asi_src->fd, buffer, upipe_dveo_asi_src->output_size);
+    ssize_t ret = read(upipe_dveo_asi_src->fd, buffer, CAPTURE_DEFAULT_SIZE);
     uref_block_unmap(uref, 0);
 
     if (unlikely(ret == -1)) {
@@ -260,10 +263,12 @@ static void upipe_dveo_asi_src_worker(struct upump *upump)
         upipe_throw_source_end(upipe);
         return;
     }
+
     if (upipe_dveo_asi_src->uclock != NULL)
         uref_clock_set_cr_sys(uref, systime);
-    if (unlikely(ret != upipe_dveo_asi_src->output_size))
+    if (unlikely(ret != CAPTURE_DEFAULT_SIZE))
         uref_block_resize(uref, 0, ret);
+
 
     while (ret > 0) {
         int size = 8, discontinuity;
@@ -272,6 +277,7 @@ static void upipe_dveo_asi_src_worker(struct upump *upump)
             uint8_t u8[8];
         } ts;
         uref_block_read(uref, 0, &size, (const uint8_t **)&ts.u8);
+        uref_block_unmap(uref, 0);
         discontinuity = ts.i64 < upipe_dveo_asi_src->last_ts;
         upipe_throw_clock_ref(upipe, uref, ts.i64, discontinuity);
         upipe_dveo_asi_src->last_ts = ts.i64;
@@ -279,6 +285,9 @@ static void upipe_dveo_asi_src_worker(struct upump *upump)
         /* Delete rest of timestamps */
         for (int i = 0; i < TS_PACKETS; i++)
             uref_block_delete(uref, 188*i, 8);
+
+        size_t len;
+        uref_block_size(uref, &len);
 
         struct uref *output = uref_block_splice(uref, 0, 188*TS_PACKETS);
         if (unlikely(output == NULL)) {
@@ -288,6 +297,7 @@ static void upipe_dveo_asi_src_worker(struct upump *upump)
         }
 
         upipe_dveo_asi_src_output(upipe, output, &upipe_dveo_asi_src->upump);
+        ret -= (188+8)*TS_PACKETS;
     }
 }
 
@@ -315,7 +325,7 @@ static int upipe_dveo_asi_src_check(struct upipe *upipe, struct uref *flow_forma
     if (upipe_dveo_asi_src->ubuf_mgr == NULL) {
         struct uref *flow_format =
             uref_block_flow_alloc_def(upipe_dveo_asi_src->uref_mgr, NULL);
-        uref_block_flow_set_size(flow_format, upipe_dveo_asi_src->output_size);
+        uref_block_flow_set_size(flow_format, CAPTURE_DEFAULT_SIZE);
         if (unlikely(flow_format == NULL)) {
             upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
             return UBASE_ERR_ALLOC;
@@ -330,8 +340,7 @@ static int upipe_dveo_asi_src_check(struct upipe *upipe, struct uref *flow_forma
         return UBASE_ERR_NONE;
 
     if (upipe_dveo_asi_src->fd != -1 && upipe_dveo_asi_src->upump == NULL) {
-        struct upump *upump;
-            upump = upump_alloc_fd_read(upipe_dveo_asi_src->upump_mgr,
+        struct upump *upump = upump_alloc_fd_read(upipe_dveo_asi_src->upump_mgr,
                                         upipe_dveo_asi_src_worker, upipe,
                                         upipe->refcount, upipe_dveo_asi_src->fd);
         if (unlikely(upump == NULL)) {
@@ -354,14 +363,16 @@ static int upipe_dveo_asi_src_open(struct upipe *upipe)
 {
     struct upipe_dveo_asi_src *upipe_dveo_asi_src = upipe_dveo_asi_src_from_upipe(upipe);
     char path[20], sys[50], buf[20];
-    int ret;
+    int ret, granularity;
 
     snprintf(sys, sizeof(sys), sys_fmt, upipe_dveo_asi_src->card_idx, "granularity");
-    snprintf(buf, sizeof(buf), "%u", GRANULARITY);
-    if (util_write(sys, buf, sizeof(buf)) < 0) {
-        upipe_err_va(upipe, "Couldn't set granularity");
+    if (util_read(sys, buf, 1) < 0) {
+        upipe_err_va(upipe, "Couldn't read granularity");
         return UBASE_ERR_EXTERNAL;
     }
+
+    buf[1] = '\0';
+    granularity = atoi(buf);
 
     snprintf(sys, sizeof(sys), sys_fmt, upipe_dveo_asi_src->card_idx, "buffers");
     snprintf(buf, sizeof(buf), "%u", BUFFERS);
