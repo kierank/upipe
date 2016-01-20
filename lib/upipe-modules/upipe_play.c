@@ -47,7 +47,7 @@
 #include <assert.h>
 
 /* default output latency */
-#define DEFAULT_OUTPUT_LATENCY (UCLOCK_FREQ / 50)
+#define DEFAULT_OUTPUT_LATENCY 0
 
 /** @internal @This is the private context of a play pipe. */
 struct upipe_play {

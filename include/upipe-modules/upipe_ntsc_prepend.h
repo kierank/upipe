@@ -1,7 +1,7 @@
 /*
- * Copyright (C) 2014 OpenHeadend S.A.R.L.
+ * Copyright (C) 2015 Open Broadcast Systems Ltd
  *
- * Authors: Christophe Massiot
+ * Authors: Kieran Kunhya
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -24,28 +24,27 @@
  */
 
 /** @file
- * @short Upipe module decapsulating RTP header from blocks
+ * @short Upipe linear module prepending 5 lines to compressed NTSC video
+ *        and flagging as Bottom-Field-First.
  */
 
-#ifndef _UPIPE_MODULES_UPIPE_RTP_DECAPS_H_
+#ifndef _UPIPE_MODULES_UPIPE_NTSC_PREPEND_H_
 /** @hidden */
-#define _UPIPE_MODULES_UPIPE_RTP_DECAPS_H_
+#define _UPIPE_MODULES_UPIPE_NTSC_PREPEND_H_
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#include <stdint.h>
 #include <upipe/upipe.h>
 
-#define UPIPE_RTPD_SIGNATURE UBASE_FOURCC('r','t','p','d')
+#define UPIPE_NTSC_PREPEND_SIGNATURE UBASE_FOURCC('n','t','s','p')
 
-UREF_ATTR_UNSIGNED(rtp, timestamp, "timestamp", TIMESTAMP)
-UREF_ATTR_UNSIGNED(rtp, seqnum, "seqnum", SEQNUM)
-
-/** @This returns the management structure for rtpd pipes.
+/** @This returns the management structure for ntsc_prepend pipes.
  *
  * @return pointer to manager
  */
-struct upipe_mgr *upipe_rtpd_mgr_alloc(void);
+struct upipe_mgr *upipe_ntsc_prepend_mgr_alloc(void);
 
 #ifdef __cplusplus
 }
