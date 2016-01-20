@@ -25,7 +25,6 @@ dist_check_DATA = \
 	upipe_ts_test.ts \
 	uref_uri_test.txt \
 	ustring_test.txt \
-	ustring_test.valgrind \
 	upipe_m3u_reader_test_files/1.m3u \
 	upipe_m3u_reader_test_files/1.m3u.logs \
 	upipe_m3u_reader_test_files/2.m3u \
@@ -225,7 +224,6 @@ check_PROGRAMS += \
 	upipe_mpgv_framer_test \
 	upipe_mpga_framer_test \
 	upipe_a52_framer_test \
-	upipe_h264_framer_test \
 	upipe_video_trim_test \
 	upipe_ts_check_test \
 	upipe_ts_decaps_test \
@@ -238,7 +236,7 @@ check_PROGRAMS += \
 	upipe_ts_psi_merge_test \
 	upipe_ts_psi_split_test \
 	upipe_ts_scte35_decoder_test \
-	upipe_ts_scte35_probe_test \
+	upipe_ts_scte35_generator_test \
 	upipe_ts_sdt_decoder_test \
 	upipe_ts_tdt_decoder_test \
 	upipe_ts_split_test \
@@ -248,8 +246,7 @@ check_PROGRAMS += \
 	upipe_ts_pes_encaps_test \
 	upipe_ts_psi_generator_test \
 	upipe_ts_si_generator_test \
-	upipe_ts_tstd_test \
-	upipe_ts_test
+	upipe_ts_tstd_test
 TESTS += \
 	upipe_rtp_decaps_test \
 	upipe_rtp_prepend_test \
@@ -268,7 +265,7 @@ TESTS += \
 	upipe_ts_psi_merge_test \
 	upipe_ts_psi_split_test \
 	upipe_ts_scte35_decoder_test \
-	upipe_ts_scte35_probe_test \
+	upipe_ts_scte35_generator_test \
 	upipe_ts_sdt_decoder_test \
 	upipe_ts_tdt_decoder_test \
 	upipe_ts_split_test \
@@ -278,8 +275,17 @@ TESTS += \
 	upipe_ts_pes_encaps_test \
 	upipe_ts_psi_generator_test \
 	upipe_ts_si_generator_test \
-	upipe_ts_tstd_test \
+	upipe_ts_tstd_test
+
+if HAVE_EV
+check_PROGRAMS += \
+	upipe_h264_framer_test \
+	upipe_ts_scte35_probe_test \
+	upipe_ts_test
+TESTS += \
+	upipe_ts_scte35_probe_test \
 	upipe_ts_test.sh
+endif
 endif
 
 if HAVE_X264
@@ -300,7 +306,6 @@ endif
 endif
 
 AM_CPPFLAGS = -I$(top_builddir)/include -I$(top_srcdir)/include
-AM_CFLAGS = -Wall
 LDADD = $(top_builddir)/lib/upipe/libupipe.la
 
 upump_ev_test_LDADD = $(LDADD) -lev $(top_builddir)/lib/upump-ev/libupump_ev.la
@@ -379,6 +384,7 @@ upipe_ts_psi_split_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_t
 upipe_ts_pat_decoder_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_pmt_decoder_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_scte35_decoder_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
+upipe_ts_scte35_generator_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_scte35_probe_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la -lev $(top_builddir)/lib/upump-ev/libupump_ev.la
 upipe_ts_sdt_decoder_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
 upipe_ts_si_generator_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-ts/libupipe_ts.la
@@ -393,9 +399,10 @@ upipe_filter_blend_test_LDADD = $(LDADD) $(top_builddir)/lib/upipe-filters/libup
 upipe_filter_ebur128_test_LDADD = $(LDADD) -lm $(top_builddir)/lib/upipe-filters/libupipe_filters.la $(top_builddir)/lib/upipe-modules/libupipe_modules.la
 
 upipe_x264_test_LDADD = $(LDADD) $(X264_LIBS) $(top_builddir)/lib/upipe-x264/libupipe_x264.la
-upipe_x264_test_CFLAGS = $(X264_CFLAGS) -Wall
+upipe_x264_test_CFLAGS = $(X264_CFLAGS)
 
 upipe_alsa_sink_test_LDADD = $(LDADD) -lasound $(top_builddir)/lib/upipe-alsa/libupipe_alsa.la $(top_builddir)/lib/upipe-modules/libupipe_modules.la -lev $(top_builddir)/lib/upump-ev/libupump_ev.la
 upump_ecore_test_LDADD = $(LDADD) $(ECORE_LIBS) $(top_builddir)/lib/upump-ecore/libupump_ecore.la
-upump_ecore_test_CFLAGS = $(ECORE_CFLAGS) -Wall
+upump_ecore_test_CFLAGS = $(ECORE_CFLAGS)
 upipe_m3u_reader_test_LDADD = $(LDADD) -lev $(top_builddir)/lib/upump-ev/libupump_ev.la $(top_builddir)/lib/upipe-modules/libupipe_modules.la
+ustring_test_CFLAGS = -fno-inline

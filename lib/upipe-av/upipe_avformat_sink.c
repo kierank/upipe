@@ -239,8 +239,8 @@ static int upipe_avfsink_sub_set_flow_def(struct upipe *upipe,
     uint64_t octetrate = 0;
     uref_block_flow_get_octetrate(flow_def, &octetrate);
 
-    struct urational fps, sar;
-    uint64_t width, height;
+    struct urational fps = {}, sar;
+    uint64_t width = 0, height = 0;
     uint8_t channels = 0;
     uint64_t rate = 0, samples = 0;
     if (codec_id < AV_CODEC_ID_FIRST_AUDIO) {
@@ -281,6 +281,7 @@ static int upipe_avfsink_sub_set_flow_def(struct upipe *upipe,
 
     if (!ubase_ncmp(def, "block.aac.") &&
         ubase_check(uref_mpga_flow_get_adts(flow_def))) {
+        free(extradata_alloc);
         upipe_err(upipe, "asc required");
         return UBASE_ERR_INVALID;
     }
@@ -327,8 +328,6 @@ static int upipe_avfsink_sub_set_flow_def(struct upipe *upipe,
 
     if (upipe_avfsink->opened) {
         /* Die if the attributes changed. */
-        /* NB: this supposes that all attributes are in the udict, and that
-         * the udict is never empty. */
         bool ret = upipe_avfsink_sub_check_flow_def_check(upipe,
                                                           flow_def_check);
         free(extradata_alloc);
@@ -337,7 +336,6 @@ static int upipe_avfsink_sub_set_flow_def(struct upipe *upipe,
         if (ret && codec_id < AV_CODEC_ID_FIRST_AUDIO &&
             urational_cmp(&sar, &upipe_avfsink_sub->sar)) {
             upipe_warn(upipe, "SAR is different");
-            upipe_throw_error(upipe, UBASE_ERR_BUSY);
         }
         return ret ? UBASE_ERR_NONE : UBASE_ERR_BUSY;
     }
@@ -359,6 +357,7 @@ static int upipe_avfsink_sub_set_flow_def(struct upipe *upipe,
     if (likely(ubase_check(uref_flow_get_id(flow_def, &id)))) {
         stream->id = id;
     }
+    stream->disposition = AV_DISPOSITION_DEFAULT;
 
     uint8_t languages;
     const char *lang;
