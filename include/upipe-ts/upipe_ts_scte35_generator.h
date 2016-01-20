@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 OpenHeadend S.A.R.L.
+ * Copyright (C) 2015 OpenHeadend S.A.R.L.
  *
  * Authors: Christophe Massiot
  *
@@ -19,27 +19,26 @@
  */
 
 /** @file
- * @short Upipe module building frames from chunks of a DVB subtitles stream
+ * @short Upipe module generating SCTE-35 Splice Information Table
  */
 
-#ifndef _UPIPE_FRAMERS_UPIPE_DVBSUB_FRAMER_H_
+#ifndef _UPIPE_TS_UPIPE_TS_SCTE35_GENERATOR_H_
 /** @hidden */
-#define _UPIPE_FRAMERS_UPIPE_DVBSUB_FRAMER_H_
+#define _UPIPE_TS_UPIPE_TS_SCTE35_GENERATOR_H_
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #include <upipe/upipe.h>
+#include <upipe-ts/upipe_ts_mux.h>
 
-#define UPIPE_DVBSUBF_SIGNATURE UBASE_FOURCC('d','s','b','f')
-/** We only accept the EN 300 743 elementary stream. */
-#define UPIPE_DVBSUBF_EXPECTED_FLOW_DEF "block.dvb_subtitle."
+#define UPIPE_TS_SCTE35G_SIGNATURE UBASE_FOURCC('t','s',0xfc,'g')
 
-/** @This returns the management structure for all dvbsubf pipes.
+/** @This returns the management structure for all ts_scte35g pipes.
  *
  * @return pointer to manager
  */
-struct upipe_mgr *upipe_dvbsubf_mgr_alloc(void);
+struct upipe_mgr *upipe_ts_scte35g_mgr_alloc(void);
 
 #ifdef __cplusplus
 }
