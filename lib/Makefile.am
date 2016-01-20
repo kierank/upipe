@@ -2,7 +2,6 @@ SUBDIRS = \
 	upipe \
 	upipe-modules \
 	upipe-filters
->>>>>>> cmassiot
 
 if HAVE_QTWEBKIT
 SUBDIRS += upipe-qt
