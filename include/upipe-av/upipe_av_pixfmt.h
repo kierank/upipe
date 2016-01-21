@@ -53,7 +53,7 @@ extern "C" {
  * @param flow_def overwritten flow definition
  * @return an error code
  */
-static inline int upipe_av_pixfmt_to_flow_def(enum PixelFormat pix_fmt,
+static inline int upipe_av_pixfmt_to_flow_def(enum AVPixelFormat pix_fmt,
                                               struct uref *flow_def)
 {
     UBASE_RETURN(uref_pic_flow_set_planes(flow_def, 0))
@@ -200,12 +200,12 @@ static inline int upipe_av_pixfmt_to_flow_def(enum PixelFormat pix_fmt,
  * @return selected pixel format, or PIX_FMT_NONE if no compatible pixel format
  * was found
  */
-static inline enum PixelFormat
+static inline enum AVPixelFormat
     upipe_av_pixfmt_from_flow_def(struct uref *flow_def,
-                                  const enum PixelFormat *pix_fmts,
+                                  const enum AVPixelFormat *pix_fmts,
                                   const char *chroma_p[UPIPE_AV_MAX_PLANES])
 {
-    static const enum PixelFormat supported_fmts[] = {
+    static const enum AVPixelFormat supported_fmts[] = {
         AV_PIX_FMT_YUV420P,
         AV_PIX_FMT_YUVJ420P,
         AV_PIX_FMT_YUV422P,
