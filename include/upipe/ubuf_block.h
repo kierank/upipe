@@ -73,6 +73,11 @@ struct ubuf_block {
     /** cached last offset */
     size_t cached_offset;
 
+    /** cached end ubuf */
+    struct ubuf *cached_end_ubuf;
+    /** cached last offset */
+    size_t cached_end_offset;
+
     /** common structure */
     struct ubuf ubuf;
 };
@@ -281,8 +286,8 @@ static inline int ubuf_block_append(struct ubuf *ubuf, struct ubuf *append)
     size_t old_total_size = block->total_size;
     block->total_size += append_block->total_size;
 
-    if (block->cached_ubuf != NULL) {
-        ubuf = block->cached_ubuf;
+    if (block->cached_end_ubuf != NULL) {
+        ubuf = block->cached_end_ubuf;
         block = ubuf_block_from_ubuf(ubuf);
     }
     while (block->next_ubuf != NULL) {
@@ -290,8 +295,8 @@ static inline int ubuf_block_append(struct ubuf *ubuf, struct ubuf *append)
         block = ubuf_block_from_ubuf(ubuf);
     }
     block->next_ubuf = append;
-    head_block->cached_ubuf = append;
-    head_block->cached_offset = old_total_size;
+    head_block->cached_ubuf = head_block->cached_end_ubuf = append;
+    head_block->cached_offset = head_block->cached_end_offset = old_total_size;
     return UBASE_ERR_NONE;
 }
 
@@ -428,8 +433,8 @@ static inline int ubuf_block_truncate(struct ubuf *ubuf, int offset)
         }
         head_block->size = 0;
         head_block->total_size = 0;
-        head_block->cached_ubuf = &head_block->ubuf;
-        head_block->cached_offset = 0;
+        head_block->cached_ubuf = head_block->cached_end_ubuf = &head_block->ubuf;
+        head_block->cached_offset = head_block->cached_end_offset = 0;
         return UBASE_ERR_NONE;
     }
 
@@ -445,8 +450,8 @@ static inline int ubuf_block_truncate(struct ubuf *ubuf, int offset)
     }
     block->size = offset + 1;
     head_block->total_size = saved_size;
-    head_block->cached_ubuf = &head_block->ubuf;
-    head_block->cached_offset = 0;
+    head_block->cached_ubuf = head_block->cached_end_ubuf = &head_block->ubuf;
+    head_block->cached_offset = head_block->cached_end_offset = 0;
     return UBASE_ERR_NONE;
 }
 
