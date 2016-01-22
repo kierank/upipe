@@ -58,8 +58,8 @@ static inline void ubuf_block_common_init(struct ubuf *ubuf, bool map)
     block->map = map;
     block->buffer = NULL;
 
-    block->cached_ubuf = block->cached_ubuf_end = ubuf;
-    block->cached_offset = block->cached_offset_end = 0;
+    block->cached_ubuf = block->cached_end_ubuf = ubuf;
+    block->cached_offset = block->cached_end_offset = 0;
     uchain_init(&ubuf->uchain);
 }
 
