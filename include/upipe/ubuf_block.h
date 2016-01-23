@@ -295,8 +295,8 @@ static inline int ubuf_block_append(struct ubuf *ubuf, struct ubuf *append)
         block = ubuf_block_from_ubuf(ubuf);
     }
     block->next_ubuf = append;
-    head_block->cached_ubuf = head_block->cached_end_ubuf = append;
-    head_block->cached_offset = head_block->cached_end_offset = old_total_size;
+    head_block->cached_end_ubuf = append;
+    head_block->cached_end_offset = old_total_size;
     return UBASE_ERR_NONE;
 }
 
