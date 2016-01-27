@@ -271,23 +271,20 @@ static void upipe_dveo_asi_src_worker(struct upump *upump)
 
 
     while (ret > 0) {
-        int size = 8, discontinuity;
-        union ts {
-            int64_t i64;
-            uint8_t u8[8];
-        } ts;
-        uref_block_read(uref, 0, &size, (const uint8_t **)&ts.u8);
-        uref_block_unmap(uref, 0);
-        discontinuity = ts.i64 < upipe_dveo_asi_src->last_ts;
-        upipe_throw_clock_ref(upipe, uref, ts.i64, discontinuity);
-        upipe_dveo_asi_src->last_ts = ts.i64;
+        int discontinuity;
+        uint64_t ts;
+        uint8_t tmp[8];
+        const uint8_t *ptr = uref_block_peek(uref, 0, 8, tmp);
+        ts = ((uint64_t)ptr[7] << 56) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[4] << 32) |
+             ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[1] <<  8) | ((uint64_t)ptr[0] <<  0);
+        discontinuity = ts < upipe_dveo_asi_src->last_ts;
+        upipe_throw_clock_ref(upipe, uref, ts, discontinuity);
+        upipe_dveo_asi_src->last_ts = ts;
+        uref_block_peek_unmap(uref, 0, tmp, ptr);
 
         /* Delete rest of timestamps */
         for (int i = 0; i < TS_PACKETS; i++)
             uref_block_delete(uref, 188*i, 8);
-
-        size_t len;
-        uref_block_size(uref, &len);
 
         struct uref *output = uref_block_splice(uref, 0, 188*TS_PACKETS);
         if (unlikely(output == NULL)) {
@@ -297,6 +294,7 @@ static void upipe_dveo_asi_src_worker(struct upump *upump)
         }
 
         upipe_dveo_asi_src_output(upipe, output, &upipe_dveo_asi_src->upump);
+        uref_block_delete(uref, 0, 188*TS_PACKETS);
         ret -= (188+8)*TS_PACKETS;
     }
 }
