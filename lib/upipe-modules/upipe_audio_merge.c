@@ -413,7 +413,7 @@ static void upipe_audio_merge_cb(struct upump *upump)
     int found = 0, i, j;
     uint64_t samples = 0;
     struct ubuf *ubuf;
-    int32_t *in_data, *out_data;
+    const int32_t *in_data, *out_data;
 
     /* interate through input subpipes */
     ulist_foreach (&upipe_audio_merge->inputs, uchain) {
