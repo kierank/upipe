@@ -69,11 +69,16 @@
 #include <assert.h>
 
 #include <libavutil/intreadwrite.h>
+#include <libzvbi.h>
 
 #include "include/DeckLinkAPI.h"
 #include "include/DeckLinkAPIDispatch.cpp"
 
+#define PAL_FIELD_OFFSET 313
+
 #define CC_LINE 9
+#define AFD_LINE 11
+#define OP47_LINE1 12
 
 /* don't clip the v210 anc data */
 #define WRITE_PIXELS(a, b, c)           \
@@ -84,6 +89,36 @@
         AV_WL32(dst, val);              \
         dst++;                          \
     } while (0)
+
+#define WRITE_PIXELS8(a, b, c)           \
+    do {                                \
+        val =  (*a << 2);               \
+        val |= (*b << 12)  |            \
+               (*c << 22);              \
+        AV_WL32(dst, val);              \
+        dst++;                          \
+    } while (0)
+
+const static uint8_t reverse_tab[256] = {
+    0x00,0x80,0x40,0xC0,0x20,0xA0,0x60,0xE0,0x10,0x90,0x50,0xD0,0x30,0xB0,0x70,0xF0,
+    0x08,0x88,0x48,0xC8,0x28,0xA8,0x68,0xE8,0x18,0x98,0x58,0xD8,0x38,0xB8,0x78,0xF8,
+    0x04,0x84,0x44,0xC4,0x24,0xA4,0x64,0xE4,0x14,0x94,0x54,0xD4,0x34,0xB4,0x74,0xF4,
+    0x0C,0x8C,0x4C,0xCC,0x2C,0xAC,0x6C,0xEC,0x1C,0x9C,0x5C,0xDC,0x3C,0xBC,0x7C,0xFC,
+    0x02,0x82,0x42,0xC2,0x22,0xA2,0x62,0xE2,0x12,0x92,0x52,0xD2,0x32,0xB2,0x72,0xF2,
+    0x0A,0x8A,0x4A,0xCA,0x2A,0xAA,0x6A,0xEA,0x1A,0x9A,0x5A,0xDA,0x3A,0xBA,0x7A,0xFA,
+    0x06,0x86,0x46,0xC6,0x26,0xA6,0x66,0xE6,0x16,0x96,0x56,0xD6,0x36,0xB6,0x76,0xF6,
+    0x0E,0x8E,0x4E,0xCE,0x2E,0xAE,0x6E,0xEE,0x1E,0x9E,0x5E,0xDE,0x3E,0xBE,0x7E,0xFE,
+    0x01,0x81,0x41,0xC1,0x21,0xA1,0x61,0xE1,0x11,0x91,0x51,0xD1,0x31,0xB1,0x71,0xF1,
+    0x09,0x89,0x49,0xC9,0x29,0xA9,0x69,0xE9,0x19,0x99,0x59,0xD9,0x39,0xB9,0x79,0xF9,
+    0x05,0x85,0x45,0xC5,0x25,0xA5,0x65,0xE5,0x15,0x95,0x55,0xD5,0x35,0xB5,0x75,0xF5,
+    0x0D,0x8D,0x4D,0xCD,0x2D,0xAD,0x6D,0xED,0x1D,0x9D,0x5D,0xDD,0x3D,0xBD,0x7D,0xFD,
+    0x03,0x83,0x43,0xC3,0x23,0xA3,0x63,0xE3,0x13,0x93,0x53,0xD3,0x33,0xB3,0x73,0xF3,
+    0x0B,0x8B,0x4B,0xCB,0x2B,0xAB,0x6B,0xEB,0x1B,0x9B,0x5B,0xDB,0x3B,0xBB,0x7B,0xFB,
+    0x07,0x87,0x47,0xC7,0x27,0xA7,0x67,0xE7,0x17,0x97,0x57,0xD7,0x37,0xB7,0x77,0xF7,
+    0x0F,0x8F,0x4F,0xCF,0x2F,0xAF,0x6F,0xEF,0x1F,0x9F,0x5F,0xDF,0x3F,0xBF,0x7F,0xFF,
+};
+
+#define REVERSE(x) reverse_tab[(x)]
 
 class upipe_bmd_sink_frame : public IDeckLinkVideoFrame
 {
@@ -242,12 +277,19 @@ struct upipe_bmd_sink {
     /** started flag **/
     int started;
 
-    /** vanc temporary buffer **/
+    /** vanc/vbi temporary buffer **/
     uint16_t vanc_tmp[1920*2];
     uint16_t *dc;
 
     /** closed captioning **/
     uint16_t cdp_hdr_sequence_cntr;
+
+    /** subpic queue **/
+    struct uchain subpic_queue;
+
+    /** vbi **/
+    vbi_sampling_par sp;
+    vbi_sliced sliced[1];
 
     /** handle to decklink card */
     IDeckLink *deckLink;
@@ -291,29 +333,30 @@ static const bool parity_tab[256] =
 #define ANC_START_LEN   6
 #define CDP_HEADER_SIZE 7
 
-static void upipe_bmd_sink_clear_vanc(uint16_t *dst, int w, int sd)
+static void upipe_bmd_sink_clear_vbi(uint8_t *dst, int w)
 {
     int i;
-    if (sd){
-        // uyvy
-        for (i = 0; i < (w/4); i++) {
-            dst[0] = 0x200;
-            dst[1] = 0x40;
-            dst[2] = 0x200;
-            dst[3] = 0x40;
-            dst += 4;
-        }
-    }
-    else {
-        // nv20
-        for (i = 0; i < (w/2); i++)
-            dst[i] = 0x40;
 
-        dst += (w/2);
+    for (i = 0; i < w; i++)
+        dst[i] = 0x10;
 
-        for (i = 0; i < (w/2); i++)
-            dst[i] = 0x200;
-    }
+    dst += w;
+
+    for (i = 0; i < w; i++)
+        dst[i] = 0x80;
+}
+
+static void upipe_bmd_sink_clear_vanc(uint16_t *dst, int w)
+{
+    int i;
+
+    for (i = 0; i < (w/2); i++)
+        dst[i] = 0x40;
+
+    dst += (w/2);
+
+    for (i = 0; i < (w/2); i++)
+        dst[i] = 0x200;
 }
 
 /* XXX: put this somewhere */
@@ -429,7 +472,7 @@ static void upipe_bmd_sink_calc_parity_checksum(struct upipe *upipe)
     upipe_bmd_sink->vanc_tmp[ANC_START_LEN+dc] = checksum;
 }
 
-static void upipe_bmd_sink_encode_v210(struct upipe *upipe, uint32_t *dst, int sd)
+static void upipe_bmd_sink_encode_v210(struct upipe *upipe, uint32_t *dst, int vbi)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
         upipe_bmd_sink_from_sub_mgr(upipe->mgr);
@@ -437,28 +480,25 @@ static void upipe_bmd_sink_encode_v210(struct upipe *upipe, uint32_t *dst, int s
     int w;
     uint32_t val = 0;
 
-    /* FIXME: SIMD */
-    if (sd) {
-        uint16_t *u = &upipe_bmd_sink->vanc_tmp[0];
-        uint16_t *y = &upipe_bmd_sink->vanc_tmp[1];
+    if (vbi) {
+        uint8_t *y = (uint8_t*)upipe_bmd_sink->vanc_tmp;
+        uint8_t *u = &y[720];
 
-        /* Guaranteed mod-6 width */
-        for( w = 0; w < width; w += 6 ){
-            WRITE_PIXELS(u, y, (u+2));
-            u += 4;
-            y += 2;
-            WRITE_PIXELS(y, u, (y+2));
+        for( w = 0; w < 720; w += 6 ){
+            WRITE_PIXELS8(u, y, (u+1));
+            y += 1;
             u += 2;
-            y += 4;
-            WRITE_PIXELS(u, y, (u+2));
-            u += 4;
+            WRITE_PIXELS8(y, u, (y+1));
             y += 2;
-            WRITE_PIXELS(y, u, (y+2));
+            u += 1;
+            WRITE_PIXELS8(u, y, (u+1));
+            y += 1;
             u += 2;
-            y += 4;
+            WRITE_PIXELS8(y, u, (y+1));
+            y += 2;
+            u += 1;
         }
-    }
-    else {
+    } else {
         /* 1280 isn't mod-6 so long vanc packets will be truncated */
         uint16_t *y = &upipe_bmd_sink->vanc_tmp[0];
         uint16_t *u = &upipe_bmd_sink->vanc_tmp[width];
@@ -477,6 +517,58 @@ static void upipe_bmd_sink_encode_v210(struct upipe *upipe, uint32_t *dst, int s
             y += 2;
             u += 1;
         }
+    }
+}
+
+/* VBI Teletext */
+static void upipe_bmd_sink_extract_ttx(struct upipe *upipe, IDeckLinkVideoFrameAncillary *ancillary,
+                                       const uint8_t *pic_data, size_t pic_data_size, int sd)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink =
+        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+    void *vanc;
+    pic_data++;
+    pic_data_size--;
+
+    while (pic_data_size >= 46)
+    {
+        uint8_t data_unit_id = pic_data[0];
+        if (data_unit_id == 0x2 || data_unit_id == 0x3) {
+            uint8_t data_unit_len = pic_data[1];
+            if (data_unit_len == 0x2c) {
+                uint8_t line_offset = pic_data[2] & 0x1f;
+                uint8_t f2 = (pic_data[2] >> 5) & 1;
+                uint16_t line = line_offset + (PAL_FIELD_OFFSET * f2);
+                if (line > 0) {
+                    /* Setup libzvbi or OP-47 */
+                    if (sd) {
+                        uint8_t *buf = (uint8_t*)upipe_bmd_sink->vanc_tmp;
+                        upipe_bmd_sink_clear_vbi(buf, 720);
+
+                        upipe_bmd_sink->sp.start[f2] = line;
+                        upipe_bmd_sink->sp.count[f2] = 1;
+                        upipe_bmd_sink->sp.count[!f2] = 0;
+                        
+                        upipe_bmd_sink->sliced[0].id = VBI_SLICED_TELETEXT_B;
+                        upipe_bmd_sink->sliced[0].line = line;
+                        for (int i = 0; i < 42; i++)
+                            upipe_bmd_sink->sliced[0].data[i] = REVERSE(pic_data[5+i]);
+
+                        int success = vbi_raw_video_image(buf, 720*2, &upipe_bmd_sink->sp,
+                                                          0, 0, 0, 0x000000FF, false,
+                                                          upipe_bmd_sink->sliced, 1);
+
+                        ancillary->GetBufferForVerticalBlankingLine(line, &vanc);
+                        upipe_bmd_sink_encode_v210(upipe, (uint32_t*)vanc, 1);
+                    } else {
+
+                    }
+                }
+            }
+        }
+
+        pic_data += 46;
+        pic_data_size -= 46;
     }
 }
 
@@ -554,6 +646,11 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         return true;
     }
 
+    if (upipe_bmd_sink_sub == &upipe_bmd_sink->subpic_subpipe) {
+        ulist_add(&upipe_bmd_sink->subpic_queue, uref_to_uchain(uref));
+        return true;
+    }
+
     uint64_t pts = 0;
     if (likely(ubase_check(uref_clock_get_pts_sys(uref, &pts)))) {
         uint64_t now = uclock_now(&upipe_bmd_sink->uclock.uclock);
@@ -614,12 +711,40 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         {
             void *vanc;
             ancillary->GetBufferForVerticalBlankingLine(CC_LINE, &vanc);
-            upipe_bmd_sink_clear_vanc(upipe_bmd_sink->vanc_tmp, w, sd);
+            upipe_bmd_sink_clear_vanc(upipe_bmd_sink->vanc_tmp, w);
             upipe_bmd_sink_start_anc(upipe, upipe_bmd_sink->vanc_tmp, 0x61, 0x1);
             upipe_bmd_sink_write_cdp(upipe, pic_data, pic_data_size, &upipe_bmd_sink->vanc_tmp[ANC_START_LEN]);
             upipe_bmd_sink_calc_parity_checksum(upipe);
 
             upipe_bmd_sink_encode_v210(upipe, (uint32_t*)vanc, sd);
+        }
+
+        /* Loop through subpic data */
+        struct uchain *uchain, *uchain_tmp;
+        ulist_delete_foreach(&upipe_bmd_sink->subpic_queue, uchain, uchain_tmp) {
+            struct uref *uref = uref_from_uchain(uchain);
+            uint64_t subpic_pts = 0;
+            uref_clock_get_pts_sys(uref, &subpic_pts);
+            subpic_pts += upipe_bmd_sink->subpic_subpipe.latency;
+            if (subpic_pts + (UCLOCK_FREQ/(25*2)) < pts) {
+                ulist_delete(uchain);
+                uref_free(uref);
+                continue;
+            }
+
+            /* Choose the closest subpic */
+            if (pts - (UCLOCK_FREQ/(25*2)) < subpic_pts && pts + (UCLOCK_FREQ/(25*2)) > subpic_pts) {
+                const uint8_t *buf;
+                int size = -1;
+                uref_block_read(uref, 0, &size, &buf);
+                
+                upipe_bmd_sink_extract_ttx(upipe, ancillary, buf, size, sd);
+                
+                uref_block_unmap(uref, 0);                
+                ulist_delete(uchain);
+                uref_free(uref);
+                break;
+            }
         }
 
         video_frame->SetAncillaryData(ancillary);
@@ -657,6 +782,9 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         if (written != size)
             upipe_dbg_va(upipe, "written %u/%u", written, size);
         upipe_dbg_va(upipe, "buffered samples: %u", buffered );
+        uref_free(uref);
+    }
+    else {
         uref_free(uref);
     }
 
@@ -820,6 +948,8 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
                             &upipe_bmd_sink->sub_mgr, uprobe_sound);
     upipe_bmd_sink_sub_init(upipe_bmd_sink_sub_to_upipe(upipe_bmd_sink_to_subpic_subpipe(upipe_bmd_sink)),
                             &upipe_bmd_sink->sub_mgr, uprobe_subpic);
+
+    ulist_init(&upipe_bmd_sink->subpic_queue);
 
     upipe_throw_ready(upipe);
     return upipe;
@@ -995,6 +1125,27 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
 
     upipe_bmd_sink->deckLinkOutput = deckLinkOutput;
     upipe_bmd_sink->deckLink = deckLink;
+
+    if (!strcmp(upipe_bmd_sink->mode, "pal ")) {
+        upipe_bmd_sink->sp.scanning         = 625; /* PAL */
+        upipe_bmd_sink->sp.sampling_format  = VBI_PIXFMT_YUV420;
+        upipe_bmd_sink->sp.sampling_rate    = 13.5e6;
+        upipe_bmd_sink->sp.bytes_per_line   = 720;
+        upipe_bmd_sink->sp.start[0]     = 6;
+        upipe_bmd_sink->sp.count[0]     = 17;
+        upipe_bmd_sink->sp.start[1]     = 319;
+        upipe_bmd_sink->sp.count[1]     = 17;
+        upipe_bmd_sink->sp.interlaced   = FALSE;
+        upipe_bmd_sink->sp.synchronous  = FALSE;
+        upipe_bmd_sink->sp.offset       = 0;
+    } else if (!strcmp(upipe_bmd_sink->mode, "ntsc")) {
+        upipe_bmd_sink->sp.scanning         = 525; /* NTSC */
+        upipe_bmd_sink->sp.sampling_format  = VBI_PIXFMT_YUV420;
+        upipe_bmd_sink->sp.sampling_rate    = 13.5e6;
+        upipe_bmd_sink->sp.bytes_per_line   = 720;
+        upipe_bmd_sink->sp.interlaced   = FALSE;
+        upipe_bmd_sink->sp.synchronous  = TRUE;
+    }
 
 end:
 
