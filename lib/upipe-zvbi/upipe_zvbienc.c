@@ -139,7 +139,7 @@ static bool upipe_zvbienc_handle(struct upipe *upipe, struct uref *uref,
     uref_pic_plane_write(uref, "y8", 0, 1, -1, 2, &buf);
     int success = vbi_raw_video_image(buf, 720*2, &upipe_zvbienc->sp,
                                       0, 0, 0, 0x000000FF, false,
-                                      sliced, 1);
+                                      sliced, 2);
     uref_pic_plane_unmap(uref, "y8", 0, 1, -1, 2);
 
     upipe_zvbienc_output(upipe, uref, upump_p);
@@ -241,7 +241,7 @@ static int _upipe_zvbienc_set_pic_fmt(struct upipe *upipe, int pic_fmt)
         sp.sampling_format  = VBI_PIXFMT_YUV420;
         sp.sampling_rate    = 13.5e6;
         sp.bytes_per_line   = 720 * 2; /* 2 bpp */
-        sp.offset       = 9.5e-6 * 13.5e6;
+        sp.offset       = 0;
         sp.start[0]     = 23;
         sp.count[0]     = 17;
         sp.start[1]     = 319;
@@ -255,7 +255,7 @@ static int _upipe_zvbienc_set_pic_fmt(struct upipe *upipe, int pic_fmt)
         upipe_zvbienc->sp.sampling_format  = VBI_PIXFMT_YUV420;
         upipe_zvbienc->sp.sampling_rate    = 13.5e6;
         upipe_zvbienc->sp.bytes_per_line   = 720;
-        upipe_zvbienc->sp.offset       = 122;
+        upipe_zvbienc->sp.offset       = 0;
         upipe_zvbienc->sp.start[0]     = 21;
         upipe_zvbienc->sp.count[0]     = 1;
         upipe_zvbienc->sp.start[1]     = 284;
