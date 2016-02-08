@@ -769,10 +769,18 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
                 uref_free(uref);
                 return;
             }
+
+            if(!offset || !na) {
+                upipe_warn(upipe, "Invalid row/column in FEC packet, ignoring");
+                uref_free(uref);
+                return;
+            }
+            
             if (upipe_rtp_fec->cols != offset && upipe_rtp_fec->cols <= 50 &&
                 upipe_rtp_fec->rows <= 50) {
                 upipe_rtp_fec->cols = offset;
                 upipe_rtp_fec->rows = na;
+
                 fec_change = 1;
                 upipe_warn_va(upipe, "FEC detected %u rows and %u columns", upipe_rtp_fec->rows,
                               upipe_rtp_fec->cols);
@@ -808,6 +816,7 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
         upipe_rtp_fec->last_seqnum = UINT64_MAX;
 
         free(upipe_rtp_fec->recent);
+        upipe_rtp_fec->recent = NULL;
         if (upipe_rtp_fec->rows && upipe_rtp_fec->cols) {
             upipe_rtp_fec->recent_len = 2 * upipe_rtp_fec->rows * upipe_rtp_fec->cols;
             upipe_rtp_fec->recent = malloc(upipe_rtp_fec->recent_len * sizeof(*upipe_rtp_fec->recent));
