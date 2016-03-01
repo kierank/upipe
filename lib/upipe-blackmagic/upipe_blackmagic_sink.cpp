@@ -79,6 +79,7 @@
 #define CC_LINE 9
 #define AFD_LINE 11
 #define OP47_LINE1 12
+#define VANC_WIDTH 1920
 
 /* don't clip the v210 anc data */
 #define WRITE_PIXELS(a, b, c)           \
@@ -278,11 +279,17 @@ struct upipe_bmd_sink {
     int started;
 
     /** vanc/vbi temporary buffer **/
-    uint16_t vanc_tmp[1920*2];
-    uint16_t *dc;
+    uint16_t vanc_tmp[2][VANC_WIDTH*2];
+    uint16_t *dc[2];
 
     /** closed captioning **/
     uint16_t cdp_hdr_sequence_cntr;
+
+    /** OP47 teletext sequence counter **/
+    uint16_t op47_sequence_counter[2];
+
+    /** OP47 total number of teletext packets written **/
+    int op47_number_of_packets[2];
 
     /** subpic queue **/
     struct uchain subpic_queue;
@@ -346,28 +353,28 @@ static void upipe_bmd_sink_clear_vbi(uint8_t *dst, int w)
         dst[i] = 0x80;
 }
 
-static void upipe_bmd_sink_clear_vanc(uint16_t *dst, int w)
+static void upipe_bmd_sink_clear_vanc(uint16_t *dst)
 {
     int i;
 
-    for (i = 0; i < (w/2); i++)
+    for (i = 0; i < VANC_WIDTH; i++)
         dst[i] = 0x40;
 
-    dst += (w/2);
+    dst += VANC_WIDTH;
 
-    for (i = 0; i < (w/2); i++)
+    for (i = 0; i < VANC_WIDTH; i++)
         dst[i] = 0x200;
 }
 
 /* XXX: put this somewhere */
 static void upipe_bmd_sink_start_anc(struct upipe *upipe, uint16_t *dst,
-                                     uint16_t did, uint16_t sdid)
+                                     int field, uint16_t did, uint16_t sdid)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
         upipe_bmd_sink_from_sub_mgr(upipe->mgr);
 
     /* reset dc */
-    upipe_bmd_sink->dc = 0;
+    upipe_bmd_sink->dc[field] = 0;
 
     /* ADF */
     dst[0] = 0x000;
@@ -379,7 +386,7 @@ static void upipe_bmd_sink_start_anc(struct upipe *upipe, uint16_t *dst,
     dst[4] = sdid;
     /* DC */
     dst[5] = 0;
-    upipe_bmd_sink->dc = &dst[5];
+    upipe_bmd_sink->dc[field] = &dst[5];
 }
 
 static void upipe_bmd_sink_write_cdp_header(struct upipe *upipe, uint16_t *dst)
@@ -399,7 +406,7 @@ static void upipe_bmd_sink_write_cdp_header(struct upipe *upipe, uint16_t *dst)
     dst[5] = upipe_bmd_sink->cdp_hdr_sequence_cntr >> 8;
     dst[6] = upipe_bmd_sink->cdp_hdr_sequence_cntr & 0xff;
 
-    *upipe_bmd_sink->dc += CDP_HEADER_SIZE;
+    *upipe_bmd_sink->dc[0] += CDP_HEADER_SIZE;
 }
 
 static void upipe_bmd_sink_write_ccdata_section(struct upipe *upipe, uint16_t *dst,
@@ -416,7 +423,7 @@ static void upipe_bmd_sink_write_ccdata_section(struct upipe *upipe, uint16_t *d
     for (i = 0; i < src_size; i++)
         dst[i] = src[i];
 
-    *upipe_bmd_sink->dc += src_size+2;
+    *upipe_bmd_sink->dc[0] += src_size+2;
 }
 
 static void upipe_bmd_sink_write_cdp_footer(struct upipe *upipe, uint16_t *dst)
@@ -432,12 +439,12 @@ static void upipe_bmd_sink_write_cdp_footer(struct upipe *upipe, uint16_t *dst)
 
     upipe_bmd_sink->cdp_hdr_sequence_cntr++;
 
-    *upipe_bmd_sink->dc += 4;
-    cnt = *upipe_bmd_sink->dc;
-    upipe_bmd_sink->vanc_tmp[ANC_START_LEN+2] = cnt; // set cdp length
+    *upipe_bmd_sink->dc[0] += 4;
+    cnt = *upipe_bmd_sink->dc[0];
+    upipe_bmd_sink->vanc_tmp[0][ANC_START_LEN+2] = cnt; // set cdp length
 
     for( i = 0; i < cnt-1; i++ ) // don't include checksum
-        checksum += upipe_bmd_sink->vanc_tmp[ANC_START_LEN+i];
+        checksum += upipe_bmd_sink->vanc_tmp[0][ANC_START_LEN+i];
 
     dst[3] = checksum ? 256 - checksum : 0;
 }
@@ -450,29 +457,31 @@ static void upipe_bmd_sink_write_cdp(struct upipe *upipe, const uint8_t *src,
     upipe_bmd_sink_write_cdp_footer(upipe, &dst[CDP_HEADER_SIZE+src_size+2]);
 }
 
-static void upipe_bmd_sink_calc_parity_checksum(struct upipe *upipe)
+static void upipe_bmd_sink_calc_parity_checksum(struct upipe *upipe, int field)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
         upipe_bmd_sink_from_sub_mgr(upipe->mgr);
-    uint16_t i, dc = *upipe_bmd_sink->dc;
+    uint16_t i;
+    uint16_t dc = *upipe_bmd_sink->dc[field];
     uint16_t checksum = 0;
+    uint16_t *buf = upipe_bmd_sink->vanc_tmp[field];
 
     /* +3 = did + sdid + dc itself */
     for( i = 0; i < dc+3; i++ )
     {
-        uint8_t parity = parity_tab[upipe_bmd_sink->vanc_tmp[3+i] & 0xff];
-        upipe_bmd_sink->vanc_tmp[3+i] |= (!parity << 9) | (parity << 8);
+        uint8_t parity = parity_tab[buf[3+i] & 0xff];
+        buf[3+i] |= (!parity << 9) | (parity << 8);
 
-        checksum += upipe_bmd_sink->vanc_tmp[3+i] & 0x1ff;
+        checksum += buf[3+i] & 0x1ff;
     }
 
     checksum &= 0x1ff;
     checksum |= (!(checksum >> 8)) << 9;
 
-    upipe_bmd_sink->vanc_tmp[ANC_START_LEN+dc] = checksum;
+    buf[ANC_START_LEN+dc] = checksum;
 }
 
-static void upipe_bmd_sink_encode_v210(struct upipe *upipe, uint32_t *dst, int vbi)
+static void upipe_bmd_sink_encode_v210(struct upipe *upipe, uint32_t *dst, int field, int vbi)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
         upipe_bmd_sink_from_sub_mgr(upipe->mgr);
@@ -500,8 +509,8 @@ static void upipe_bmd_sink_encode_v210(struct upipe *upipe, uint32_t *dst, int v
         }
     } else {
         /* 1280 isn't mod-6 so long vanc packets will be truncated */
-        uint16_t *y = &upipe_bmd_sink->vanc_tmp[0];
-        uint16_t *u = &upipe_bmd_sink->vanc_tmp[width];
+        uint16_t *y = &upipe_bmd_sink->vanc_tmp[field][0];
+        uint16_t *u = &upipe_bmd_sink->vanc_tmp[field][width];
 
         for( w = 0; w < width; w += 6 ){
             WRITE_PIXELS(u, y, (u+1));
@@ -520,6 +529,88 @@ static void upipe_bmd_sink_encode_v210(struct upipe *upipe, uint32_t *dst, int v
     }
 }
 
+static void upipe_bmd_sink_write_op47_header(struct upipe *upipe, int field)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink =
+        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+
+    uint16_t *buf = upipe_bmd_sink->vanc_tmp[field];
+
+    /* Populates upipe_bmd_sink->dc with an address to
+    * use later on */
+    upipe_bmd_sink_start_anc(upipe, buf, field, 0x43, 0x2);
+
+    /* 2 identifiers */
+    buf[6]  = 0x51;
+    buf[7]  = 0x15;
+
+    /* Length, populate this last */
+    buf[8]  = 0x0;
+
+    /* Format code */
+    buf[9]  = 0x2;
+
+    /* Data Adaption header */
+    buf[10] = 0x0;
+    buf[11] = 0x0;
+    buf[12] = 0x0;
+    buf[13] = 0x0;
+    buf[14] = 0x0;
+}
+
+static void upipe_bmd_sink_write_op47_packet(struct upipe *upipe, const uint8_t *data,
+                                             int line, uint8_t field)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink =
+        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+
+    uint16_t *buf = upipe_bmd_sink->vanc_tmp[field];
+    int index = 15 + 45*upipe_bmd_sink->op47_number_of_packets[field];
+
+    /* 2xRun in codes */
+    buf[index++] = 0x55;
+    buf[index++] = 0x55;
+
+    /* Framing code, MRAG and the data */
+    for (int i = 1; i < 44; i++)
+        buf[index++] = data[i];
+
+    /* Write structure A */
+    buf[10 + upipe_bmd_sink->op47_number_of_packets[field]]  = line;
+    buf[10 + upipe_bmd_sink->op47_number_of_packets[field]] |= ((!field) << 5);
+
+    upipe_bmd_sink->op47_number_of_packets[field]++;
+}
+
+static void upipe_bmd_sink_write_op47_footer(struct upipe *upipe, int field)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink =
+        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+
+    uint16_t *buf = upipe_bmd_sink->vanc_tmp[field];
+    int index = 15 + 45*upipe_bmd_sink->op47_number_of_packets[field];
+
+    /* Footer ID */
+    buf[index++] = 0x74;
+
+    /* Sequence counter, MSB and LSB */
+    upipe_bmd_sink->op47_sequence_counter[field]++;
+    buf[index++] = upipe_bmd_sink->op47_sequence_counter[field] >> 8;
+    buf[index++] = upipe_bmd_sink->op47_sequence_counter[field] & 0xff;
+
+    /* Write UDW length */
+    buf[8] = index - ANC_START_LEN;
+
+    /* SDP Checksum */
+    uint8_t sum = 0;
+    for (int i = ANC_START_LEN; i < index; i++)
+        sum += buf[i];
+    buf[index++] = sum;
+
+    /* Write ADF DC */
+    *upipe_bmd_sink->dc[field] = index - ANC_START_LEN;
+}
+
 /* VBI Teletext */
 static void upipe_bmd_sink_extract_ttx(struct upipe *upipe, IDeckLinkVideoFrameAncillary *ancillary,
                                        const uint8_t *pic_data, size_t pic_data_size, int sd)
@@ -529,6 +620,14 @@ static void upipe_bmd_sink_extract_ttx(struct upipe *upipe, IDeckLinkVideoFrameA
     void *vanc;
     pic_data++;
     pic_data_size--;
+
+    if(!sd) {
+        ancillary->GetBufferForVerticalBlankingLine(OP47_LINE1, &vanc);
+        upipe_bmd_sink_clear_vanc(upipe_bmd_sink->vanc_tmp[0]);
+    }
+
+    upipe_bmd_sink->op47_number_of_packets[0] = 0;
+    upipe_bmd_sink->op47_number_of_packets[1] = 0;
 
     while (pic_data_size >= 46)
     {
@@ -542,26 +641,28 @@ static void upipe_bmd_sink_extract_ttx(struct upipe *upipe, IDeckLinkVideoFrameA
                 if (line > 0) {
                     /* Setup libzvbi or OP-47 */
                     if (sd) {
-                        uint8_t *buf = (uint8_t*)upipe_bmd_sink->vanc_tmp;
+                        uint8_t *buf = (uint8_t*)upipe_bmd_sink->vanc_tmp[0];
                         upipe_bmd_sink_clear_vbi(buf, 720);
 
                         upipe_bmd_sink->sp.start[f2] = line;
                         upipe_bmd_sink->sp.count[f2] = 1;
                         upipe_bmd_sink->sp.count[!f2] = 0;
-                        
+
                         upipe_bmd_sink->sliced[0].id = VBI_SLICED_TELETEXT_B;
                         upipe_bmd_sink->sliced[0].line = line;
                         for (int i = 0; i < 42; i++)
-                            upipe_bmd_sink->sliced[0].data[i] = REVERSE(pic_data[5+i]);
+                            upipe_bmd_sink->sliced[0].data[i] = REVERSE(pic_data[4+i]);
 
-                        int success = vbi_raw_video_image(buf, 720*2, &upipe_bmd_sink->sp,
+                        int success = vbi_raw_video_image(buf, 720, &upipe_bmd_sink->sp,
                                                           0, 0, 0, 0x000000FF, false,
                                                           upipe_bmd_sink->sliced, 1);
 
                         ancillary->GetBufferForVerticalBlankingLine(line, &vanc);
-                        upipe_bmd_sink_encode_v210(upipe, (uint32_t*)vanc, 1);
+                        upipe_bmd_sink_encode_v210(upipe, (uint32_t*)vanc, 0, 1);
                     } else {
-
+                        if (!upipe_bmd_sink->op47_number_of_packets[f2])
+                            upipe_bmd_sink_write_op47_header(upipe, f2);
+                        upipe_bmd_sink_write_op47_packet(upipe, pic_data, line, f2);
                     }
                 }
             }
@@ -569,6 +670,19 @@ static void upipe_bmd_sink_extract_ttx(struct upipe *upipe, IDeckLinkVideoFrameA
 
         pic_data += 46;
         pic_data_size -= 46;
+    }
+
+    if (!sd) {
+        if (upipe_bmd_sink->op47_number_of_packets[0]) {
+            upipe_bmd_sink_write_op47_footer(upipe, 0);
+            upipe_bmd_sink_calc_parity_checksum(upipe, 0);
+            upipe_bmd_sink_encode_v210(upipe, (uint32_t*)vanc, 0, sd);
+        }
+        if (upipe_bmd_sink->op47_number_of_packets[1]) {
+            upipe_bmd_sink_write_op47_footer(upipe, 1);
+            upipe_bmd_sink_calc_parity_checksum(upipe, 1);
+            upipe_bmd_sink_encode_v210(upipe, (uint32_t*)vanc, 1, sd);
+        }
     }
 }
 
@@ -711,36 +825,39 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         {
             void *vanc;
             ancillary->GetBufferForVerticalBlankingLine(CC_LINE, &vanc);
-            upipe_bmd_sink_clear_vanc(upipe_bmd_sink->vanc_tmp, w);
-            upipe_bmd_sink_start_anc(upipe, upipe_bmd_sink->vanc_tmp, 0x61, 0x1);
-            upipe_bmd_sink_write_cdp(upipe, pic_data, pic_data_size, &upipe_bmd_sink->vanc_tmp[ANC_START_LEN]);
-            upipe_bmd_sink_calc_parity_checksum(upipe);
+            upipe_bmd_sink_clear_vanc(upipe_bmd_sink->vanc_tmp[0]);
+            upipe_bmd_sink_start_anc(upipe, upipe_bmd_sink->vanc_tmp[0], 0, 0x61, 0x1);
+            upipe_bmd_sink_write_cdp(upipe, pic_data, pic_data_size, &upipe_bmd_sink->vanc_tmp[0][ANC_START_LEN]);
+            upipe_bmd_sink_calc_parity_checksum(upipe, 0);
 
-            upipe_bmd_sink_encode_v210(upipe, (uint32_t*)vanc, sd);
+            upipe_bmd_sink_encode_v210(upipe, (uint32_t*)vanc, 0, sd);
         }
 
         /* Loop through subpic data */
+        printf("\n subpic depth %i \n", ulist_depth(&upipe_bmd_sink->subpic_queue));
         struct uchain *uchain, *uchain_tmp;
         ulist_delete_foreach(&upipe_bmd_sink->subpic_queue, uchain, uchain_tmp) {
+            printf("\n VIDEO PTS %"PRIu64" \n", pts );
             struct uref *uref = uref_from_uchain(uchain);
             uint64_t subpic_pts = 0;
             uref_clock_get_pts_sys(uref, &subpic_pts);
             subpic_pts += upipe_bmd_sink->subpic_subpipe.latency;
-            if (subpic_pts + (UCLOCK_FREQ/(25*2)) < pts) {
+            printf("\n SUBPIC PTS %"PRIu64" \n", subpic_pts );
+
+            if (subpic_pts + (UCLOCK_FREQ/25) < pts) {
                 ulist_delete(uchain);
                 uref_free(uref);
                 continue;
             }
 
-            /* Choose the closest subpic */
-            if (pts - (UCLOCK_FREQ/(25*2)) < subpic_pts && pts + (UCLOCK_FREQ/(25*2)) > subpic_pts) {
+            /* Choose the closest subpic in the past */
+            if (pts - (UCLOCK_FREQ/25) < subpic_pts) {
+                printf("\n CHOSEN SUBPIC %"PRIu64" \n", subpic_pts);
                 const uint8_t *buf;
                 int size = -1;
                 uref_block_read(uref, 0, &size, &buf);
-                
                 upipe_bmd_sink_extract_ttx(upipe, ancillary, buf, size, sd);
-                
-                uref_block_unmap(uref, 0);                
+                uref_block_unmap(uref, 0);
                 ulist_delete(uchain);
                 uref_free(uref);
                 break;
@@ -1137,7 +1254,7 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
         upipe_bmd_sink->sp.count[1]     = 17;
         upipe_bmd_sink->sp.interlaced   = FALSE;
         upipe_bmd_sink->sp.synchronous  = FALSE;
-        upipe_bmd_sink->sp.offset       = 0;
+        upipe_bmd_sink->sp.offset       = 128;
     } else if (!strcmp(upipe_bmd_sink->mode, "ntsc")) {
         upipe_bmd_sink->sp.scanning         = 525; /* NTSC */
         upipe_bmd_sink->sp.sampling_format  = VBI_PIXFMT_YUV420;
@@ -1182,7 +1299,7 @@ static int upipe_bmd_sink_set_option(struct upipe *upipe,
     return UBASE_ERR_NONE;
 }
 
-/** @internal @This returns the bmd_sink genlock status. 
+/** @internal @This returns the bmd_sink genlock status.
  *
  * @param upipe description structure of the pipe
  * @param pointer to integer for genlock status
@@ -1208,7 +1325,7 @@ static int _upipe_bmd_sink_get_genlock_status(struct upipe *upipe, int *status)
     return UBASE_ERR_NONE;
 }
 
-/** @internal @This returns the bmd_sink genlock offset. 
+/** @internal @This returns the bmd_sink genlock offset.
  *
  * @param upipe description structure of the pipe
  * @param pointer to int64_t for genlock offset
@@ -1245,7 +1362,7 @@ static int _upipe_bmd_sink_get_genlock_offset(struct upipe *upipe, int64_t *offs
     return UBASE_ERR_NONE;
 }
 
-/** @internal @This sets the bmd_sink genlock offset. 
+/** @internal @This sets the bmd_sink genlock offset.
  *
  * @param upipe description structure of the pipe
  * @param int64_t requested genlock offset
