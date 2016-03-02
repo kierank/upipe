@@ -63,7 +63,7 @@
 /** max retention time for still pictures streams (ISO/IEC 13818-1 2.4.2.6) */
 #define MAX_DELAY_STILL (UCLOCK_FREQ * 60)
 /** max retention time for teletext (ETSI EN 300 472 5.) */
-#define MAX_DELAY_TELX (UCLOCK_FREQ / 25)
+#define MAX_DELAY_TELX (UCLOCK_FREQ * 5 / 25)
 /** max retention time for SCTE-35 tables */
 #define MAX_DELAY_SCTE35 UINT64_MAX
 

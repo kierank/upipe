@@ -139,7 +139,7 @@ static bool upipe_zvbienc_handle(struct upipe *upipe, struct uref *uref,
     uref_pic_plane_write(uref, "y8", 0, 1, -1, 2, &buf);
     int success = vbi_raw_video_image(buf, 720*2, &upipe_zvbienc->sp,
                                       0, 0, 0, 0x000000FF, false,
-                                      sliced, 1);
+                                      sliced, 2);
     uref_pic_plane_unmap(uref, "y8", 0, 1, -1, 2);
 
     upipe_zvbienc_output(upipe, uref, upump_p);
