@@ -842,15 +842,15 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         }
 
         /* Loop through subpic data */
-        printf("\n subpic depth %i \n", ulist_depth(&upipe_bmd_sink->subpic_queue));
+        //printf("\n subpic depth %i \n", ulist_depth(&upipe_bmd_sink->subpic_queue));
         struct uchain *uchain, *uchain_tmp;
         ulist_delete_foreach(&upipe_bmd_sink->subpic_queue, uchain, uchain_tmp) {
-            printf("\n VIDEO PTS %"PRIu64" \n", pts );
+            //printf("\n VIDEO PTS %"PRIu64" \n", pts );
             struct uref *uref = uref_from_uchain(uchain);
             uint64_t subpic_pts = 0;
             uref_clock_get_pts_sys(uref, &subpic_pts);
             subpic_pts += upipe_bmd_sink->subpic_subpipe.latency;
-            printf("\n SUBPIC PTS %"PRIu64" \n", subpic_pts );
+            //printf("\n SUBPIC PTS %"PRIu64" \n", subpic_pts );
 
             /* Delete old urefs */
             if (subpic_pts + (UCLOCK_FREQ/25) < pts) {
@@ -861,7 +861,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
 
             /* Choose the closest subpic in the past */
             if (ttx && pts - (UCLOCK_FREQ/25) < subpic_pts) {
-                printf("\n CHOSEN SUBPIC %"PRIu64" \n", subpic_pts);
+                //printf("\n CHOSEN SUBPIC %"PRIu64" \n", subpic_pts);
                 const uint8_t *buf;
                 int size = -1;
                 uref_block_read(uref, 0, &size, &buf);
