@@ -667,7 +667,7 @@ static void upipe_bmd_sink_extract_ttx(struct upipe *upipe, IDeckLinkVideoFrameA
                                                           upipe_bmd_sink->sliced, 1);
 
                         ancillary->GetBufferForVerticalBlankingLine(line, &vanc[0]);
-                        upipe_bmd_sink_encode_v210(upipe, (uint32_t*)vanc, 0, 1);
+                        upipe_bmd_sink_encode_v210(upipe, (uint32_t*)vanc[0], 0, 1);
                     } else {
                         if (!upipe_bmd_sink->op47_number_of_packets[f2])
                             upipe_bmd_sink_write_op47_header(upipe, f2);
