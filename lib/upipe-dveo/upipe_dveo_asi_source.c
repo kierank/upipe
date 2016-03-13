@@ -76,6 +76,7 @@ const char dvbm_sys_fmt[] = "/sys/class/dvbm/%u/%s";
 #define CAPTURE_DEFAULT_SIZE  ((188+8)*112)
 #define RX_DEFAULT_SIZE       (188*7)
 #define BUFFERS               (2)
+#define OPERATING_MODE        (1)
 #define TIMESTAMP_MODE        (2)
 #define TS_PACKETS            (7)
 
@@ -220,7 +221,7 @@ static void upipe_dveo_asi_src_worker(struct upump *upump)
 {
     struct upipe *upipe = upump_get_opaque(upump, struct upipe *);
     struct upipe_dveo_asi_src *upipe_dveo_asi_src = upipe_dveo_asi_src_from_upipe(upipe);
-    uint64_t systime = 0; /* to keep gcc quiet */
+    uint64_t systime = 0, first_ts = UINT64_MAX;
     if (upipe_dveo_asi_src->uclock != NULL)
         systime = uclock_now(upipe_dveo_asi_src->uclock);
 
@@ -279,9 +280,10 @@ static void upipe_dveo_asi_src_worker(struct upump *upump)
         ts = ((uint64_t)ptr[7] << 56) | ((uint64_t)ptr[6] << 48) | ((uint64_t)ptr[5] << 40) | ((uint64_t)ptr[4] << 32) |
              ((uint64_t)ptr[3] << 24) | ((uint64_t)ptr[2] << 16) | ((uint64_t)ptr[1] <<  8) | ((uint64_t)ptr[0] <<  0);
         discontinuity = ts < upipe_dveo_asi_src->last_ts;
-        upipe_throw_clock_ref(upipe, uref, ts, discontinuity);
         upipe_dveo_asi_src->last_ts = ts;
         uref_block_peek_unmap(uref, 0, tmp, ptr);
+        if (first_ts == UINT64_MAX)
+            first_ts = ts;
 
         /* Delete rest of timestamps */
         for (int i = 0; i < TS_PACKETS; i++)
@@ -293,6 +295,8 @@ static void upipe_dveo_asi_src_worker(struct upump *upump)
             upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
             return;
         }
+
+        uref_clock_set_cr_sys(uref, systime + (ts - first_ts));
 
         upipe_dveo_asi_src_output(upipe, output, &upipe_dveo_asi_src->upump);
         uref_block_delete(uref, 0, 188*TS_PACKETS);
@@ -366,10 +370,7 @@ static int upipe_dveo_asi_src_open(struct upipe *upipe)
 
     snprintf(sys, sizeof(sys), dvbm_sys_fmt, upipe_dveo_asi_src->card_idx, "bypass_mode");
     snprintf(buf, sizeof(buf), "%u", BYPASS_MODE);
-    if (util_write(sys, buf, sizeof(buf)) < 0) {
-        upipe_err_va(upipe, "Couldn't set bypass mode");
-        return UBASE_ERR_EXTERNAL;
-    }
+    util_write(sys, buf, sizeof(buf)); /* Not all cards have this so don't fail */
 
     snprintf(sys, sizeof(sys), sys_fmt, upipe_dveo_asi_src->card_idx, "granularity");
     if (util_read(sys, buf, 1) < 0) {
