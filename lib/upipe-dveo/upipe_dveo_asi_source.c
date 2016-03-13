@@ -69,12 +69,13 @@
 
 const char dev_fmt[] = "/dev/asirx%u";
 const char sys_fmt[] = "/sys/class/asi/asirx%u/%s";
+const char dvbm_sys_fmt[] = "/sys/class/dvbm/%u/%s";
 
 /** default size of buffers when unspecified, extra 8-byte timestamp on capture */
+#define BYPASS_MODE           (1)
 #define CAPTURE_DEFAULT_SIZE  ((188+8)*112)
 #define RX_DEFAULT_SIZE       (188*7)
 #define BUFFERS               (2)
-#define OPERATING_MODE        (1)
 #define TIMESTAMP_MODE        (2)
 #define TS_PACKETS            (7)
 
@@ -362,6 +363,13 @@ static int upipe_dveo_asi_src_open(struct upipe *upipe)
     struct upipe_dveo_asi_src *upipe_dveo_asi_src = upipe_dveo_asi_src_from_upipe(upipe);
     char path[20], sys[50], buf[20];
     int ret, granularity;
+
+    snprintf(sys, sizeof(sys), dvbm_sys_fmt, upipe_dveo_asi_src->card_idx, "bypass_mode");
+    snprintf(buf, sizeof(buf), "%u", BYPASS_MODE);
+    if (util_write(sys, buf, sizeof(buf)) < 0) {
+        upipe_err_va(upipe, "Couldn't set bypass mode");
+        return UBASE_ERR_EXTERNAL;
+    }
 
     snprintf(sys, sizeof(sys), sys_fmt, upipe_dveo_asi_src->card_idx, "granularity");
     if (util_read(sys, buf, 1) < 0) {
