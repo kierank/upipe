@@ -157,7 +157,7 @@ UPIPE_HELPER_UPUMP(upipe_dveo_asi_src, upump, upump_mgr)
 UPIPE_HELPER_OUTPUT_SIZE(upipe_dveo_asi_src, output_size)
 
 /* From the example code */
-ssize_t util_read(const char *name, char *buf, size_t count)
+static ssize_t util_read(const char *name, char *buf, size_t count)
 {
     ssize_t fd, ret;
 
@@ -169,7 +169,7 @@ ssize_t util_read(const char *name, char *buf, size_t count)
     return ret;
 }
 
-ssize_t util_write(const char *name, const char *buf, size_t count)
+static ssize_t util_write(const char *name, const char *buf, size_t count)
 {
     ssize_t fd, ret;
 
@@ -208,7 +208,6 @@ static struct upipe *upipe_dveo_asi_src_alloc(struct upipe_mgr *mgr,
     upipe_dveo_asi_src->last_ts = -1;
     upipe_throw_ready(upipe);
 
-    upipe_dveo_asi_src_open(upipe);
     //upipe_dveo_asi_src_check(upipe, NULL);
     
     return upipe;
@@ -432,6 +431,30 @@ static void upipe_dveo_asi_src_close(struct upipe *upipe)
     upipe_dveo_asi_src_set_upump(upipe, NULL);
 }
 
+/** @internal @This sets the content of a dveo_asi_src option.
+ *
+ * @param upipe description structure of the pipe
+ * @param option name of the option
+ * @param content content of the option, or NULL to delete it
+ * @return an error code
+ */
+static int upipe_dveo_asi_src_set_option(struct upipe *upipe,
+                                   const char *k, const char *v)
+{
+    struct upipe_dveo_asi_src *upipe_dveo_asi_src = upipe_dveo_asi_src_from_upipe(upipe);
+    assert(k != NULL);
+
+    if (unlikely(upipe_dveo_asi_src->fd != -1))
+        upipe_dveo_asi_src_close(upipe);    
+
+    if (!strcmp(k, "card-idx"))
+        upipe_dveo_asi_src->card_idx = atoi(v);
+
+    upipe_dveo_asi_src_open(upipe);
+
+    return UBASE_ERR_NONE;
+}
+
 /** @internal @This processes control commands on a file source pipe.
  *
  * @param upipe description structure of the pipe
@@ -462,7 +485,11 @@ static int _upipe_dveo_asi_src_control(struct upipe *upipe, int command, va_list
             struct upipe *output = va_arg(args, struct upipe *);
             return upipe_dveo_asi_src_set_output(upipe, output);
         }
-
+        case UPIPE_SET_OPTION: {
+            const char *k = va_arg(args, const char *);
+            const char *v = va_arg(args, const char *);
+            return upipe_dveo_asi_src_set_option(upipe, k, v);
+        }
         default:
             return UBASE_ERR_NONE;
     }
