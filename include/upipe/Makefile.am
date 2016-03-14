@@ -54,7 +54,10 @@ pkginclude_HEADERS = \
 	upipe_helper_uref_mgr.h \
 	upipe_helper_uref_stream.h \
 	upipe_helper_urefcount.h \
+	upipe_helper_urefcount_real.h \
 	upipe_helper_void.h \
+	upipe_helper_uprobe.h \
+	upipe_helper_inner.h \
 	upool.h \
 	uprobe.h \
 	uprobe_dejitter.h \
@@ -64,6 +67,7 @@ pkginclude_HEADERS = \
 	uprobe_output.h \
 	uprobe_prefix.h \
 	uprobe_select_flows.h \
+	uprobe_source_mgr.h \
 	uprobe_stdio.h \
 	uprobe_stdio_color.h \
 	uprobe_syslog.h \

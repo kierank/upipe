@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2015 OpenHeadend S.A.R.L.
+ * Copyright (C) 2013-2016 OpenHeadend S.A.R.L.
  *
  * Authors: Christophe Massiot
  *
@@ -286,11 +286,19 @@ static int upipe_ts_psig_flow_check(struct upipe *upipe,
             *descriptors_size_p += DESC0A_HEADER_SIZE +
                                    languages * DESC0A_LANGUAGE_SIZE;
 
-        if (!ubase_ncmp(raw_def, "block.ac3."))
+        if (!ubase_ncmp(raw_def, "block.ac3.")) {
             *descriptors_size_p += DESC6A_HEADER_SIZE;
-        else if (!ubase_ncmp(raw_def, "block.eac3."))
+            uint8_t component_type;
+            if (ubase_check(uref_ts_flow_get_component_type(flow->flow_def,
+                                                            &component_type)))
+                *descriptors_size_p += 1;
+        } else if (!ubase_ncmp(raw_def, "block.eac3.")) {
             *descriptors_size_p += DESC7A_HEADER_SIZE;
-        else if (!ubase_ncmp(raw_def, "block.dts."))
+            uint8_t component_type;
+            if (ubase_check(uref_ts_flow_get_component_type(flow->flow_def,
+                                                            &component_type)))
+                *descriptors_size_p += 1;
+        } else if (!ubase_ncmp(raw_def, "block.dts."))
             *descriptors_size_p += DESC7B_HEADER_SIZE;
         else if (!ubase_ncmp(raw_def, "block.opus."))
             *descriptors_size_p += DESC05_HEADER_SIZE;
@@ -461,14 +469,28 @@ static int upipe_ts_psig_flow_build(struct upipe *upipe, uint8_t *es,
         if (!ubase_ncmp(raw_def, "block.ac3.")) {
             desc = descs_get_desc(descs, k++);
             desc6a_init(desc);
-            desc_set_length(desc, DESC6A_HEADER_SIZE - DESC_HEADER_SIZE);
             desc6a_clear_flags(desc);
+
+            uint8_t component_type;
+            if (ubase_check(uref_ts_flow_get_component_type(flow->flow_def,
+                                                            &component_type))) {
+                desc6a_set_component_type_flag(desc, true);
+                desc6a_set_component_type(desc, component_type);
+            }
+            desc6a_set_length(desc);
 
         } else if (!ubase_ncmp(raw_def, "block.eac3.")) {
             desc = descs_get_desc(descs, k++);
             desc7a_init(desc);
-            desc_set_length(desc, DESC7A_HEADER_SIZE - DESC_HEADER_SIZE);
             desc7a_clear_flags(desc);
+
+            uint8_t component_type;
+            if (ubase_check(uref_ts_flow_get_component_type(flow->flow_def,
+                                                            &component_type))) {
+                desc7a_set_component_type_flag(desc, true);
+                desc7a_set_component_type(desc, component_type);
+            }
+            desc7a_set_length(desc);
 
         } else if (!ubase_ncmp(raw_def, "block.dts.")) {
             desc = descs_get_desc(descs, k++);
@@ -612,7 +634,8 @@ static int upipe_ts_psig_flow_set_flow_def(struct upipe *upipe,
     bool pmt_change = flow->flow_def == NULL ||
         uref_flow_cmp_raw_def(flow_def, flow->flow_def) ||
         uref_ts_flow_cmp_pid(flow_def, flow->flow_def) ||
-        uref_ts_flow_compare_descriptors(flow_def, flow->flow_def);
+        uref_ts_flow_compare_descriptors(flow_def, flow->flow_def) ||
+        uref_ts_flow_cmp_component_type(flow_def, flow->flow_def);
 
     uref_free(flow->flow_def);
     flow->flow_def = flow_def_dup;

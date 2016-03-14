@@ -104,9 +104,9 @@ struct upipe_sws {
     /** swscale image conversion context [0] for progressive, [1,2] interlaced */
     struct SwsContext *convert_ctx[3];
     /** input pixel format */
-    enum PixelFormat input_pix_fmt;
+    enum AVPixelFormat input_pix_fmt;
     /** requested output pixel format */
-    enum PixelFormat output_pix_fmt;
+    enum AVPixelFormat output_pix_fmt;
     /** input chroma map */
     const char *input_chroma_map[UPIPE_AV_MAX_PLANES];
     /** output chroma map */
@@ -275,8 +275,10 @@ static bool upipe_sws_handle(struct upipe *upipe, struct uref *uref,
         upipe_verbose_va(upipe, "input_stride[%d] %d",
                          i, input_strides[i]);
     }
-    input_planes[i] = NULL;
-    input_strides[i] = 0;
+    for ( ; i < UPIPE_AV_MAX_PLANES; i++) {
+        input_planes[i] = NULL;
+        input_strides[i] = 0;
+    }
 
     /* allocate dest ubuf */
     struct ubuf *ubuf = ubuf_pic_alloc(upipe_sws->ubuf_mgr,
@@ -314,8 +316,10 @@ static bool upipe_sws_handle(struct upipe *upipe, struct uref *uref,
         upipe_verbose_va(upipe, "output_stride[%d] %d",
                          i, output_strides[i]);
     }
-    output_planes[i] = NULL;
-    output_strides[i] = 0;
+    for ( ; i < UPIPE_AV_MAX_PLANES; i++) {
+        output_planes[i] = NULL;
+        output_strides[i] = 0;
+    }
 
     /* fire ! */
     int ret = 0, ret2 = 1;

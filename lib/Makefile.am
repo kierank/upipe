@@ -24,10 +24,6 @@ if HAVE_NACL
 SUBDIRS += upipe-nacl
 endif
 
-if HAVE_X264
-SUBDIRS += upipe-x264
-endif
-
 if HAVE_GLX
 SUBDIRS += upipe-gl
 endif
@@ -49,7 +45,10 @@ SUBDIRS += upipe-v210
 endif
 
 if HAVE_BITSTREAM
-SUBDIRS += upipe-ts upipe-framers
+SUBDIRS += upipe-ts upipe-framers upipe-hls
+if HAVE_X264
+SUBDIRS += upipe-x264
+endif
 endif
 
 if HAVE_AVFORMAT

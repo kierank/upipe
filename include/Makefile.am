@@ -49,7 +49,7 @@ SUBDIRS += upipe-v210
 endif
 
 if HAVE_BITSTREAM
-SUBDIRS += upipe-ts upipe-framers
+SUBDIRS += upipe-ts upipe-framers upipe-hls
 endif
 
 if HAVE_AVFORMAT
