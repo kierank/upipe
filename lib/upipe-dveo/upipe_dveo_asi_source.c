@@ -312,8 +312,10 @@ static void upipe_dveo_asi_src_worker(struct upump *upump)
 static int upipe_dveo_asi_src_check(struct upipe *upipe, struct uref *flow_format)
 {
     struct upipe_dveo_asi_src *upipe_dveo_asi_src = upipe_dveo_asi_src_from_upipe(upipe);
-    if (flow_format != NULL)
+    if (flow_format != NULL) {
+        uref_flow_set_def(flow_format, "block.mpegtsaligned.");
         upipe_dveo_asi_src_store_flow_def(upipe, flow_format);
+    }
 
     upipe_dveo_asi_src_check_upump_mgr(upipe);
     if (upipe_dveo_asi_src->upump_mgr == NULL)
