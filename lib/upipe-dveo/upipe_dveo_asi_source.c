@@ -303,10 +303,9 @@ static void upipe_dveo_asi_src_worker(struct upump *upump)
         uref_clock_set_cr_sys(output, systime + (ts - first_ts));
         upipe_dveo_asi_src_output(upipe, output, &upipe_dveo_asi_src->upump);
 
-        if (ret > (188+8)*TS_PACKETS) {
+        if (ret > (188+8)*TS_PACKETS)
             uref_block_delete(uref, 0, 188*TS_PACKETS);
-            ret -= (188+8)*TS_PACKETS;
-        }
+        ret -= (188+8)*TS_PACKETS;
     }
 }
 
