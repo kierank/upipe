@@ -288,18 +288,25 @@ static void upipe_dveo_asi_src_worker(struct upump *upump)
         for (int i = 0; i < TS_PACKETS; i++)
             uref_block_delete(uref, 188*i, 8);
 
-        struct uref *output = uref_block_splice(uref, 0, 188*TS_PACKETS);
-        if (unlikely(output == NULL)) {
-            uref_free(uref);
-            upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-            return;
+        struct uref *output;
+        if (ret > (188+8)*TS_PACKETS) {
+            output = uref_block_splice(uref, 0, 188*TS_PACKETS);
+            if (unlikely(output == NULL)) {
+                uref_free(uref);
+                upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+                return;
+            }
         }
+        else
+            output = uref;
 
-        uref_clock_set_cr_sys(uref, systime + (ts - first_ts));
-
+        uref_clock_set_cr_sys(output, systime + (ts - first_ts));
         upipe_dveo_asi_src_output(upipe, output, &upipe_dveo_asi_src->upump);
-        uref_block_delete(uref, 0, 188*TS_PACKETS);
-        ret -= (188+8)*TS_PACKETS;
+
+        if (ret > (188+8)*TS_PACKETS) {
+            uref_block_delete(uref, 0, 188*TS_PACKETS);
+            ret -= (188+8)*TS_PACKETS;
+        }
     }
 }
 
