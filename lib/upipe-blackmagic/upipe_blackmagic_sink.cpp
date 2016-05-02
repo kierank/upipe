@@ -71,7 +71,6 @@
 #include <libavutil/intreadwrite.h>
 
 #include "include/DeckLinkAPI.h"
-#include "include/DeckLinkAPIDispatch.cpp"
 
 #define CC_LINE 9
 
