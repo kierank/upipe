@@ -3,12 +3,12 @@ lib_LTLIBRARIES = libupipe_blackmagic.la
 libupipe_blackmagic_la_SOURCES = ubuf_pic_blackmagic.cpp \
                                  ubuf_sound_blackmagic.cpp \
                                  upipe_blackmagic_source.cpp \
-                                 upipe_blackmagic_sink.cpp
+                                 upipe_blackmagic_sink.cpp \
+                                 include/DeckLinkAPIDispatch.cpp
 
 EXTRA_libupipe_blackmagic_la_SOURCES = include/DeckLinkAPIConfiguration.h \
                                        include/DeckLinkAPIDeckControl.h \
                                        include/DeckLinkAPIDiscovery.h \
-                                       include/DeckLinkAPIDispatch.cpp \
                                        include/DeckLinkAPI.h \
                                        include/DeckLinkAPIModes.h \
                                        include/DeckLinkAPITypes.h \
