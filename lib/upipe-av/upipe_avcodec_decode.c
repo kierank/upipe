@@ -142,6 +142,10 @@ struct upipe_avcdec {
     uint64_t iframe_rap;
     /** latest incoming uref */
     struct uref *uref;
+    /** latest subtitle width */
+    unsigned sub_width;
+    /** latest subtitle height */
+    unsigned sub_height;
     /** last PTS */
     uint64_t last_pts;
     /** last PTS (systime time) */
@@ -575,6 +579,9 @@ static bool upipe_avcdec_do_av_deal(struct upipe *upipe)
     }
 
     switch (context->codec->type) {
+        case AVMEDIA_TYPE_SUBTITLE:
+            context->get_buffer2 = NULL;
+            break;
         case AVMEDIA_TYPE_VIDEO:
             context->get_buffer = upipe_avcdec_get_buffer_pic;
             context->release_buffer = upipe_avcdec_release_buffer_pic;
@@ -793,10 +800,164 @@ static void upipe_avcdec_set_time_attributes(struct upipe *upipe,
     }
 }
 
+/** @internal @This outputs subtitles.
+ *
+ * @param upipe description structure of the pipe
+ * @param subtitle AVSubtitle subtitle 
+ * @param upump_p reference to upump structure
+ */
+static void upipe_avcdec_output_sub(struct upipe *upipe, AVSubtitle *sub,
+        struct upump **upump_p)
+{
+    struct upipe_avcdec *upipe_avcdec = upipe_avcdec_from_upipe(upipe);
+    struct uref *uref = upipe_avcdec->uref;
+
+    upipe_dbg_va(upipe, "\t - Subtitle decoded ! format %hu rects %u"
+                " PTS %"PRIx64" START +%u ms, END +%u ms",
+                sub->format, sub->num_rects,
+                sub->pts, sub->start_display_time, sub->end_display_time);
+
+    AVSubtitleRect *r;
+    AVSubtitleRect blank;
+
+    if (sub->num_rects) {
+        assert(sub->num_rects == 1);
+        r = sub->rects[0];
+    } else {
+        if (upipe_avcdec->sub_width == 0) {
+            uref_free(uref);
+            upipe_avcdec->uref = NULL;
+            return;
+        }
+        upipe_warn(upipe, "Fake blank sub");
+        memset(&blank, 0, sizeof(blank));
+        r = &blank;
+        r->w = upipe_avcdec->sub_width;
+        r->h = upipe_avcdec->sub_height;
+        r->type = SUBTITLE_BITMAP;
+        r->nb_colors = 1;
+        static uint8_t blank_map[1000 * 1000]; // FIXME !
+        r->pict.data[0] = blank_map;
+        r->pict.data[1] = blank_map; // only first element will be read
+
+        sub->end_display_time = 0; // do not blit more than one frame
+    }
+
+    upipe_dbg_va(upipe, "%dx%d (off %dx%d) - %d colors, type %s",
+       r->w, r->h, r->x, r->y, r->nb_colors,
+       (r->type == SUBTITLE_BITMAP) ? "bitmap" : "other");
+
+    /* Prepare flow definition attributes. */
+    struct uref *flow_def_attr = upipe_avcdec_alloc_flow_def_attr(upipe);
+    if (unlikely(flow_def_attr == NULL)) {
+        uref_free(uref);
+        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+        return;
+    }
+    uref_pic_flow_set_planes(flow_def_attr, 0);
+    uref_pic_flow_set_macropixel(flow_def_attr, 1);
+    uref_pic_flow_add_plane(flow_def_attr, 1, 1, 4, "b8g8r8a8");
+    uref_flow_set_def(flow_def_attr, UREF_PIC_FLOW_DEF);
+    uref_pic_set_progressive(flow_def_attr);
+
+    UBASE_FATAL(upipe, uref_pic_flow_set_align(flow_def_attr, 16))
+    UBASE_FATAL(upipe, uref_pic_flow_set_hsize(flow_def_attr, r->w))
+    UBASE_FATAL(upipe, uref_pic_flow_set_vsize(flow_def_attr, r->h))
+    UBASE_FATAL(upipe, uref_pic_flow_set_hsize_visible(flow_def_attr, r->w))
+    UBASE_FATAL(upipe, uref_pic_flow_set_vsize_visible(flow_def_attr, r->h))
+    //TODO offset
+
+    if (unlikely(upipe_avcdec->ubuf_mgr == NULL)) {
+        upipe_avcdec->flow_def_format = uref_dup(flow_def_attr);
+        if (unlikely(!upipe_avcdec_demand_ubuf_mgr(upipe, flow_def_attr))) {
+            uref_free(uref);
+            return;
+        }
+    } else
+        uref_free(flow_def_attr);
+
+    flow_def_attr = uref_dup(upipe_avcdec->flow_def_provided);
+
+    /* Allocate a ubuf */
+    struct ubuf *ubuf = ubuf_pic_alloc(upipe_avcdec->ubuf_mgr, r->w, r->h);
+    if (unlikely(ubuf == NULL)) {
+        uref_free(uref);
+        uref_free(flow_def_attr);
+        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+        return;
+    }
+
+    ubuf_pic_clear(ubuf, 0, 0, -1, -1, 0);
+    uref_pic_set_progressive(uref);
+    uref_attach_ubuf(uref, ubuf);
+
+    /* Chain the new flow def attributes to the uref so we can apply them
+     * later. */
+    uref->uchain.next = uref_to_uchain(flow_def_attr);
+
+    uref_clock_set_duration(uref, UCLOCK_FREQ * sub->end_display_time / 1000);
+
+    uint64_t prog;
+    int type;
+    uref_clock_get_date_prog(uref, &prog, &type);
+    if (!type)
+        upipe_notice_va(upipe, "FOO %"PRIx64, prog);
+
+    uref_clock_set_date_prog(uref,
+            prog + UCLOCK_FREQ * sub->start_display_time / 1000, type);
+
+    uint8_t planes;
+    if (unlikely(!ubase_check(uref_pic_flow_get_planes(flow_def_attr, &planes)))) {
+        uref_free(uref);
+        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+        return;
+    }
+
+    assert(planes == 1);
+
+    /* */
+    uint8_t *dst;
+    const char *chroma;
+    if (unlikely(!ubase_check(uref_pic_flow_get_chroma(flow_def_attr, &chroma,
+                        0)) ||
+                !ubase_check(ubuf_pic_plane_write(uref->ubuf, chroma,
+                        0, 0, -1, -1, &dst)))) {
+        uref_free(uref);
+        upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+        return;
+    }
+
+    size_t s = r->w * r->h;
+    for (int j = 0; j < s; j++) {
+        uint8_t idx = r->pict.data[0][j];
+        assert(idx < r->nb_colors);
+        memcpy(&dst[j*4], &r->pict.data[1][idx*4], 4);
+    }
+    ubuf_pic_plane_unmap(uref->ubuf, chroma, 0, 0, -1, -1);
+    /* */
+
+    upipe_avcdec->uref = NULL;
+
+    /* Find out if flow def attributes have changed. */
+    if (!upipe_avcdec_check_flow_def_attr(upipe, flow_def_attr)) {
+        struct uref *flow_def =
+            upipe_avcdec_store_flow_def_attr(upipe, flow_def_attr);
+        if (flow_def != NULL) {
+            uref_block_flow_clear_format(flow_def);
+            uref_flow_delete_headers(flow_def);
+            upipe_avcdec_store_flow_def(upipe, flow_def);
+        }
+    }
+
+    upipe_avcdec->sub_width = r->w;
+    upipe_avcdec->sub_height = r->h;
+
+    upipe_avcdec_output(upipe, uref, upump_p);
+}
+
 /** @internal @This outputs video frames.
  *
  * @param upipe description structure of the pipe
- * @param frame AVFrame structure
  * @param upump_p reference to upump structure
  */
 static void upipe_avcdec_output_pic(struct upipe *upipe, struct upump **upump_p)
@@ -995,8 +1156,24 @@ static bool upipe_avcdec_decode_avpkt(struct upipe *upipe, AVPacket *avpkt,
 {
     struct upipe_avcdec *upipe_avcdec = upipe_avcdec_from_upipe(upipe);
     int gotframe = 0, len;
-    switch (upipe_avcdec->context->codec->type)
-        case AVMEDIA_TYPE_VIDEO: {
+    switch (upipe_avcdec->context->codec->type) {
+        case AVMEDIA_TYPE_SUBTITLE: {
+            AVSubtitle subtitle;
+            len = avcodec_decode_subtitle2(upipe_avcdec->context,
+                                        &subtitle,
+                                        &gotframe, avpkt);
+            if (len < 0) {
+                upipe_warn(upipe, "Error while decoding subtitle");
+            }
+
+            /* output subtitle if any has been decoded */
+            if (gotframe) {
+                upipe_avcdec_output_sub(upipe, &subtitle, upump_p);
+                avsubtitle_free(&subtitle);
+            }
+            break;
+        }
+        case AVMEDIA_TYPE_VIDEO:
             len = avcodec_decode_video2(upipe_avcdec->context,
                                         upipe_avcdec->frame,
                                         &gotframe, avpkt);
@@ -1024,12 +1201,11 @@ static bool upipe_avcdec_decode_avpkt(struct upipe *upipe, AVPacket *avpkt,
             }
             break;
 
-        default: {
+        default:
             /* should never be here */
             upipe_err_va(upipe, "Unsupported media type (%d)",
                          upipe_avcdec->context->codec->type);
             break;
-        }
     }
     return !!gotframe;
 }
@@ -1424,6 +1600,8 @@ static struct upipe *upipe_avcdec_alloc(struct upipe_mgr *mgr,
 
     upipe_avcdec->index_rap = 0;
     upipe_avcdec->iframe_rap = 0;
+    upipe_avcdec->sub_width = 0;
+    upipe_avcdec->sub_height = 0;
     upipe_avcdec->last_pts = UINT64_MAX;
     upipe_avcdec->last_pts_sys = UINT64_MAX;
     upipe_avcdec->next_pts = UINT64_MAX;
