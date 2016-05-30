@@ -29,6 +29,8 @@
 #include <upipe/ulist.h>
 #include <upipe/uprobe.h>
 #include <upipe/uref.h>
+#include <upipe/uref_clock.h>
+#include <upipe/uclock.h>
 #include <upipe/ubuf.h>
 #include <upipe/uref_pic_flow.h>
 #include <upipe/uref_pic.h>
@@ -110,6 +112,10 @@ struct upipe_blit_sub {
 
     /** last received ubuf */
     struct ubuf *ubuf;
+    /** pts */
+    uint64_t date_prog;
+    /** end date */
+    uint64_t end_date;
 
     /** horizontal size */
     uint64_t hsize;
@@ -155,11 +161,104 @@ static struct upipe *upipe_blit_sub_alloc(struct upipe_mgr *mgr,
     upipe_blit_sub_init_sub(upipe);
     sub->loffset = sub->roffset = sub->toffset = sub->boffset = 0;
     sub->ubuf = NULL;
+    sub->date_prog = UINT64_MAX;
+    sub->end_date = UINT64_MAX;
     sub->hsize = sub->vsize = sub->hposition = sub->vposition = UINT64_MAX;
     ulist_init(&sub->flow_format_requests);
 
     upipe_throw_ready(upipe);
     return upipe;
+}
+
+/** TODO: merge into ubuf_pic_blit? what do we do if we're blitting onto
+ * an alpha pic, do we merge the 2 alpha channels?
+ */
+static int upipe_blit_alpha(struct uref *uref, struct ubuf *src,
+         int dest_hoffset, int dest_voffset,
+         int src_hoffset, int src_voffset,
+         int extract_hsize, int extract_vsize, const uint8_t *alpha,
+         size_t alpha_stride)
+{
+    struct ubuf *dest = uref->ubuf;
+
+    uint8_t src_macropixel;
+    UBASE_RETURN(ubuf_pic_size(src, NULL, NULL, &src_macropixel))
+    uint8_t dest_macropixel;
+    UBASE_RETURN(ubuf_pic_size(dest, NULL, NULL, &dest_macropixel))
+    if (unlikely(dest_macropixel != src_macropixel))
+        return UBASE_ERR_INVALID;
+
+    const char *chroma = NULL;
+    while (ubase_check(ubuf_pic_plane_iterate(dest, &chroma)) &&
+           chroma != NULL) {
+        size_t src_stride;
+        uint8_t src_hsub, src_vsub, src_macropixel_size;
+        UBASE_RETURN(ubuf_pic_plane_size(src, chroma, &src_stride,
+                    &src_hsub, &src_vsub, &src_macropixel_size))
+
+        size_t dest_stride;
+        uint8_t dest_hsub, dest_vsub, dest_macropixel_size;
+        UBASE_RETURN(ubuf_pic_plane_size(dest, chroma,
+                    &dest_stride, &dest_hsub, &dest_vsub,
+                    &dest_macropixel_size))
+
+        if (unlikely(src_hsub != dest_hsub || src_vsub != dest_vsub ||
+                     src_macropixel_size != dest_macropixel_size))
+            return UBASE_ERR_INVALID;
+
+        uint8_t *dest_buffer;
+        const uint8_t *src_buffer;
+        UBASE_RETURN(ubuf_pic_plane_write(dest, chroma,
+                    dest_hoffset, dest_voffset,
+                    extract_hsize, extract_vsize, &dest_buffer))
+        int err = ubuf_pic_plane_read(src, chroma, src_hoffset, src_voffset,
+                                      extract_hsize, extract_vsize,
+                                      &src_buffer);
+        if (unlikely(!ubase_check(err))) {
+            ubuf_pic_plane_unmap(dest, chroma,
+                                 dest_hoffset, dest_voffset,
+                                 extract_hsize, extract_vsize);
+            return err;
+        }
+
+        int plane_hsize = extract_hsize / src_hsub / src_macropixel *
+                          src_macropixel_size;
+        int plane_vsize = extract_vsize / src_vsub;
+
+        //if (src_hsub == 2) // only do luma for now
+        for (int i = 0; i < plane_vsize; i++) {
+#if 0
+            memcpy(dest_buffer, src_buffer, plane_hsize);
+#else
+            for (int j = 0; j < plane_hsize; j++) {
+                unsigned a = 0;
+                for (int x = 0; x < src_hsub; x++)
+                    for (int y = 0; y < src_vsub; y++) {
+                        a += alpha[alpha_stride * (i * src_vsub + y)
+                            + j * src_hsub + x];
+                    }
+
+                a /= src_hsub * src_vsub;
+
+                /* apply alpha to subpic and 1-alpha to pic */
+                dest_buffer[j] = (dest_buffer[j] * (0xff - a) +
+                    src_buffer[j] * a) / 0xff;
+            }
+#endif
+            dest_buffer += dest_stride;
+            src_buffer += src_stride;
+        }
+
+        err = ubuf_pic_plane_unmap(dest, chroma,
+                                   dest_hoffset, dest_voffset,
+                                   extract_hsize, extract_vsize);
+        UBASE_RETURN(ubuf_pic_plane_unmap(src, chroma,
+                                          src_hoffset, src_voffset,
+                                          extract_hsize, extract_vsize))
+        UBASE_RETURN(err)
+    }
+
+    return UBASE_ERR_NONE;
 }
 
 /** @internal @This blits the subpicture into the input uref.
@@ -173,14 +272,59 @@ static void upipe_blit_sub_work(struct upipe *upipe, struct uref *uref)
     if (unlikely(sub->ubuf == NULL))
         return;
 
-    int err = uref_pic_blit(uref, sub->ubuf, sub->hposition, sub->vposition,
-                            0, 0, sub->hsize, sub->vsize);
+    bool is_alpha = false;
+
+    const char *chroma = NULL;
+    while (ubase_check(ubuf_pic_plane_iterate(sub->ubuf, &chroma)) && chroma)
+        if (chroma[0] == 'a') {
+            is_alpha = true;
+            break;
+        }
+
+    int err;
+    if (!is_alpha) {
+        err = uref_pic_blit(uref, sub->ubuf, sub->hposition, sub->vposition,
+                0, 0, sub->hsize, sub->vsize);
+    } else {
+        const uint8_t *alpha;
+        if (unlikely(!ubase_check(ubuf_pic_plane_read(sub->ubuf, "a8", 0, 0,
+                            -1, -1, &alpha)))) {
+            upipe_err(upipe, "Couldn't read sub alpha plane");
+            return;
+        }
+
+        size_t stride;
+        if (unlikely(!ubase_check(ubuf_pic_plane_size(sub->ubuf, "a8", &stride,
+                    NULL, NULL, NULL)))) {
+            upipe_err(upipe, "Couldn't read sub alpha plane sizes");
+            ubuf_pic_plane_unmap(sub->ubuf, "a8", 0, 0, -1, -1);
+            return;
+        }
+
+        err = upipe_blit_alpha(uref, sub->ubuf, sub->hposition, sub->vposition,
+                0, 0, sub->hsize, sub->vsize, alpha, stride);
+
+        ubuf_pic_plane_unmap(sub->ubuf, "a8", 0, 0, -1, -1);
+    }
+
     if (unlikely(!ubase_check(err))) {
         upipe_warn(upipe, "unable to blit picture");
         upipe_throw_error(upipe, err);
     }
-    ubuf_free(sub->ubuf);
-    sub->ubuf = NULL;
+
+    int type;
+    uint64_t date;
+	uref_clock_get_date_prog(uref, &date, &type);
+    if (type == UREF_DATE_NONE)
+        upipe_err(upipe, "CANT READ DATE");
+
+    if (sub->end_date != UINT64_MAX && date > sub->end_date) { // XXX
+        upipe_notice_va(upipe, "Subtitle duration elapsed: pic %"PRIx64" end %"PRIx64,
+            date, sub->end_date);
+        ubuf_free(sub->ubuf);
+        sub->ubuf = NULL;
+        sub->date_prog = UINT64_MAX;
+    }
 }
 
 /** @internal @This receives data.
@@ -210,14 +354,32 @@ static void upipe_blit_sub_input(struct upipe *upipe, struct uref *uref,
                                             &macropixel)) ||
                  hsize != sub->hsize || vsize != sub->vsize ||
                  macropixel != upipe_blit->macropixel)) {
-        upipe_warn(upipe, "dropping incompatible subpicture");
+        upipe_warn_va(upipe, "dropping incompatible subpicture: %d != %d, %d != %d, %d != %d",
+            hsize, sub->hsize, vsize, sub->vsize, macropixel, upipe_blit->macropixel);
         upipe_throw_error(upipe, UBASE_ERR_INVALID);
+        exit(1);
         uref_free(uref);
         return;
     }
+    upipe_warn_va(upipe, "compatible subpicture: %d == %d, %d == %d",
+            hsize, sub->hsize, vsize, sub->vsize);
 
     ubuf_free(sub->ubuf);
     sub->ubuf = uref_detach_ubuf(uref);
+
+    int type;
+    uint64_t date, duration;
+    if (!ubase_check(uref_clock_get_duration(uref, &duration)))
+        duration = 0;
+	uref_clock_get_date_prog(uref, &sub->date_prog, &type);
+    upipe_notice_va(upipe, "\t\tDURATION %"PRIu64" PROG TYPE %d = %"PRIx64, duration, type, sub->date_prog);
+    if (type == UREF_DATE_NONE) {
+        sub->date_prog = UINT64_MAX;
+        sub->end_date = UINT64_MAX;
+    } else {
+        sub->end_date = sub->date_prog + duration;
+    }
+
     uref_free(uref);
 }
 
@@ -287,12 +449,15 @@ static int upipe_blit_sub_provide_flow_format(struct upipe *upipe)
         struct urational src_sar;
         src_sar.num = src_sar.den = 1;
         uref_pic_flow_get_sar(urequest->uref, &src_sar);
+        upipe_notice_va(upipe, "SRC SAR %d/%d", src_sar.num, src_sar.den);
 
         /* FIXME take into account overscan */
         struct urational src_dar;
         src_dar.num = src_hsize * src_sar.num;
         src_dar.den = src_vsize * src_sar.den;
         urational_simplify(&src_dar);
+        upipe_notice_va(upipe, "SRC DAR %d/%d = %d/%d",
+            src_hsize, src_vsize, src_dar.num, src_dar.den);
 
         struct uref *uref = uref_dup(urequest->uref);
         if (unlikely(uref == NULL)) {
@@ -301,10 +466,14 @@ static int upipe_blit_sub_provide_flow_format(struct upipe *upipe)
         }
 
         struct urational div = urational_divide(&dest_dar, &src_dar);
+        upipe_notice_va(upipe, "DIV (%d/%d) / (%d/%d) = %d/%d",
+            dest_dar.num, dest_dar.den, src_dar.num, src_dar.den, div.num, div.den);
         if (div.num > div.den) {
             /* Destination rectangle larger than source picture */
             sub->hsize = dest_hsize * div.den / div.num;
             sub->hsize -= sub->hsize % hround;
+            upipe_notice_va(upipe, "H %d = %d * %d / %d",
+                sub->hsize, dest_hsize, div.den, div.num);
             assert(sub->hsize <= dest_hsize);
             sub->vsize = dest_vsize;
             loffset += (dest_hsize - sub->hsize) / 2;
@@ -314,6 +483,8 @@ static int upipe_blit_sub_provide_flow_format(struct upipe *upipe)
             sub->hsize = dest_hsize;
             sub->vsize = dest_vsize * div.num / div.den;
             sub->vsize -= sub->vsize % vround;
+            upipe_notice_va(upipe, "V %d = %d * %d / %d",
+                sub->vsize, dest_vsize, div.den, div.num);
             assert(sub->vsize <= dest_vsize);
             toffset += (dest_vsize - sub->vsize) / 2;
             toffset -= toffset % hround;
