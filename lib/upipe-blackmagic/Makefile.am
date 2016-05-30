@@ -15,9 +15,14 @@ EXTRA_libupipe_blackmagic_la_SOURCES = include/DeckLinkAPIConfiguration.h \
                                        include/DeckLinkAPIVersion.h \
                                        include/LinuxCOM.h
 
+
 libupipe_blackmagic_la_CPPFLAGS = -I$(top_builddir)/include -I$(top_srcdir)/include
 libupipe_blackmagic_la_CXXFLAGS = -Wno-missing-declarations
 libupipe_blackmagic_la_LIBADD = $(top_builddir)/lib/upipe/libupipe.la -ldl
+if HAVE_ZVBI
+libupipe_blackmagic_la_CPPFLAGS += $(ZVBI_CFLAGS)
+libupipe_blackmagic_la_LIBADD += $(ZVBI_LIBS)
+endif
 
 pkgconfigdir = $(libdir)/pkgconfig
 pkgconfig_DATA = libupipe_blackmagic.pc
