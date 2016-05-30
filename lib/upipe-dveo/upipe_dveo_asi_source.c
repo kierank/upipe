@@ -210,7 +210,7 @@ static struct upipe *upipe_dveo_asi_src_alloc(struct upipe_mgr *mgr,
     upipe_throw_ready(upipe);
 
     //upipe_dveo_asi_src_check(upipe, NULL);
-    
+
     return upipe;
 }
 
@@ -457,7 +457,7 @@ static int upipe_dveo_asi_src_set_option(struct upipe *upipe,
     assert(k != NULL);
 
     if (unlikely(upipe_dveo_asi_src->fd != -1))
-        upipe_dveo_asi_src_close(upipe);    
+        upipe_dveo_asi_src_close(upipe);
 
     if (!strcmp(k, "card-idx"))
         upipe_dveo_asi_src->card_idx = atoi(v);

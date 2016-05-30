@@ -60,5 +60,6 @@ myinclude_HEADERS = \
 	upipe_sequential_source.h \
 	upipe_segment_source.h \
 	upipe_id3v2.h \
+	upipe_rtp_reorder.h \
 	upipe_ntsc_prepend.h \
 	upipe_audio_merge.h
