@@ -29,6 +29,8 @@
 #include <upipe/ulist.h>
 #include <upipe/uprobe.h>
 #include <upipe/uref.h>
+#include <upipe/uref_clock.h>
+#include <upipe/uclock.h>
 #include <upipe/ubuf.h>
 #include <upipe/uref_pic_flow.h>
 #include <upipe/uref_pic.h>
@@ -110,6 +112,10 @@ struct upipe_blit_sub {
 
     /** last received ubuf */
     struct ubuf *ubuf;
+    /** pts */
+    uint64_t date_prog;
+    /** end date */
+    uint64_t end_date;
 
     /** horizontal size */
     uint64_t hsize;
@@ -155,6 +161,8 @@ static struct upipe *upipe_blit_sub_alloc(struct upipe_mgr *mgr,
     upipe_blit_sub_init_sub(upipe);
     sub->loffset = sub->roffset = sub->toffset = sub->boffset = 0;
     sub->ubuf = NULL;
+    sub->date_prog = UINT64_MAX;
+    sub->end_date = UINT64_MAX;
     sub->hsize = sub->vsize = sub->hposition = sub->vposition = UINT64_MAX;
     ulist_init(&sub->flow_format_requests);
 
@@ -173,14 +181,34 @@ static void upipe_blit_sub_work(struct upipe *upipe, struct uref *uref)
     if (unlikely(sub->ubuf == NULL))
         return;
 
+    int type;
+    uint64_t date;
+	uref_clock_get_date_prog(uref, &date, &type);
+    if (type == UREF_DATE_NONE)
+        date = UINT64_MAX;
+
+    if (sub->date_prog != UINT64_MAX && sub->date_prog > date)
+        return;
+
     int err = uref_pic_blit(uref, sub->ubuf, sub->hposition, sub->vposition,
                             0, 0, sub->hsize, sub->vsize, 0 /* memcpy */);
     if (unlikely(!ubase_check(err))) {
         upipe_warn(upipe, "unable to blit picture");
         upipe_throw_error(upipe, err);
     }
+
+    if (sub->end_date == UINT64_MAX)
+        return;
+
+    /* subtitle not yet elapsed */
+    if (date <= sub->end_date)
+        return;
+
+    upipe_verbose(upipe, "Subtitle duration elapsed");
+
     ubuf_free(sub->ubuf);
     sub->ubuf = NULL;
+    sub->date_prog = UINT64_MAX;
 }
 
 /** @internal @This receives data.
@@ -218,6 +246,22 @@ static void upipe_blit_sub_input(struct upipe *upipe, struct uref *uref,
 
     ubuf_free(sub->ubuf);
     sub->ubuf = uref_detach_ubuf(uref);
+
+    /* Read subtitle pts and duration */
+
+    int type;
+    uint64_t date, duration;
+    if (unlikely(!ubase_check(uref_clock_get_duration(uref, &duration))))
+        duration = 0;
+
+	uref_clock_get_date_prog(uref, &sub->date_prog, &type);
+	if (type == UREF_DATE_NONE) {
+        sub->date_prog = UINT64_MAX;
+        sub->end_date = UINT64_MAX;
+    } else {
+        sub->end_date = sub->date_prog + duration;
+    }
+
     uref_free(uref);
 }
 
