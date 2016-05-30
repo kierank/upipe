@@ -72,7 +72,6 @@
 #include <libzvbi.h>
 
 #include "include/DeckLinkAPI.h"
-#include "include/DeckLinkAPIDispatch.cpp"
 
 #define CC_LINE 9
 #define AFD_LINE 11

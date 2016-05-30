@@ -369,7 +369,7 @@ static void uplay_start(struct upump *upump)
     struct uprobe *uprobe_src = uprobe_xfer_alloc(uprobe_use(uprobe_main));
     uprobe_xfer_add(uprobe_src, UPROBE_XFER_VOID, UPROBE_SOURCE_END, 0);
 
-    uprobe_dejitter_set(uprobe_dejitter, DEJITTER_DIVIDER);
+    uprobe_dejitter_set(uprobe_dejitter, true, 0);
     src_out_queue_length = SRC_OUT_QUEUE_LENGTH;
 
     /* try rtp source */
