@@ -57,6 +57,14 @@
 #include <assert.h>
 
 #define UBUF_POOL_DEPTH 2
+#define MAX_SAMPLES 5000
+
+#ifndef MIN
+# define MIN(a,b) ((a) < (b) ? (a) : (b))
+#endif
+#ifndef MAX
+# define MAX(a,b) ((a) > (b) ? (a) : (b))
+#endif
 
 /** @hidden */
 static bool upipe_audio_merge_sub_output(struct upipe *upipe, struct uref *uref,
@@ -411,7 +419,7 @@ static void upipe_audio_merge_cb(struct upump *upump)
     struct uref *uref, *output_uref = NULL;
     uint64_t pts_sys = 1234, lowest_pts_sys = UINT64_MAX;
     int found = 0, i, j;
-    uint64_t samples = 0;
+    uint64_t samples = 0, in_samples = 0;
     struct ubuf *ubuf;
     int32_t *in_data, *out_data;
 
@@ -423,12 +431,13 @@ static void upipe_audio_merge_cb(struct upump *upump)
         ulist_delete_foreach(&upipe_audio_merge_sub->uref_queue, uchain2, uchain_tmp) {
             uref = uref_from_uchain(uchain2);
             uref_clock_get_pts_sys(uref, &pts_sys);
-            if (pts_sys + 2700000 <= now) {
+            uref_sound_flow_get_samples(uref, &samples);
+
+            if (pts_sys + 2700000 <= now || samples > MAX_SAMPLES) {
                 ulist_delete(uchain2);
             }
             else if (pts_sys + upipe_audio_merge_sub->latency <= now) {
                 found = 1;
-                uref_sound_flow_get_samples(uref, &samples);
                 if (pts_sys < lowest_pts_sys )
                     lowest_pts_sys = pts_sys;
                 break;
@@ -453,7 +462,12 @@ static void upipe_audio_merge_cb(struct upump *upump)
                 uref = uref_from_uchain(uchain2);
                 pts_sys = 0;
                 uref_clock_get_pts_sys(uref, &pts_sys);
-                if( pts_sys == lowest_pts_sys || lowest_pts_sys + 100 > pts_sys ) {
+                uref_sound_flow_get_samples(uref, &in_samples);
+                if( in_samples > samples ) {
+                    ulist_delete(uchain2);
+                    uref_free(uref);
+                }
+                else if( pts_sys == lowest_pts_sys || lowest_pts_sys + 100 > pts_sys ) {
                     uref_sound_read_int32_t(uref, 0, -1, &in_data, 1);
 
                     uint8_t channel_idx = upipe_audio_merge_sub->channel_index;
