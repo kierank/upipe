@@ -213,6 +213,7 @@ static inline enum AVPixelFormat
         AV_PIX_FMT_YUVA420P,
         AV_PIX_FMT_YUV420P,
         AV_PIX_FMT_YUVJ420P,
+        AV_PIX_FMT_YUVA422P,
         AV_PIX_FMT_YUV422P,
         AV_PIX_FMT_YUVJ422P,
         AV_PIX_FMT_YUV444P,
@@ -276,6 +277,20 @@ static inline enum AVPixelFormat
                     chroma_p[1] = "u8";
                     chroma_p[2] = "v8";
                     chroma_p[3] = NULL;
+                    return *pix_fmts;
+                }
+                break;
+            case AV_PIX_FMT_YUVA422P:
+                if (macropixel == 1 &&
+                    u(uref_pic_flow_check_chroma(flow_def, 1, 1, 1, "y8")) &&
+                    u(uref_pic_flow_check_chroma(flow_def, 2, 1, 1, "u8")) &&
+                    u(uref_pic_flow_check_chroma(flow_def, 2, 1, 1, "v8")) &&
+                    u(uref_pic_flow_check_chroma(flow_def, 1, 1, 1, "a8"))) {
+                    chroma_p[0] = "y8";
+                    chroma_p[1] = "u8";
+                    chroma_p[2] = "v8";
+                    chroma_p[3] = "a8";
+                    chroma_p[4] = NULL;
                     return *pix_fmts;
                 }
                 break;
