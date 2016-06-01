@@ -293,6 +293,9 @@ struct upipe_bmd_sink {
     /** hardware uclock */
     struct uclock uclock;
 
+    /** last hardware clock read */
+    uint64_t last_cr;
+
     /** public upipe structure */
     struct upipe upipe;
 };
@@ -1123,10 +1126,16 @@ static uint64_t uclock_bmd_sink_now(struct uclock *uclock)
     if (upipe_bmd_sink->deckLinkOutput) {
         HRESULT res = upipe_bmd_sink->deckLinkOutput->GetHardwareReferenceClock(
                 UCLOCK_FREQ, &hardware_time, &time_in_frame, &ticks_per_frame);
-        if (res != S_OK)
-            upipe_err_va(upipe, "Couldn't read hardware clock: 0x%08lx", res);
+        if (res != S_OK) {
+            upipe_err_va(upipe, "\t\tCouldn't read hardware clock: 0x%08lx", res);
+            hardware_time = upipe_bmd_sink->last_cr;
+        } else
+            upipe_bmd_sink->last_cr = hardware_time;
     } else
         upipe_err_va(upipe, "No output configured");
+
+    if (0) upipe_notice_va(upipe, "CLOCK THR 0x%llx VAL %"PRIu64,
+        (unsigned long long)pthread_self(), (uint64_t)hardware_time);
 
     return (uint64_t)hardware_time;
 }
@@ -1174,6 +1183,7 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
 
     ulist_init(&upipe_bmd_sink->subpic_queue);
 
+    upipe_bmd_sink->last_cr = 0;
     upipe_bmd_sink->uclock.uclock_now = uclock_bmd_sink_now;
 
     upipe_throw_ready(upipe);
@@ -1196,7 +1206,6 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
         upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->sound_subpipe.upipe);
         upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->subpic_subpipe.upipe);
         deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
-        deckLinkOutput->DisableVideoOutput();
         deckLinkOutput->DisableAudioOutput();
         upipe_bmd_sink->displayMode->Release();
         upipe_bmd_sink->started = 0;
@@ -1234,6 +1243,8 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
 
     upipe_bmd_sink->displayMode = displayMode;
 
+    /* disable video the shortest time possible, to keep clock running */
+    deckLinkOutput->DisableVideoOutput();
     result = deckLinkOutput->EnableVideoOutput(displayMode->GetDisplayMode(),
                                                bmdVideoOutputVANC);
     if (result != S_OK)
