@@ -1081,7 +1081,7 @@ static uint64_t uclock_bmd_sink_now(struct uclock *uclock)
     struct uclock_bmd_sink *uclock_bmd_sink = uclock_bmd_sink_from_uclock(uclock);
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_uclock_bmd_sink(uclock_bmd_sink);
 
-    BMDTimeValue hardware_time, time_in_frame, ticks_per_frame;
+    BMDTimeValue hardware_time = 0, time_in_frame, ticks_per_frame;
 
     if (upipe_bmd_sink->deckLinkOutput) {
         upipe_bmd_sink->deckLinkOutput->GetHardwareReferenceClock(UCLOCK_FREQ, &hardware_time,
