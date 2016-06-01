@@ -1177,7 +1177,7 @@ end:
  * @param uri URI
  * @return an error code
  */
-static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
+static int upipe_bmd_sink_open_card(struct upipe *upipe)
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
 
@@ -1365,10 +1365,9 @@ static int _upipe_bmd_sink_set_genlock_offset(struct upipe *upipe, int64_t offse
 static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args)
 {
     switch (command) {
-        case UPIPE_SET_URI: {
-            const char *uri = va_arg(args, const char *);
-            return upipe_bmd_sink_set_uri(upipe, uri);
-        }
+        case UPIPE_SET_URI:
+            return upipe_bmd_sink_open_card(upipe);
+
         case UPIPE_BMD_SINK_GET_PIC_SUB: {
             UBASE_SIGNATURE_CHECK(args, UPIPE_BMD_SINK_SIGNATURE)
             struct upipe **upipe_p = va_arg(args, struct upipe **);
