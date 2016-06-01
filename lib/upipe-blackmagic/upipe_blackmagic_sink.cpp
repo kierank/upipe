@@ -714,6 +714,7 @@ static void upipe_bmd_sink_sub_free(struct upipe *upipe)
     upipe_bmd_sink_sub_clean_upump(upipe);
     upipe_bmd_sink_sub_clean_upump_mgr(upipe);
     upipe_bmd_sink_sub_clean_input(upipe);
+    upipe_clean(upipe);
 }
 
 /** @internal @This is called when the data should be displayed.
