@@ -1021,13 +1021,17 @@ static void upipe_bmd_sink_init_sub_mgr(struct upipe *upipe)
 static uint64_t uclock_bmd_sink_now(struct uclock *uclock)
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_uclock(uclock);
+    struct upipe *upipe = &upipe_bmd_sink->upipe;
 
-    BMDTimeValue hardware_time = 0, time_in_frame, ticks_per_frame;
+    BMDTimeValue hardware_time = UINT64_MAX, time_in_frame, ticks_per_frame;
 
     if (upipe_bmd_sink->deckLinkOutput) {
-        upipe_bmd_sink->deckLinkOutput->GetHardwareReferenceClock(UCLOCK_FREQ, &hardware_time,
-                                                                  &time_in_frame, &ticks_per_frame);
-    }
+        HRESULT res = upipe_bmd_sink->deckLinkOutput->GetHardwareReferenceClock(
+                UCLOCK_FREQ, &hardware_time, &time_in_frame, &ticks_per_frame);
+        if (res != S_OK)
+            upipe_err_va(upipe, "Couldn't read hardware clock: 0x%08lx", res);
+    } else
+        upipe_err_va(upipe, "No output configured");
 
     return (uint64_t)hardware_time;
 }
