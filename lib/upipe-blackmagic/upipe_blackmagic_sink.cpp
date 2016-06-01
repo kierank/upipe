@@ -1340,8 +1340,6 @@ static int upipe_bmd_sink_open_card(struct upipe *upipe)
 
     upipe_bmd_sink->deckLink = deckLink;
 
-    err = upipe_bmd_open_vid(upipe);
-
 end:
 
     deckLinkIterator->Release();
@@ -1485,9 +1483,14 @@ static int _upipe_bmd_sink_set_genlock_offset(struct upipe *upipe, int64_t offse
  */
 static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args)
 {
+    struct upipe_bmd_sink *bmd_sink = upipe_bmd_sink_from_upipe(upipe);
+
     switch (command) {
         case UPIPE_SET_URI:
-            return upipe_bmd_sink_open_card(upipe);
+            if (!bmd_sink->deckLink) {
+                UBASE_RETURN(upipe_bmd_sink_open_card(upipe));
+            }
+            return upipe_bmd_open_vid(upipe);
 
         case UPIPE_BMD_SINK_GET_PIC_SUB: {
             UBASE_SIGNATURE_CHECK(args, UPIPE_BMD_SINK_SIGNATURE)
@@ -1516,7 +1519,6 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
         case UPIPE_BMD_SINK_GET_UCLOCK: {
             UBASE_SIGNATURE_CHECK(args, UPIPE_BMD_SINK_SIGNATURE)
             struct uclock **pp_uclock = va_arg(args, struct uclock **);
-            struct upipe_bmd_sink *bmd_sink = upipe_bmd_sink_from_upipe(upipe);
             *pp_uclock = &bmd_sink->uclock;
             return UBASE_ERR_NONE;
         }
