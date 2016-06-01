@@ -1455,6 +1455,13 @@ static void upipe_bmd_sink_free(struct upipe *upipe)
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
     struct uclock_bmd_sink *uclock_bmd_sink = &upipe_bmd_sink->uclock;
 
+    struct uchain *uchain, *uchain_tmp;
+    ulist_delete_foreach(&upipe_bmd_sink->subpic_queue, uchain, uchain_tmp) {
+        struct uref *uref = uref_from_uchain(uchain);
+        ulist_delete(uchain);
+        uref_free(uref);
+    }
+
     upipe_bmd_sink_sub_free(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->pic_subpipe));
     upipe_bmd_sink_sub_free(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->sound_subpipe));
     upipe_bmd_sink_sub_free(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->subpic_subpipe));
