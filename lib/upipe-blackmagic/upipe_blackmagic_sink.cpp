@@ -246,9 +246,6 @@ struct upipe_bmd_sink_sub {
 
 /** super-set of the uclock structure with additional local members */
 struct uclock_bmd_sink {
-    /** offset for discontinuities caused by format changes */
-    uint64_t offset;
-
     /** structure exported to modules */
     struct uclock uclock;
 };
@@ -1088,14 +1085,7 @@ static uint64_t uclock_bmd_sink_now(struct uclock *uclock)
                                                                   &time_in_frame, &ticks_per_frame);
     }
 
-    return (uint64_t)hardware_time + uclock_bmd_sink->offset;
-}
-
-static void uclock_set_offset(struct uclock *uclock)
-{
-    struct uclock_bmd_sink *uclock_bmd_sink = uclock_bmd_sink_from_uclock(uclock);
-
-    uclock_bmd_sink->offset += uclock_bmd_sink_now(uclock);
+    return (uint64_t)hardware_time;
 }
 
 static int upipe_bmd_open_vid(struct upipe *upipe)
