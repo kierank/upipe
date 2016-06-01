@@ -1013,6 +1013,25 @@ static void upipe_bmd_sink_init_sub_mgr(struct upipe *upipe)
     sub_mgr->upipe_mgr_control = NULL;
 }
 
+/** @This returns the Blackmagic hardware output time.
+ *
+ * @param uclock utility structure passed to the module
+ * @return current hardware output time in 27 MHz ticks
+ */
+static uint64_t uclock_bmd_sink_now(struct uclock *uclock)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_uclock(uclock);
+
+    BMDTimeValue hardware_time = 0, time_in_frame, ticks_per_frame;
+
+    if (upipe_bmd_sink->deckLinkOutput) {
+        upipe_bmd_sink->deckLinkOutput->GetHardwareReferenceClock(UCLOCK_FREQ, &hardware_time,
+                                                                  &time_in_frame, &ticks_per_frame);
+    }
+
+    return (uint64_t)hardware_time;
+}
+
 /** @internal @This allocates a bmd_sink pipe.
  *
  * @param mgr common management structure
@@ -1056,27 +1075,10 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
 
     ulist_init(&upipe_bmd_sink->subpic_queue);
 
+    upipe_bmd_sink->uclock.uclock_now = uclock_bmd_sink_now;
+
     upipe_throw_ready(upipe);
     return upipe;
-}
-
-/** @This returns the Blackmagic hardware output time.
- *
- * @param uclock utility structure passed to the module
- * @return current hardware output time in 27 MHz ticks
- */
-static uint64_t uclock_bmd_sink_now(struct uclock *uclock)
-{
-    struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_uclock(uclock);
-
-    BMDTimeValue hardware_time = 0, time_in_frame, ticks_per_frame;
-
-    if (upipe_bmd_sink->deckLinkOutput) {
-        upipe_bmd_sink->deckLinkOutput->GetHardwareReferenceClock(UCLOCK_FREQ, &hardware_time,
-                                                                  &time_in_frame, &ticks_per_frame);
-    }
-
-    return (uint64_t)hardware_time;
 }
 
 static int upipe_bmd_open_vid(struct upipe *upipe)
@@ -1218,8 +1220,6 @@ static int upipe_bmd_sink_open_card(struct upipe *upipe)
         deckLink->Release();
         goto end;
     }
-
-    upipe_bmd_sink->uclock.uclock_now = uclock_bmd_sink_now;
 
     upipe_bmd_sink->deckLink = deckLink;
 
