@@ -223,9 +223,6 @@ static void upipe_bmd_sink_sub_write_watcher(struct upump *upump);
 struct upipe_bmd_sink_sub {
     struct upipe *upipe_bmd_sink;
 
-    /** refcount management structure */
-    struct urefcount urefcount;
-
     /** temporary uref storage */
     struct uchain urefs;
     /** nb urefs in storage */
@@ -249,9 +246,6 @@ struct upipe_bmd_sink_sub {
 
 /** super-set of the uclock structure with additional local members */
 struct uclock_bmd_sink {
-    /** refcount management structure */
-    struct urefcount urefcount;
-
     /** offset for discontinuities caused by format changes */
     uint64_t offset;
 
@@ -260,7 +254,6 @@ struct uclock_bmd_sink {
 };
 
 UBASE_FROM_TO(uclock_bmd_sink, uclock, uclock, uclock)
-UBASE_FROM_TO(uclock_bmd_sink, urefcount, urefcount, urefcount)
 
 /** upipe_bmd_sink structure */
 struct upipe_bmd_sink {
@@ -324,7 +317,6 @@ UPIPE_HELPER_UREFCOUNT(upipe_bmd_sink, urefcount, upipe_bmd_sink_free);
 UPIPE_HELPER_VOID(upipe_bmd_sink);
 
 UPIPE_HELPER_UPIPE(upipe_bmd_sink_sub, upipe, UPIPE_BMD_SINK_INPUT_SIGNATURE)
-UPIPE_HELPER_UREFCOUNT(upipe_bmd_sink_sub, urefcount, upipe_bmd_sink_sub_free);
 UPIPE_HELPER_UPUMP_MGR(upipe_bmd_sink_sub, upump_mgr);
 UPIPE_HELPER_UPUMP(upipe_bmd_sink_sub, upump, upump_mgr);
 UPIPE_HELPER_INPUT(upipe_bmd_sink_sub, urefs, nb_urefs, max_urefs, blockers, upipe_bmd_sink_sub_output);
@@ -707,7 +699,6 @@ static void upipe_bmd_sink_sub_init(struct upipe *upipe,
     struct upipe_bmd_sink_sub *upipe_bmd_sink_sub = upipe_bmd_sink_sub_from_upipe(upipe);
     upipe_bmd_sink_sub->upipe_bmd_sink = upipe_bmd_sink_to_upipe(upipe_bmd_sink);
 
-    upipe_bmd_sink_sub_init_urefcount(upipe);
     upipe_bmd_sink_sub_init_input(upipe);
     upipe_bmd_sink_sub_init_upump_mgr(upipe);
     upipe_bmd_sink_sub_init_upump(upipe);
@@ -722,8 +713,6 @@ static void upipe_bmd_sink_sub_free(struct upipe *upipe)
     upipe_bmd_sink_sub_clean_upump(upipe);
     upipe_bmd_sink_sub_clean_upump_mgr(upipe);
     upipe_bmd_sink_sub_clean_input(upipe);
-    upipe_bmd_sink_sub_clean_urefcount(upipe);
-    upipe_release(upipe_bmd_sink_sub->upipe_bmd_sink);
 }
 
 /** @internal @This is called when the data should be displayed.
@@ -1107,25 +1096,6 @@ static void uclock_set_offset(struct uclock *uclock)
     uclock_bmd_sink->offset += uclock_bmd_sink_now(uclock);
 }
 
-/** @This frees a uclock.
- *
- * @param urefcount pointer to urefcount
- */
-static void uclock_bmd_sink_free(struct urefcount *urefcount)
-{
-    struct uclock_bmd_sink *uclock_bmd_sink = uclock_bmd_sink_from_urefcount(urefcount);
-
-    urefcount_clean(urefcount);
-    uclock_bmd_sink->uclock.uclock_now = NULL;
-}
-
-static void uclock_bmd_sink_init(uclock_bmd_sink *uclock_bmd_sink)
-{
-    urefcount_init(uclock_bmd_sink_to_urefcount(uclock_bmd_sink), uclock_bmd_sink_free);
-    uclock_bmd_sink->uclock.refcount = uclock_bmd_sink_to_urefcount(uclock_bmd_sink);
-    uclock_bmd_sink->uclock.uclock_now = uclock_bmd_sink_now;
-}
-
 /** @internal @This asks to open the given device.
  *
  * @param upipe description structure of the pipe
@@ -1243,10 +1213,7 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
     }
 
     if (!upipe_bmd_sink->deckLink)
-    {
-        uclock_bmd_sink_init(&upipe_bmd_sink->uclock);
-        urefcount_use(uclock_bmd_sink_to_urefcount(&upipe_bmd_sink->uclock));
-    }
+        upipe_bmd_sink->uclock.uclock.uclock_now = uclock_bmd_sink_now;
 
     upipe_bmd_sink->deckLinkOutput = deckLinkOutput;
     upipe_bmd_sink->deckLink = deckLink;
@@ -1487,12 +1454,10 @@ static void upipe_bmd_sink_free(struct upipe *upipe)
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
     struct uclock_bmd_sink *uclock_bmd_sink = &upipe_bmd_sink->uclock;
 
-    upipe_release(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->pic_subpipe));
-    upipe_release(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->sound_subpipe));
-    upipe_release(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->subpic_subpipe));
+    upipe_bmd_sink_sub_free(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->pic_subpipe));
+    upipe_bmd_sink_sub_free(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->sound_subpipe));
+    upipe_bmd_sink_sub_free(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->subpic_subpipe));
     upipe_throw_dead(upipe);
-
-    urefcount_release(uclock_bmd_sink_to_urefcount(uclock_bmd_sink));
 
     if (upipe_bmd_sink->deckLink) {
         upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
