@@ -694,6 +694,7 @@ static void upipe_bmd_sink_sub_init(struct upipe *upipe,
         struct upipe_mgr *sub_mgr, struct uprobe *uprobe)
 {
     upipe_init(upipe, sub_mgr, uprobe);
+    upipe_mgr_release(sub_mgr); /* do not reference super pipe */
 
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_sub_mgr(sub_mgr);
     struct upipe_bmd_sink_sub *upipe_bmd_sink_sub = upipe_bmd_sink_sub_from_upipe(upipe);
