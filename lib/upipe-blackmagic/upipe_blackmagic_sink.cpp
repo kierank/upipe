@@ -33,11 +33,7 @@
 #include <upipe/uclock.h>
 #include <upipe/uref.h>
 #include <upipe/uref_attr.h>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wsign-compare"
-#   include <upipe/uref_block.h>
-#pragma GCC diagnostic pop
-
+#include <upipe/uref_block.h>
 #include <upipe/uref_block_flow.h>
 #include <upipe/uref_pic.h>
 #include <upipe/uref_pic_flow.h>
