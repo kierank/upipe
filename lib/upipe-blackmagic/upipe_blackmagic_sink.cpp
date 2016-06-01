@@ -1108,8 +1108,6 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
 
-    IDeckLinkIterator *deckLinkIterator = NULL;
-    IDeckLink *deckLink = NULL;
     IDeckLinkOutput *deckLinkOutput;
     IDeckLinkDisplayModeIterator *displayModeIterator = NULL;
     char* displayModeName = NULL;
@@ -1131,14 +1129,14 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
     }
 
     /* decklink interface interator */
-    deckLinkIterator = CreateDeckLinkIteratorInstance();
+    IDeckLinkIterator *deckLinkIterator = CreateDeckLinkIteratorInstance();
     if (!deckLinkIterator) {
         upipe_err_va(upipe, "decklink drivers not found");
-        err = UBASE_ERR_EXTERNAL;
-        goto end;
+        return UBASE_ERR_EXTERNAL;
     }
 
     /* get decklink interface handler */
+    IDeckLink *deckLink = NULL;
     for (int i = 0; i <= upipe_bmd_sink->card_idx; i++) {
         if (deckLink)
             deckLink->Release();
@@ -1246,8 +1244,7 @@ end:
     if (displayModeIterator != NULL)
         displayModeIterator->Release();
 
-    if (deckLinkIterator)
-        deckLinkIterator->Release();
+    deckLinkIterator->Release();
 
     return err;
 }
