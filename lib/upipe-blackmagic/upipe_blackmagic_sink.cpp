@@ -258,7 +258,7 @@ struct upipe_bmd_sink {
     int card_idx;
 
     /** output mode **/
-    char mode[5];
+    BMDDisplayMode mode;
 
     /** started flag **/
     int started;
@@ -376,8 +376,8 @@ static void upipe_bmd_sink_write_cdp_header(struct upipe *upipe, uint16_t *dst)
         upipe_bmd_sink_from_sub_mgr(upipe->mgr);
 
     /** XXX: Support crazy 25fps captions? **/
-    uint8_t fps = !strcmp(upipe_bmd_sink->mode, "ntsc") ||
-                  !strcmp(upipe_bmd_sink->mode, "Hi59") ? 0x4 : 0x7;
+    uint8_t fps = upipe_bmd_sink->mode == bmdModeNTSC ||
+                  upipe_bmd_sink->mode == bmdModeHD1080i5994 ? 0x4 : 0x7;
 
     dst[0] = 0x96;
     dst[1] = 0x69;
@@ -769,8 +769,8 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
     if (upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe) {
         int w = upipe_bmd_sink->displayMode->GetWidth();
         int h = upipe_bmd_sink->displayMode->GetHeight();
-        int sd = !strcmp(upipe_bmd_sink->mode, "pal ") || !strcmp(upipe_bmd_sink->mode, "ntsc");
-        int ttx = !strcmp(upipe_bmd_sink->mode, "pal ") || !strcmp(upipe_bmd_sink->mode, "Hi50");
+        int sd = upipe_bmd_sink->mode == bmdModePAL || upipe_bmd_sink->mode == bmdModeNTSC;
+        int ttx = upipe_bmd_sink->mode == bmdModePAL || upipe_bmd_sink->mode == bmdModeHD1080i50;
         const uint8_t *pic_data = NULL;
         size_t pic_data_size = 0;
 
@@ -916,6 +916,92 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
     }
 }
 
+static BMDDisplayMode upipe_bmd_mode_from_flow_def(struct upipe_bmd_sink *upipe_bmd_sink, struct uref *flow_def)
+{
+    struct upipe *upipe = &upipe_bmd_sink->upipe;
+    IDeckLinkOutput *deckLinkOutput = upipe_bmd_sink->deckLinkOutput;
+    char *displayModeName = NULL;
+    BMDDisplayMode bmdMode = bmdModeUnknown;
+
+    uint64_t hsize, vsize;
+    struct urational fps;
+    if (unlikely(!ubase_check(uref_pic_flow_get_hsize(flow_def, &hsize)) ||
+                !ubase_check(uref_pic_flow_get_vsize(flow_def, &vsize)) ||
+                !ubase_check(uref_pic_flow_get_fps(flow_def, &fps)))) {
+        upipe_err(upipe, "cannot read size and frame rate");
+        uref_dump(flow_def, upipe->uprobe);
+        return bmdModeUnknown;
+    }
+
+    bool interlaced = !ubase_check(uref_pic_get_progressive(flow_def));
+
+    upipe_notice_va(upipe, "%"PRIu64"x%"PRIu64" %"PRId64"/%"PRIu64" interlaced %d",
+            hsize, vsize, fps.num, fps.den, interlaced);
+
+    IDeckLinkDisplayModeIterator *displayModeIterator = NULL;
+    HRESULT result = deckLinkOutput->GetDisplayModeIterator(&displayModeIterator);
+    if (result != S_OK){
+        upipe_err(upipe, "decklink card has no display modes");
+        return bmdModeUnknown;
+    }
+
+    IDeckLinkDisplayMode *mode = NULL;
+    while ((result = displayModeIterator->Next(&mode)) == S_OK) {
+        BMDFieldDominance field;
+        BMDTimeValue timeValue;
+        BMDTimeScale timeScale;
+        struct urational bmd_fps;
+
+        if (mode->GetWidth() != hsize)
+            goto next;
+
+        if (mode->GetHeight() != vsize)
+            goto next;
+
+        mode->GetFrameRate(&timeValue, &timeScale);
+        bmd_fps.num = timeScale;
+        bmd_fps.den = timeValue;
+
+        if (urational_cmp(&fps, &bmd_fps))
+            goto next;
+
+        field = mode->GetFieldDominance();
+        if (field == bmdUnknownFieldDominance) {
+            upipe_err(upipe, "unknown field dominance");
+        } else if (field == bmdLowerFieldFirst || field == bmdUpperFieldFirst) {
+            if (!interlaced) {
+                goto next;
+            }
+        } else {
+            if (interlaced) {
+                goto next;
+            }
+        }
+        break;
+next:
+        mode->Release();
+    }
+
+    if (result != S_OK || !mode)
+        goto end;
+
+    if (mode->GetName((const char**)&displayModeName) == S_OK) {
+        upipe_dbg_va(upipe, "Flow def is mode %s", displayModeName);
+        free(displayModeName);
+    }
+    bmdMode = mode->GetDisplayMode();
+
+end:
+    if (mode)
+        mode->Release();
+
+    displayModeIterator->Release();
+
+    return bmdMode;
+}
+
+static int upipe_bmd_open_vid(struct upipe *upipe);
+
 /** @internal @This sets the input flow definition.
  *
  * @param upipe description structure of the pipe
@@ -941,50 +1027,17 @@ static int upipe_bmd_sink_sub_set_flow_def(struct upipe *upipe,
             return UBASE_ERR_EXTERNAL;
         }
 
-        uint64_t hsize, vsize;
-        struct urational fps;
-        if (unlikely(!ubase_check(uref_pic_flow_get_hsize(flow_def, &hsize)) ||
-                    !ubase_check(uref_pic_flow_get_vsize(flow_def, &vsize)) ||
-                    !ubase_check(uref_pic_flow_get_fps(flow_def, &fps)))) {
-            upipe_err(upipe, "cannot read size and frame rate");
-            uref_dump(flow_def, upipe->uprobe);
-            return UBASE_ERR_EXTERNAL;
-        }
-
-        bool interlaced = !ubase_check(uref_pic_get_progressive(flow_def));
-
-        upipe_notice_va(upipe, "%"PRIu64"x%"PRIu64" %"PRId64"/%"PRIu64" interlaced %d",
-            hsize, vsize, fps.num, fps.den, interlaced);
-
-        int width = upipe_bmd_sink->displayMode->GetWidth();
-        int height = upipe_bmd_sink->displayMode->GetHeight();
-
-        if (width != hsize || height != vsize) {
-            upipe_err_va(upipe, "Detected size change:"
-                " %dx%d -> %"PRIu64"x%"PRIu64, width, height, hsize, vsize);
-        }
-
-        BMDFieldDominance field = upipe_bmd_sink->displayMode->GetFieldDominance();
-        if (field == bmdUnknownFieldDominance) {
-            upipe_err(upipe, "unknown field dominance");
-        } else if (field == bmdLowerFieldFirst || field == bmdUpperFieldFirst) {
-            if (!interlaced)
-                upipe_err(upipe, "field dominance changed: now progressive");
-        } else {
-            if (interlaced)
-                upipe_err(upipe, "field dominance changed: now interlaced");
-        }
-
-        BMDTimeValue timeValue;
-        BMDTimeScale timeScale;
-        upipe_bmd_sink->displayMode->GetFrameRate(&timeValue, &timeScale);
-        struct urational bmd_fps = { timeScale, timeValue};
-
-        if (urational_cmp(&fps, &bmd_fps)) {
-            urational_simplify(&bmd_fps);
-            upipe_err_va(upipe, "Detect frame rate change:"
-                " %"PRId64"/%"PRIu64" -> %"PRId64"/%"PRIu64,
-                bmd_fps.num, bmd_fps.den, fps.num, fps.den);
+        BMDDisplayMode bmdMode = upipe_bmd_mode_from_flow_def(upipe_bmd_sink, flow_def);
+        if (bmdMode != upipe_bmd_sink->mode) {
+            uint32_t prev_mode = htonl(upipe_bmd_sink->mode);
+            uint32_t new_mode = htonl(bmdMode);
+            upipe_notice_va(upipe, "Changing mode from %4.4s to %4.4s",
+                    &prev_mode, &new_mode);
+            upipe_bmd_sink->mode = bmdMode;
+            if (!ubase_check(upipe_bmd_open_vid(&upipe_bmd_sink->upipe))) {
+                upipe_err_va(upipe, "Could not change mode");
+                return UBASE_ERR_EXTERNAL;
+            }
         }
 
         if (macropixel != 48 || ubase_check(
@@ -1137,6 +1190,18 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
     int err = UBASE_ERR_NONE;
     HRESULT result = E_NOINTERFACE;
 
+    if (upipe_bmd_sink->displayMode) {
+        //uclock_set_offset(&upipe_bmd_sink->uclock.uclock); SHIT
+        upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->pic_subpipe.upipe);
+        upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->sound_subpipe.upipe);
+        upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->subpic_subpipe.upipe);
+        deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
+        deckLinkOutput->DisableVideoOutput();
+        deckLinkOutput->DisableAudioOutput();
+        upipe_bmd_sink->displayMode->Release();
+        upipe_bmd_sink->started = 0;
+    }
+
     result = deckLinkOutput->GetDisplayModeIterator(&displayModeIterator);
     if (result != S_OK){
         upipe_err_va(upipe, "decklink card has no display modes");
@@ -1146,13 +1211,7 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
 
     while ((result = displayModeIterator->Next(&displayMode)) == S_OK)
     {
-        union {
-            BMDDisplayMode mode_id;
-            char mode_s[4];
-        } u;
-        u.mode_id = ntohl(displayMode->GetDisplayMode());
-
-        if (!strncmp(u.mode_s, upipe_bmd_sink->mode, 4))
+        if (displayMode->GetDisplayMode() == upipe_bmd_sink->mode)
             break;
 
         displayMode->Release();
@@ -1160,7 +1219,8 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
 
     if (result != S_OK || displayMode == NULL)
     {
-        fprintf(stderr, "Unable to get display mode %s\n", upipe_bmd_sink->mode);
+        uint32_t mode = htonl(upipe_bmd_sink->mode);
+        fprintf(stderr, "Unable to get display mode %4.4s\n", (char*)&mode);
         err = UBASE_ERR_EXTERNAL;
         goto end;
     }
@@ -1191,7 +1251,7 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
         goto end;
     }
 
-    if (!strcmp(upipe_bmd_sink->mode, "pal ")) {
+    if (upipe_bmd_sink->mode == bmdModePAL) {
         upipe_bmd_sink->sp.scanning         = 625; /* PAL */
         upipe_bmd_sink->sp.sampling_format  = VBI_PIXFMT_YUV420;
         upipe_bmd_sink->sp.sampling_rate    = 13.5e6;
@@ -1203,7 +1263,7 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
         upipe_bmd_sink->sp.interlaced   = FALSE;
         upipe_bmd_sink->sp.synchronous  = FALSE;
         upipe_bmd_sink->sp.offset       = 128;
-    } else if (!strcmp(upipe_bmd_sink->mode, "ntsc")) {
+    } else if (upipe_bmd_sink->mode == bmdModeNTSC) {
         upipe_bmd_sink->sp.scanning         = 525; /* NTSC */
         upipe_bmd_sink->sp.sampling_format  = VBI_PIXFMT_YUV420;
         upipe_bmd_sink->sp.sampling_rate    = 13.5e6;
@@ -1295,8 +1355,12 @@ static int upipe_bmd_sink_set_option(struct upipe *upipe,
         upipe_bmd_sink->card_idx = atoi(v);
 
     if (!strcmp(k, "mode")) {
-        strncpy(upipe_bmd_sink->mode, v, sizeof(upipe_bmd_sink->mode));
-        upipe_bmd_sink->mode[4] = '\0';
+        union {
+            BMDDisplayMode mode_id;
+            char mode_s[4];
+        } u;
+        strncpy(u.mode_s, v, sizeof(u.mode_s));
+        upipe_bmd_sink->mode = htonl(u.mode_id);
     }
 
     return UBASE_ERR_NONE;
