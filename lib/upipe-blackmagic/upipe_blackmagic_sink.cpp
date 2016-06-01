@@ -941,6 +941,52 @@ static int upipe_bmd_sink_sub_set_flow_def(struct upipe *upipe,
             return UBASE_ERR_EXTERNAL;
         }
 
+        uint64_t hsize, vsize;
+        struct urational fps;
+        if (unlikely(!ubase_check(uref_pic_flow_get_hsize(flow_def, &hsize)) ||
+                    !ubase_check(uref_pic_flow_get_vsize(flow_def, &vsize)) ||
+                    !ubase_check(uref_pic_flow_get_fps(flow_def, &fps)))) {
+            upipe_err(upipe, "cannot read size and frame rate");
+            uref_dump(flow_def, upipe->uprobe);
+            return UBASE_ERR_EXTERNAL;
+        }
+
+        bool interlaced = !ubase_check(uref_pic_get_progressive(flow_def));
+
+        upipe_notice_va(upipe, "%"PRIu64"x%"PRIu64" %"PRId64"/%"PRIu64" interlaced %d",
+            hsize, vsize, fps.num, fps.den, interlaced);
+
+        int width = upipe_bmd_sink->displayMode->GetWidth();
+        int height = upipe_bmd_sink->displayMode->GetHeight();
+
+        if (width != hsize || height != vsize) {
+            upipe_err_va(upipe, "Detected size change:"
+                " %dx%d -> %"PRIu64"x%"PRIu64, width, height, hsize, vsize);
+        }
+
+        BMDFieldDominance field = upipe_bmd_sink->displayMode->GetFieldDominance();
+        if (field == bmdUnknownFieldDominance) {
+            upipe_err(upipe, "unknown field dominance");
+        } else if (field == bmdLowerFieldFirst || field == bmdUpperFieldFirst) {
+            if (!interlaced)
+                upipe_err(upipe, "field dominance changed: now progressive");
+        } else {
+            if (interlaced)
+                upipe_err(upipe, "field dominance changed: now interlaced");
+        }
+
+        BMDTimeValue timeValue;
+        BMDTimeScale timeScale;
+        upipe_bmd_sink->displayMode->GetFrameRate(&timeValue, &timeScale);
+        struct urational bmd_fps = { timeScale, timeValue};
+
+        if (urational_cmp(&fps, &bmd_fps)) {
+            urational_simplify(&bmd_fps);
+            upipe_err_va(upipe, "Detect frame rate change:"
+                " %"PRId64"/%"PRIu64" -> %"PRId64"/%"PRIu64,
+                bmd_fps.num, bmd_fps.den, fps.num, fps.den);
+        }
+
         if (macropixel != 48 || ubase_check(
                              uref_pic_flow_check_chroma(flow_def, 1, 1, 1,
                                                         "u10y10v10y10u10y10v10y10u10y10v10y10"))) {
