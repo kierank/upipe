@@ -244,14 +244,6 @@ struct upipe_bmd_sink_sub {
     struct upipe upipe;
 };
 
-/** super-set of the uclock structure with additional local members */
-struct uclock_bmd_sink {
-    /** structure exported to modules */
-    struct uclock uclock;
-};
-
-UBASE_FROM_TO(uclock_bmd_sink, uclock, uclock, uclock)
-
 /** upipe_bmd_sink structure */
 struct upipe_bmd_sink {
     /** refcount management structure */
@@ -303,7 +295,7 @@ struct upipe_bmd_sink {
     IDeckLinkDisplayMode *displayMode;
 
     /** hardware uclock */
-    struct uclock_bmd_sink uclock;
+    struct uclock uclock;
 
     /** public upipe structure */
     struct upipe upipe;
@@ -323,7 +315,7 @@ UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, pic_subpipe, pic_subpipe)
 UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, sound_subpipe, sound_subpipe)
 UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, subpic_subpipe, subpic_subpipe)
 
-UBASE_FROM_TO(upipe_bmd_sink, uclock_bmd_sink, uclock_bmd_sink, uclock)
+UBASE_FROM_TO(upipe_bmd_sink, uclock, uclock, uclock)
 
 static const bool parity_tab[256] =
 {
@@ -761,7 +753,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
 
     uint64_t pts = 0;
     if (likely(ubase_check(uref_clock_get_pts_sys(uref, &pts)))) {
-        uint64_t now = uclock_now(&upipe_bmd_sink->uclock.uclock);
+        uint64_t now = uclock_now(&upipe_bmd_sink->uclock);
         pts += upipe_bmd_sink_sub->latency;
 
         if (now < pts) {
@@ -1075,8 +1067,7 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
  */
 static uint64_t uclock_bmd_sink_now(struct uclock *uclock)
 {
-    struct uclock_bmd_sink *uclock_bmd_sink = uclock_bmd_sink_from_uclock(uclock);
-    struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_uclock_bmd_sink(uclock_bmd_sink);
+    struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_uclock(uclock);
 
     BMDTimeValue hardware_time = 0, time_in_frame, ticks_per_frame;
 
@@ -1228,7 +1219,7 @@ static int upipe_bmd_sink_set_uri(struct upipe *upipe, const char *uri)
         goto end;
     }
 
-    upipe_bmd_sink->uclock.uclock.uclock_now = uclock_bmd_sink_now;
+    upipe_bmd_sink->uclock.uclock_now = uclock_bmd_sink_now;
 
     upipe_bmd_sink->deckLink = deckLink;
 
@@ -1406,9 +1397,7 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
             UBASE_SIGNATURE_CHECK(args, UPIPE_BMD_SINK_SIGNATURE)
             struct uclock **pp_uclock = va_arg(args, struct uclock **);
             struct upipe_bmd_sink *bmd_sink = upipe_bmd_sink_from_upipe(upipe);
-            struct uclock_bmd_sink *uclock_bmd_sink = upipe_bmd_sink_to_uclock_bmd_sink(bmd_sink);
-            struct uclock *uclock = uclock_bmd_sink_to_uclock(uclock_bmd_sink);
-            *pp_uclock = uclock;
+            *pp_uclock = &bmd_sink->uclock;
             return UBASE_ERR_NONE;
         }
         case UPIPE_BMD_SINK_GET_GENLOCK_STATUS: {
@@ -1443,7 +1432,6 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
 static void upipe_bmd_sink_free(struct upipe *upipe)
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
-    struct uclock_bmd_sink *uclock_bmd_sink = &upipe_bmd_sink->uclock;
 
     struct uchain *uchain, *uchain_tmp;
     ulist_delete_foreach(&upipe_bmd_sink->subpic_queue, uchain, uchain_tmp) {
