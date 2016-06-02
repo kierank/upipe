@@ -919,12 +919,17 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
     }
 }
 
-static BMDDisplayMode upipe_bmd_mode_from_flow_def(struct upipe_bmd_sink *upipe_bmd_sink, struct uref *flow_def)
+uint32_t upipe_bmd_mode_from_flow_def(struct upipe *upipe, struct uref *flow_def)
 {
-    struct upipe *upipe = &upipe_bmd_sink->upipe;
+    struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
     IDeckLinkOutput *deckLinkOutput = upipe_bmd_sink->deckLinkOutput;
     char *displayModeName = NULL;
-    BMDDisplayMode bmdMode = bmdModeUnknown;
+    uint32_t bmdMode = bmdModeUnknown;
+
+    if (!deckLinkOutput) {
+        upipe_err(upipe, "Card not opened yet");
+        return bmdModeUnknown;
+    }
 
     uint64_t hsize, vsize;
     struct urational fps;
@@ -1030,18 +1035,8 @@ static int upipe_bmd_sink_sub_set_flow_def(struct upipe *upipe,
             return UBASE_ERR_EXTERNAL;
         }
 
-        BMDDisplayMode bmdMode = upipe_bmd_mode_from_flow_def(upipe_bmd_sink, flow_def);
-        if (bmdMode != upipe_bmd_sink->mode) {
-            uint32_t prev_mode = htonl(upipe_bmd_sink->mode);
-            uint32_t new_mode = htonl(bmdMode);
-            upipe_notice_va(upipe, "Changing mode from %4.4s to %4.4s",
-                    &prev_mode, &new_mode);
-            upipe_bmd_sink->mode = bmdMode;
-            if (!ubase_check(upipe_bmd_open_vid(&upipe_bmd_sink->upipe))) {
-                upipe_err_va(upipe, "Could not change mode");
-                return UBASE_ERR_EXTERNAL;
-            }
-        }
+        BMDDisplayMode bmdMode = upipe_bmd_mode_from_flow_def(&upipe_bmd_sink->upipe, flow_def);
+        assert(bmdMode == upipe_bmd_sink->mode);
 
         if (macropixel != 48 || ubase_check(
                              uref_pic_flow_check_chroma(flow_def, 1, 1, 1,

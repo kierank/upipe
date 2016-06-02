@@ -181,6 +181,7 @@ static inline struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
                         uprobe_pic, uprobe_sound, uprobe_subpic);
 }
 
+uint32_t upipe_bmd_mode_from_flow_def(struct upipe *upipe, struct uref *flow_def);
 
 #ifdef __cplusplus
 }
