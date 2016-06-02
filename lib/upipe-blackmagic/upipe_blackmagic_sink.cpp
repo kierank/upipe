@@ -1008,8 +1008,6 @@ end:
     return bmdMode;
 }
 
-static int upipe_bmd_open_vid(struct upipe *upipe);
-
 /** @internal @This sets the input flow definition.
  *
  * @param upipe description structure of the pipe
