@@ -293,8 +293,8 @@ struct upipe_bmd_sink {
     /** hardware uclock */
     struct uclock uclock;
 
-    /** last hardware clock read */
-    uint64_t last_cr;
+    /** clock offset to ensure it is increasing */
+    uint64_t offset;
 
     /** public upipe structure */
     struct upipe upipe;
@@ -1119,16 +1119,20 @@ static uint64_t uclock_bmd_sink_now(struct uclock *uclock)
 
     BMDTimeValue hardware_time = UINT64_MAX, time_in_frame, ticks_per_frame;
 
-    if (upipe_bmd_sink->deckLinkOutput) {
-        HRESULT res = upipe_bmd_sink->deckLinkOutput->GetHardwareReferenceClock(
-                UCLOCK_FREQ, &hardware_time, &time_in_frame, &ticks_per_frame);
-        if (res != S_OK) {
-            upipe_err_va(upipe, "\t\tCouldn't read hardware clock: 0x%08lx", res);
-            hardware_time = upipe_bmd_sink->last_cr;
-        } else
-            upipe_bmd_sink->last_cr = hardware_time;
-    } else
+    if (!upipe_bmd_sink->deckLinkOutput) {
         upipe_err_va(upipe, "No output configured");
+        return UINT64_MAX;
+    }
+
+
+    HRESULT res = upipe_bmd_sink->deckLinkOutput->GetHardwareReferenceClock(
+            UCLOCK_FREQ, &hardware_time, &time_in_frame, &ticks_per_frame);
+    if (res != S_OK) {
+        upipe_err_va(upipe, "\t\tCouldn't read hardware clock: 0x%08lx", res);
+        hardware_time = 0;
+    }
+
+    hardware_time += upipe_bmd_sink->offset;
 
     if (0) upipe_notice_va(upipe, "CLOCK THR 0x%llx VAL %"PRIu64,
         (unsigned long long)pthread_self(), (uint64_t)hardware_time);
@@ -1179,7 +1183,7 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
 
     ulist_init(&upipe_bmd_sink->subpic_queue);
 
-    upipe_bmd_sink->last_cr = 0;
+    upipe_bmd_sink->offset = 0;
     upipe_bmd_sink->uclock.uclock_now = uclock_bmd_sink_now;
 
     upipe_throw_ready(upipe);
@@ -1197,7 +1201,6 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
     HRESULT result = E_NOINTERFACE;
 
     if (upipe_bmd_sink->displayMode) {
-        //uclock_set_offset(&upipe_bmd_sink->uclock.uclock); SHIT
         upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->pic_subpipe.upipe);
         upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->sound_subpipe.upipe);
         upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->subpic_subpipe.upipe);
@@ -1240,6 +1243,8 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
     upipe_bmd_sink->displayMode = displayMode;
 
     /* disable video the shortest time possible, to keep clock running */
+
+    upipe_bmd_sink->offset = uclock_now(&upipe_bmd_sink->uclock);
     deckLinkOutput->DisableVideoOutput();
     result = deckLinkOutput->EnableVideoOutput(displayMode->GetDisplayMode(),
                                                bmdVideoOutputVANC);
