@@ -296,6 +296,9 @@ struct upipe_bmd_sink {
     /** clock offset to ensure it is increasing */
     uint64_t offset;
 
+    /** offset between uclock and pts_prog */
+    uint64_t pts_offset;
+
     /** public upipe structure */
     struct upipe upipe;
 };
@@ -751,7 +754,15 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
     }
 
     uint64_t pts = 0;
+    uint64_t pts_prog = 0;
+    uref_clock_get_pts_prog(uref, &pts_prog);
     if (likely(ubase_check(uref_clock_get_pts_sys(uref, &pts)))) {
+
+        if (upipe_bmd_sink->pts_offset == 0) {
+            upipe_bmd_sink->pts_offset = pts_prog - pts;
+        } else
+            pts = pts_prog - upipe_bmd_sink->pts_offset;
+
         uint64_t now = uclock_now(&upipe_bmd_sink->uclock);
         pts += upipe_bmd_sink_sub->latency;
 
@@ -1183,6 +1194,7 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
 
     ulist_init(&upipe_bmd_sink->subpic_queue);
 
+    upipe_bmd_sink->pts_offset = 0;
     upipe_bmd_sink->offset = 0;
     upipe_bmd_sink->uclock.uclock_now = uclock_bmd_sink_now;
 
@@ -1246,6 +1258,7 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
 
     upipe_bmd_sink->offset = uclock_now(&upipe_bmd_sink->uclock);
     deckLinkOutput->DisableVideoOutput();
+    upipe_bmd_sink->pts_offset = 0;
     result = deckLinkOutput->EnableVideoOutput(displayMode->GetDisplayMode(),
                                                bmdVideoOutputVANC);
     if (result != S_OK)
