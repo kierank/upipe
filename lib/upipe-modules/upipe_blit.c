@@ -225,13 +225,13 @@ static int upipe_blit_alpha(struct uref *uref, struct ubuf *src,
                           src_macropixel_size;
         int plane_vsize = extract_vsize / src_vsub;
 
-        //if (src_hsub == 2) // only do luma for now
         for (int i = 0; i < plane_vsize; i++) {
-#if 0
+#if 0       /* alpha-less blitting */
             memcpy(dest_buffer, src_buffer, plane_hsize);
 #else
             for (int j = 0; j < plane_hsize; j++) {
                 unsigned a = 0;
+#if 0       /* averaging of 4 alpha pixels for chroma */
                 for (int x = 0; x < src_hsub; x++)
                     for (int y = 0; y < src_vsub; y++) {
                         a += alpha[alpha_stride * (i * src_vsub + y)
@@ -239,10 +239,19 @@ static int upipe_blit_alpha(struct uref *uref, struct ubuf *src,
                     }
 
                 a /= src_hsub * src_vsub;
+#else
+                a += alpha[alpha_stride * (i * src_vsub) + j * src_hsub ];
 
+#endif
+
+#if 0           /* alpha level between 0 and 255 */
                 /* apply alpha to subpic and 1-alpha to pic */
                 dest_buffer[j] = (dest_buffer[j] * (0xff - a) +
                     src_buffer[j] * a) / 0xff;
+#else
+                if (a)
+                    dest_buffer[j] = src_buffer[j];
+#endif
             }
 #endif
             dest_buffer += dest_stride;
