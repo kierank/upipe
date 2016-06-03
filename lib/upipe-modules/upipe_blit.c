@@ -226,34 +226,26 @@ static int upipe_blit_alpha(struct uref *uref, struct ubuf *src,
         int plane_vsize = extract_vsize / src_vsub;
 
         for (int i = 0; i < plane_vsize; i++) {
-#if 0       /* alpha-less blitting */
-            memcpy(dest_buffer, src_buffer, plane_hsize);
-#else
-            for (int j = 0; j < plane_hsize; j++) {
-                unsigned a = 0;
-#if 0       /* averaging of 4 alpha pixels for chroma */
-                for (int x = 0; x < src_hsub; x++)
-                    for (int y = 0; y < src_vsub; y++) {
-                        a += alpha[alpha_stride * (i * src_vsub + y)
-                            + j * src_hsub + x];
-                    }
-
-                a /= src_hsub * src_vsub;
-#else
-                a += alpha[alpha_stride * (i * src_vsub) + j * src_hsub ];
-
-#endif
-
-#if 0           /* alpha level between 0 and 255 */
-                /* apply alpha to subpic and 1-alpha to pic */
-                dest_buffer[j] = (dest_buffer[j] * (0xff - a) +
-                    src_buffer[j] * a) / 0xff;
-#else
-                if (a)
-                    dest_buffer[j] = src_buffer[j];
-#endif
+            for (int j = 0; j < plane_hsize; j += 16) {
+                const uint8_t *a = &alpha[alpha_stride * (i * src_vsub) + j * src_hsub];
+                if (a[0x0] > 20) dest_buffer[j+0x0] = src_buffer[j+0x0];
+                if (a[0x1] > 20) dest_buffer[j+0x1] = src_buffer[j+0x1];
+                if (a[0x2] > 20) dest_buffer[j+0x2] = src_buffer[j+0x2];
+                if (a[0x3] > 20) dest_buffer[j+0x3] = src_buffer[j+0x3];
+                if (a[0x4] > 20) dest_buffer[j+0x4] = src_buffer[j+0x4];
+                if (a[0x5] > 20) dest_buffer[j+0x5] = src_buffer[j+0x5];
+                if (a[0x6] > 20) dest_buffer[j+0x6] = src_buffer[j+0x6];
+                if (a[0x7] > 20) dest_buffer[j+0x7] = src_buffer[j+0x7];
+                if (a[0x8] > 20) dest_buffer[j+0x8] = src_buffer[j+0x8];
+                if (a[0x9] > 20) dest_buffer[j+0x9] = src_buffer[j+0x9];
+                if (a[0xa] > 20) dest_buffer[j+0xa] = src_buffer[j+0xa];
+                if (a[0xb] > 20) dest_buffer[j+0xb] = src_buffer[j+0xb];
+                if (a[0xc] > 20) dest_buffer[j+0xc] = src_buffer[j+0xc];
+                if (a[0xd] > 20) dest_buffer[j+0xd] = src_buffer[j+0xd];
+                if (a[0xe] > 20) dest_buffer[j+0xe] = src_buffer[j+0xe];
+                if (a[0xf] > 20) dest_buffer[j+0xf] = src_buffer[j+0xf];
             }
-#endif
+
             dest_buffer += dest_stride;
             src_buffer += src_stride;
         }
