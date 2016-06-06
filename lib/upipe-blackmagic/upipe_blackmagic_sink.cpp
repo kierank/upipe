@@ -694,12 +694,13 @@ static void upipe_bmd_sink_sub_init(struct upipe *upipe,
         struct upipe_mgr *sub_mgr, struct uprobe *uprobe)
 {
     upipe_init(upipe, sub_mgr, uprobe);
-    upipe_mgr_release(sub_mgr); /* do not reference super pipe */
+    upipe_mgr_release(sub_mgr); /* do not reference super pipe */ // XXX
 
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_sub_mgr(sub_mgr);
     struct upipe_bmd_sink_sub *upipe_bmd_sink_sub = upipe_bmd_sink_sub_from_upipe(upipe);
     upipe_bmd_sink_sub->upipe_bmd_sink = upipe_bmd_sink_to_upipe(upipe_bmd_sink);
 
+    upipe_bmd_sink_sub_init_sub(upipe);
     upipe_bmd_sink_sub_init_input(upipe);
     upipe_bmd_sink_sub_init_upump_mgr(upipe);
     upipe_bmd_sink_sub_init_upump(upipe);
@@ -1225,6 +1226,7 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
     struct upipe *upipe = upipe_bmd_sink_to_upipe(upipe_bmd_sink);
     upipe_init(upipe, mgr, uprobe);
 
+    upipe_bmd_sink_init_sub_inputs(upipe);
     upipe_bmd_sink_init_sub_mgr(upipe);
     upipe_bmd_sink_init_urefcount(upipe);
 
