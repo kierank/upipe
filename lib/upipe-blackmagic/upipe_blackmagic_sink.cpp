@@ -43,7 +43,9 @@
 #include <upipe/uref_dump.h>
 #include <upipe/upipe.h>
 #include <upipe/upipe_helper_input.h>
+#include <upipe/upipe_helper_flow.h>
 #include <upipe/upipe_helper_upipe.h>
+#include <upipe/upipe_helper_subpipe.h>
 #include <upipe/upipe_helper_upump_mgr.h>
 #include <upipe/upipe_helper_upump.h>
 #include <upipe/upipe_helper_urefcount.h>
@@ -228,6 +230,9 @@ struct upipe_bmd_sink_sub {
     /** list of blockers */
     struct uchain blockers;
 
+    /** structure for double-linked lists */
+    struct uchain uchain;
+
     /** delay applied to pts attribute when uclock is provided */
     uint64_t latency;
 
@@ -253,6 +258,9 @@ struct upipe_bmd_sink {
     struct upipe_bmd_sink_sub sound_subpipe;
     /** subpic subpipe */
     struct upipe_bmd_sink_sub subpic_subpipe;
+
+    /** list of input subpipes */
+    struct uchain inputs;
 
     /** card index **/
     int card_idx;
@@ -311,8 +319,9 @@ UPIPE_HELPER_UPIPE(upipe_bmd_sink_sub, upipe, UPIPE_BMD_SINK_INPUT_SIGNATURE)
 UPIPE_HELPER_UPUMP_MGR(upipe_bmd_sink_sub, upump_mgr);
 UPIPE_HELPER_UPUMP(upipe_bmd_sink_sub, upump, upump_mgr);
 UPIPE_HELPER_INPUT(upipe_bmd_sink_sub, urefs, nb_urefs, max_urefs, blockers, upipe_bmd_sink_sub_output);
+UPIPE_HELPER_FLOW(upipe_bmd_sink_sub, NULL);
+UPIPE_HELPER_SUBPIPE(upipe_bmd_sink, upipe_bmd_sink_sub, input, sub_mgr, inputs, uchain)
 
-UBASE_FROM_TO(upipe_bmd_sink, upipe_mgr, sub_mgr, sub_mgr)
 UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, pic_subpipe, pic_subpipe)
 UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, sound_subpipe, sound_subpipe)
 UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, subpic_subpipe, subpic_subpipe)
@@ -1102,6 +1111,38 @@ static int upipe_bmd_sink_sub_control(struct upipe *upipe,
     }
 }
 
+static struct upipe *upipe_bmd_sink_sub_alloc(struct upipe_mgr *mgr,
+                                                 struct uprobe *uprobe,
+                                                 uint32_t signature, va_list args)
+{
+    struct uref *flow_def;
+    struct upipe *upipe = upipe_bmd_sink_sub_alloc_flow(mgr,
+            uprobe, signature, args, &flow_def);
+
+    if (unlikely(upipe == NULL || flow_def == NULL))
+        goto error;
+
+    const char *def;
+    if (!ubase_check(uref_flow_get_def(flow_def, &def)))
+        goto error;
+
+    if (ubase_ncmp(def, "sound.")) // XXX: correct?
+        goto error;
+
+    upipe_bmd_sink_sub_init(upipe, mgr, uprobe);
+
+    /* different subpipe type */
+    uref_dump(flow_def, uprobe);
+    uref_free(flow_def);
+
+    return upipe;
+
+error:
+    uref_free(flow_def);
+    upipe_release(upipe);
+    return NULL;
+}
+
 /** @internal @This initializes the output manager for an bmd_sink pipe.
  *
  * @param upipe description structure of the pipe
@@ -1112,7 +1153,7 @@ static void upipe_bmd_sink_init_sub_mgr(struct upipe *upipe)
     struct upipe_mgr *sub_mgr = &upipe_bmd_sink->sub_mgr;
     sub_mgr->refcount = upipe_bmd_sink_to_urefcount(upipe_bmd_sink);
     sub_mgr->signature = UPIPE_BMD_SINK_INPUT_SIGNATURE;
-    sub_mgr->upipe_alloc = NULL;
+    sub_mgr->upipe_alloc = upipe_bmd_sink_sub_alloc;
     sub_mgr->upipe_input = upipe_bmd_sink_sub_input;
     sub_mgr->upipe_control = upipe_bmd_sink_sub_control;
     sub_mgr->upipe_mgr_control = NULL;
@@ -1505,6 +1546,11 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
                 UBASE_RETURN(upipe_bmd_sink_open_card(upipe));
             }
             return upipe_bmd_open_vid(upipe);
+
+        case UPIPE_GET_SUB_MGR: {
+            struct upipe_mgr **p = va_arg(args, struct upipe_mgr **);
+            return upipe_bmd_sink_get_sub_mgr(upipe, p);
+        }
 
         case UPIPE_BMD_SINK_GET_PIC_SUB: {
             UBASE_SIGNATURE_CHECK(args, UPIPE_BMD_SINK_SIGNATURE)
