@@ -1311,7 +1311,7 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
         goto end;
     }
 
-    result = deckLinkOutput->EnableAudioOutput(48000, bmdAudioSampleType32bitInteger, 16, bmdAudioOutputStreamTimestamped);
+    result = deckLinkOutput->EnableAudioOutput(48000, bmdAudioSampleType32bitInteger, 8, bmdAudioOutputStreamTimestamped);
     if (result != S_OK)
     {
         fprintf(stderr, "Failed to enable audio output. Is another application using the card?\n");
