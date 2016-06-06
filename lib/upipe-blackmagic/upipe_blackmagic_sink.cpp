@@ -241,6 +241,9 @@ struct upipe_bmd_sink_sub {
     /** watcher */
     struct upump *upump;
 
+    /** whether this is an audio pipe */
+    bool sound;
+
     /** public upipe structure */
     struct upipe upipe;
 };
@@ -254,8 +257,6 @@ struct upipe_bmd_sink {
     struct upipe_mgr sub_mgr;
     /** pic subpipe */
     struct upipe_bmd_sink_sub pic_subpipe;
-    /** sound subpipe */
-    struct upipe_bmd_sink_sub sound_subpipe;
     /** subpic subpipe */
     struct upipe_bmd_sink_sub subpic_subpipe;
 
@@ -323,7 +324,6 @@ UPIPE_HELPER_FLOW(upipe_bmd_sink_sub, NULL);
 UPIPE_HELPER_SUBPIPE(upipe_bmd_sink, upipe_bmd_sink_sub, input, sub_mgr, inputs, uchain)
 
 UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, pic_subpipe, pic_subpipe)
-UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, sound_subpipe, sound_subpipe)
 UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, subpic_subpipe, subpic_subpipe)
 
 UBASE_FROM_TO(upipe_bmd_sink, uclock, uclock, uclock)
@@ -703,6 +703,7 @@ static void upipe_bmd_sink_sub_init(struct upipe *upipe,
     upipe_bmd_sink_sub_init_input(upipe);
     upipe_bmd_sink_sub_init_upump_mgr(upipe);
     upipe_bmd_sink_sub_init_upump(upipe);
+    upipe_bmd_sink_sub->sound = false;
 
     upipe_throw_ready(upipe);
 }
@@ -882,7 +883,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
 
         video_frame->Release();
     }
-    else if (upipe_bmd_sink_sub == &upipe_bmd_sink->sound_subpipe && upipe_bmd_sink->started) {
+    else if (upipe_bmd_sink_sub->sound && upipe_bmd_sink->started) {
         size_t size = 0;
         uref_sound_size(uref, &size, NULL);
         const int32_t *buffers[1];
@@ -1118,6 +1119,7 @@ static struct upipe *upipe_bmd_sink_sub_alloc(struct upipe_mgr *mgr,
     struct uref *flow_def;
     struct upipe *upipe = upipe_bmd_sink_sub_alloc_flow(mgr,
             uprobe, signature, args, &flow_def);
+    struct upipe_bmd_sink_sub *upipe_bmd_sink_sub;
 
     if (unlikely(upipe == NULL || flow_def == NULL))
         goto error;
@@ -1130,6 +1132,9 @@ static struct upipe *upipe_bmd_sink_sub_alloc(struct upipe_mgr *mgr,
         goto error;
 
     upipe_bmd_sink_sub_init(upipe, mgr, uprobe);
+
+    upipe_bmd_sink_sub = upipe_bmd_sink_sub_from_upipe(upipe);
+    upipe_bmd_sink_sub->sound = true;
 
     /* different subpipe type */
     uref_dump(flow_def, uprobe);
@@ -1207,14 +1212,12 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
     if (signature != UPIPE_BMD_SINK_SIGNATURE)
         return NULL;
     struct uprobe *uprobe_pic = va_arg(args, struct uprobe *);
-    struct uprobe *uprobe_sound = va_arg(args, struct uprobe *);
     struct uprobe *uprobe_subpic = va_arg(args, struct uprobe *);
 
     struct upipe_bmd_sink *upipe_bmd_sink =
         (struct upipe_bmd_sink *)calloc(1, sizeof(struct upipe_bmd_sink));
     if (unlikely(upipe_bmd_sink == NULL)) {
         uprobe_release(uprobe_pic);
-        uprobe_release(uprobe_sound);
         uprobe_release(uprobe_subpic);
         return NULL;
     }
@@ -1228,8 +1231,6 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
     /* Initalise subpipes */
     upipe_bmd_sink_sub_init(upipe_bmd_sink_sub_to_upipe(upipe_bmd_sink_to_pic_subpipe(upipe_bmd_sink)),
                             &upipe_bmd_sink->sub_mgr, uprobe_pic);
-    upipe_bmd_sink_sub_init(upipe_bmd_sink_sub_to_upipe(upipe_bmd_sink_to_sound_subpipe(upipe_bmd_sink)),
-                            &upipe_bmd_sink->sub_mgr, uprobe_sound);
     upipe_bmd_sink_sub_init(upipe_bmd_sink_sub_to_upipe(upipe_bmd_sink_to_subpic_subpipe(upipe_bmd_sink)),
                             &upipe_bmd_sink->sub_mgr, uprobe_subpic);
 
@@ -1255,7 +1256,6 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
 
     if (upipe_bmd_sink->displayMode) {
         upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->pic_subpipe.upipe);
-        upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->sound_subpipe.upipe);
         upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->subpic_subpipe.upipe);
         deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
         deckLinkOutput->DisableAudioOutput();
@@ -1560,14 +1560,6 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
                                 upipe_bmd_sink_from_upipe(upipe)));
             return UBASE_ERR_NONE;
         }
-        case UPIPE_BMD_SINK_GET_SOUND_SUB: {
-            UBASE_SIGNATURE_CHECK(args, UPIPE_BMD_SINK_SIGNATURE)
-            struct upipe **upipe_p = va_arg(args, struct upipe **);
-            *upipe_p =  upipe_bmd_sink_sub_to_upipe(
-                            upipe_bmd_sink_to_sound_subpipe(
-                                upipe_bmd_sink_from_upipe(upipe)));
-            return UBASE_ERR_NONE;
-        }
         case UPIPE_BMD_SINK_GET_SUBPIC_SUB: {
             UBASE_SIGNATURE_CHECK(args, UPIPE_BMD_SINK_SIGNATURE)
             struct upipe **upipe_p = va_arg(args, struct upipe **);
@@ -1623,7 +1615,6 @@ static void upipe_bmd_sink_free(struct upipe *upipe)
     }
 
     upipe_bmd_sink_sub_free(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->pic_subpipe));
-    upipe_bmd_sink_sub_free(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->sound_subpipe));
     upipe_bmd_sink_sub_free(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->subpic_subpipe));
     upipe_throw_dead(upipe);
 
