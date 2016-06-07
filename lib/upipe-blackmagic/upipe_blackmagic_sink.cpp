@@ -219,6 +219,8 @@ static void upipe_bmd_sink_sub_write_watcher(struct upump *upump);
 /** @internal @This is the private context of an output of an bmd_sink sink
  * pipe. */
 struct upipe_bmd_sink_sub {
+    struct urefcount urefcount;
+
     struct upipe *upipe_bmd_sink;
 
     /** temporary uref storage */
@@ -325,6 +327,7 @@ UPIPE_HELPER_UPUMP(upipe_bmd_sink_sub, upump, upump_mgr);
 UPIPE_HELPER_INPUT(upipe_bmd_sink_sub, urefs, nb_urefs, max_urefs, blockers, upipe_bmd_sink_sub_output);
 UPIPE_HELPER_FLOW(upipe_bmd_sink_sub, NULL);
 UPIPE_HELPER_SUBPIPE(upipe_bmd_sink, upipe_bmd_sink_sub, input, sub_mgr, inputs, uchain)
+UPIPE_HELPER_UREFCOUNT(upipe_bmd_sink_sub, urefcount, upipe_bmd_sink_sub_free);
 
 UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, pic_subpipe, pic_subpipe)
 UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, subpic_subpipe, subpic_subpipe)
@@ -694,10 +697,13 @@ static void upipe_bmd_sink_extract_ttx(struct upipe *upipe, IDeckLinkVideoFrameA
  * @param uprobe structure used to raise events by the subpipe
  */
 static void upipe_bmd_sink_sub_init(struct upipe *upipe,
-        struct upipe_mgr *sub_mgr, struct uprobe *uprobe)
+        struct upipe_mgr *sub_mgr, struct uprobe *uprobe, bool static_pipe)
 {
-    upipe_init(upipe, sub_mgr, uprobe);
-    upipe_mgr_release(sub_mgr); /* do not reference super pipe */ // XXX
+    if (static_pipe) {
+        upipe_init(upipe, sub_mgr, uprobe);
+        upipe_mgr_release(sub_mgr); /* do not reference super pipe for static subpipes */
+    } else
+        upipe_bmd_sink_sub_init_urefcount(upipe);
 
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_sub_mgr(sub_mgr);
     struct upipe_bmd_sink_sub *upipe_bmd_sink_sub = upipe_bmd_sink_sub_from_upipe(upipe);
@@ -707,7 +713,7 @@ static void upipe_bmd_sink_sub_init(struct upipe *upipe,
     upipe_bmd_sink_sub_init_input(upipe);
     upipe_bmd_sink_sub_init_upump_mgr(upipe);
     upipe_bmd_sink_sub_init_upump(upipe);
-    upipe_bmd_sink_sub->sound = false;
+    upipe_bmd_sink_sub->sound = !static_pipe;
 
     upipe_throw_ready(upipe);
 }
@@ -716,10 +722,21 @@ static void upipe_bmd_sink_sub_free(struct upipe *upipe)
 {
     struct upipe_bmd_sink_sub *upipe_bmd_sink_sub = upipe_bmd_sink_sub_from_upipe(upipe);
     upipe_throw_dead(upipe);
+    upipe_bmd_sink_sub_clean_sub(upipe);
     upipe_bmd_sink_sub_clean_upump(upipe);
     upipe_bmd_sink_sub_clean_upump_mgr(upipe);
     upipe_bmd_sink_sub_clean_input(upipe);
-    upipe_clean(upipe);
+
+    struct upipe_bmd_sink *upipe_bmd_sink =
+        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+    if (upipe_bmd_sink_sub == &upipe_bmd_sink->subpic_subpipe ||
+        upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe) {
+        upipe_clean(upipe);
+        return;
+    }
+
+    upipe_bmd_sink_sub_clean_urefcount(upipe);
+    upipe_bmd_sink_sub_free_flow(upipe);
 }
 
 /** @internal @This is called when the data should be displayed.
@@ -1222,10 +1239,9 @@ static struct upipe *upipe_bmd_sink_sub_alloc(struct upipe_mgr *mgr,
     if (ubase_ncmp(def, "sound.")) // XXX: correct?
         goto error;
 
-    upipe_bmd_sink_sub_init(upipe, mgr, uprobe);
+    upipe_bmd_sink_sub_init(upipe, mgr, uprobe, false);
 
     upipe_bmd_sink_sub = upipe_bmd_sink_sub_from_upipe(upipe);
-    upipe_bmd_sink_sub->sound = true;
 
     uref_attr_get_small_unsigned(flow_def, &upipe_bmd_sink_sub->channel_idx,
             UDICT_TYPE_SMALL_UNSIGNED, "channel_idx");
@@ -1326,9 +1342,9 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
 
     /* Initalise subpipes */
     upipe_bmd_sink_sub_init(upipe_bmd_sink_sub_to_upipe(upipe_bmd_sink_to_pic_subpipe(upipe_bmd_sink)),
-                            &upipe_bmd_sink->sub_mgr, uprobe_pic);
+                            &upipe_bmd_sink->sub_mgr, uprobe_pic, true);
     upipe_bmd_sink_sub_init(upipe_bmd_sink_sub_to_upipe(upipe_bmd_sink_to_subpic_subpipe(upipe_bmd_sink)),
-                            &upipe_bmd_sink->sub_mgr, uprobe_subpic);
+                            &upipe_bmd_sink->sub_mgr, uprobe_subpic, true);
 
     ulist_init(&upipe_bmd_sink->subpic_queue);
 
