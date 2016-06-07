@@ -71,6 +71,8 @@
 
 #include "include/DeckLinkAPI.h"
 
+#define DECKLINK_CHANNELS 16
+
 #define CC_LINE 9
 #define AFD_LINE 11
 #define OP47_LINE1 12
@@ -755,7 +757,7 @@ static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const 
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
 
-    const uint8_t channels = 8;
+    const uint8_t channels = DECKLINK_CHANNELS;
 
     int32_t *buf = (int32_t*)calloc(samples * channels, sizeof(int32_t));
     if (!buf)
@@ -1236,13 +1238,19 @@ static struct upipe *upipe_bmd_sink_sub_alloc(struct upipe_mgr *mgr,
     if (ubase_ncmp(def, "sound."))
         goto error;
 
+    uint8_t channel_idx;
+    uref_attr_get_small_unsigned(flow_def, &channel_idx,
+            UDICT_TYPE_SMALL_UNSIGNED, "channel_idx");
+
+    if (channel_idx >= DECKLINK_CHANNELS) {
+        upipe_err_va(upipe, "channel_idx %hu not in range", channel_idx);
+        goto error;
+    }
+
     upipe_bmd_sink_sub_init(upipe, mgr, uprobe, false);
 
     upipe_bmd_sink_sub = upipe_bmd_sink_sub_from_upipe(upipe);
-
-    uref_attr_get_small_unsigned(flow_def, &upipe_bmd_sink_sub->channel_idx,
-            UDICT_TYPE_SMALL_UNSIGNED, "channel_idx");
-    // TODO: check range
+    upipe_bmd_sink_sub->channel_idx = channel_idx;
 
     /* different subpipe type */
     uref_dump(flow_def, uprobe);
@@ -1418,7 +1426,8 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
         goto end;
     }
 
-    result = deckLinkOutput->EnableAudioOutput(48000, bmdAudioSampleType32bitInteger, 8, bmdAudioOutputStreamTimestamped);
+    result = deckLinkOutput->EnableAudioOutput(48000, bmdAudioSampleType32bitInteger,
+            DECKLINK_CHANNELS, bmdAudioOutputStreamTimestamped);
     if (result != S_OK)
     {
         fprintf(stderr, "Failed to enable audio output. Is another application using the card?\n");
