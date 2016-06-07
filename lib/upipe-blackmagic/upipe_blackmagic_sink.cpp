@@ -780,9 +780,6 @@ static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const 
             uint64_t pts_sys = UINT64_MAX;
             uref_clock_get_pts_sys(uref, &pts_sys);
 
-            if (pts_sys == 0) // XXX
-                abort();
-
             if (pts_sys < pts) {
                 ulist_delete(uchain2);
                 upipe_bmd_sink_sub->nb_urefs--;
