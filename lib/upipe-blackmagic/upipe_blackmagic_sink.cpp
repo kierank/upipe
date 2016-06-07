@@ -1233,7 +1233,7 @@ static struct upipe *upipe_bmd_sink_sub_alloc(struct upipe_mgr *mgr,
     if (!ubase_check(uref_flow_get_def(flow_def, &def)))
         goto error;
 
-    if (ubase_ncmp(def, "sound.")) // XXX: correct?
+    if (ubase_ncmp(def, "sound."))
         goto error;
 
     upipe_bmd_sink_sub_init(upipe, mgr, uprobe, false);
