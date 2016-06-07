@@ -251,6 +251,9 @@ struct upipe_bmd_sink_sub {
     /** position in the SDI stream */
     uint8_t channel_idx;
 
+    /** audio buffer to merge tracks */
+    int32_t *audio_buf;
+
     /** public upipe structure */
     struct upipe upipe;
 };
@@ -759,9 +762,8 @@ static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const 
 
     const uint8_t channels = DECKLINK_CHANNELS;
 
-    int32_t *buf = (int32_t*)calloc(samples * channels, sizeof(int32_t));
-    if (!buf)
-        return NULL;
+    int32_t *buf = upipe_bmd_sink->pic_subpipe.audio_buf;
+    memset(buf, 0, samples * channels * sizeof(int32_t));
 
     /* interate through input subpipes */
     struct uchain *uchain;
@@ -1351,6 +1353,10 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
     upipe_bmd_sink_sub_init(upipe_bmd_sink_sub_to_upipe(upipe_bmd_sink_to_subpic_subpipe(upipe_bmd_sink)),
                             &upipe_bmd_sink->sub_mgr, uprobe_subpic, true);
 
+    const unsigned max_samples = (uint64_t)48000 * 1001 / 24000;
+    const size_t audio_buf_size = max_samples * DECKLINK_CHANNELS * sizeof(int32_t);
+    upipe_bmd_sink->pic_subpipe.audio_buf = (int32_t*)malloc(audio_buf_size);
+
     ulist_init(&upipe_bmd_sink->subpic_queue);
 
     upipe_bmd_sink->pts_offset = 0;
@@ -1735,6 +1741,8 @@ static void upipe_bmd_sink_free(struct upipe *upipe)
     upipe_bmd_sink_sub_free(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->pic_subpipe));
     upipe_bmd_sink_sub_free(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->subpic_subpipe));
     upipe_throw_dead(upipe);
+
+    free(upipe_bmd_sink->pic_subpipe.audio_buf);
 
     if (upipe_bmd_sink->deckLink) {
         upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
