@@ -755,7 +755,6 @@ static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const 
             continue;
         }
 
-        upipe_dbg_va(upipe, "pair %d", stereo_pair);
         unsigned channel_samples = samples;
 
         /* iterate through subpipe queue */
@@ -766,20 +765,20 @@ static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const 
             uint64_t pts_sys = UINT64_MAX;
             uref_clock_get_pts_sys(uref, &pts_sys);
 
-            if (pts_sys == 0)
+            if (pts_sys == 0) // XXX
                 abort();
 
-            printf("NEED %"PRIx64" GOT %"PRIx64" DIFF %"PRIx64" %u urefs\n",
-                pts, pts_sys, pts - pts_sys, upipe_bmd_sink_sub->nb_urefs);
-
-            if (!channel_samples)
+            if (pts_sys < pts) {
+                ulist_delete(uchain2);
+                upipe_bmd_sink_sub->nb_urefs--;
+                uref_free(uref);
                 continue;
+            }
 
             size_t size = 0;
             uref_sound_size(uref, &size, NULL);
 
             bool drop = false;
-            upipe_dbg_va(upipe, "need %u got %zu", channel_samples, size);
 
             if (size > channel_samples)
                 size = channel_samples;
@@ -797,13 +796,8 @@ static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const 
                     stereo_pair * 2
                 ];
 
-#if 1
                 /* copy the 2 stereo samples */
                 memcpy(dst, &buffers[0][i*2], 2 * sizeof(int32_t));
-#else
-                *dst++ = buffers[0][i*2+0];
-                *dst   = buffers[0][i*2+1];
-#endif
             }
 
             uref_sound_unmap(uref, 0, size, 1);
@@ -813,13 +807,13 @@ static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const 
                 ulist_delete(uchain2);
                 upipe_bmd_sink_sub->nb_urefs--;
                 uref_free(uref);
-                //upipe_dbg_va(upipe, "Now %u urefs", upipe_bmd_sink_sub->nb_urefs);
             } else {
+                uref_clock_set_pts_sys(uref, pts_sys + UCLOCK_FREQ * size / 48000);
                 uref_sound_resize(uref, size, -1);
             }
 
-            //if (!channel_samples)
-            //    break;
+            if (!channel_samples)
+                break;
         }
 
         stereo_pair++;
@@ -973,9 +967,10 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
 
         video_frame->SetAncillaryData(ancillary);
 
-        if( pts > 0 )
-        {
+        if( pts > 0 ) {
+            // FIXME: ntsc lookup table
             const unsigned samples = (uint64_t)48000 * timeValue / timeScale;
+
             int32_t *audio = upipe_bmd_sink_sub_sound_get_samples(
                 &upipe_bmd_sink->upipe, pts, samples);
 
