@@ -244,6 +244,9 @@ struct upipe_bmd_sink_sub {
     /** whether this is an audio pipe */
     bool sound;
 
+    /** position in the SDI stream */
+    uint8_t channel_idx;
+
     /** public upipe structure */
     struct upipe upipe;
 };
@@ -742,7 +745,6 @@ static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const 
         return NULL;
 
     /* interate through input subpipes */
-    uint8_t stereo_pair = 0;
     struct uchain *uchain;
     ulist_foreach(&upipe_bmd_sink->inputs, uchain) {
         struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
@@ -750,12 +752,8 @@ static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const 
         if (!upipe_bmd_sink_sub->sound)
             continue;
 
-        if (stereo_pair >= channels / 2) {
-            upipe_err(upipe, "Too much audio subpipes !!");
-            continue;
-        }
-
         unsigned channel_samples = samples;
+        const uint8_t channel_idx = upipe_bmd_sink_sub->channel_idx;
 
         /* iterate through subpipe queue */
         struct uchain *uchain2, *uchain_tmp;
@@ -791,10 +789,7 @@ static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const 
             }
 
             for (size_t i = 0; i < size; i++) {
-                int32_t *dst = &buf[
-                    (samples - channel_samples + i) * channels +
-                    stereo_pair * 2
-                ];
+                int32_t *dst = &buf[(samples - channel_samples + i) * channels + channel_idx];
 
                 /* copy the 2 stereo samples */
                 memcpy(dst, &buffers[0][i*2], 2 * sizeof(int32_t));
@@ -815,8 +810,6 @@ static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const 
             if (!channel_samples)
                 break;
         }
-
-        stereo_pair++;
     }
 
     return buf;
@@ -1233,6 +1226,10 @@ static struct upipe *upipe_bmd_sink_sub_alloc(struct upipe_mgr *mgr,
 
     upipe_bmd_sink_sub = upipe_bmd_sink_sub_from_upipe(upipe);
     upipe_bmd_sink_sub->sound = true;
+
+    uref_attr_get_small_unsigned(flow_def, &upipe_bmd_sink_sub->channel_idx,
+            UDICT_TYPE_SMALL_UNSIGNED, "channel_idx");
+    // TODO: check range
 
     /* different subpipe type */
     uref_dump(flow_def, uprobe);
