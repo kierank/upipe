@@ -1718,7 +1718,6 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
             *upipe_p =  upipe_bmd_sink_sub_to_upipe(
                             upipe_bmd_sink_to_pic_subpipe(
                                 upipe_bmd_sink_from_upipe(upipe)));
-            upipe_use(*upipe_p);
             return UBASE_ERR_NONE;
         }
         case UPIPE_BMD_SINK_GET_SUBPIC_SUB: {
@@ -1727,14 +1726,12 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
             *upipe_p =  upipe_bmd_sink_sub_to_upipe(
                             upipe_bmd_sink_to_subpic_subpipe(
                                 upipe_bmd_sink_from_upipe(upipe)));
-            upipe_use(*upipe_p);
             return UBASE_ERR_NONE;
         }
         case UPIPE_BMD_SINK_GET_UCLOCK: {
             UBASE_SIGNATURE_CHECK(args, UPIPE_BMD_SINK_SIGNATURE)
             struct uclock **pp_uclock = va_arg(args, struct uclock **);
             *pp_uclock = &bmd_sink->uclock;
-            uclock_use(*pp_uclock);
             return UBASE_ERR_NONE;
         }
         case UPIPE_BMD_SINK_GET_GENLOCK_STATUS: {
