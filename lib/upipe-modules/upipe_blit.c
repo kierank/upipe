@@ -319,7 +319,7 @@ static void upipe_blit_sub_work(struct upipe *upipe, struct uref *uref)
         upipe_err(upipe, "CANT READ DATE");
 
     if (sub->end_date != UINT64_MAX && date > sub->end_date) { // XXX
-        upipe_notice_va(upipe, "Subtitle duration elapsed: pic %"PRIx64" end %"PRIx64,
+        upipe_verbose_va(upipe, "Subtitle duration elapsed: pic %"PRIx64" end %"PRIx64,
             date, sub->end_date);
         ubuf_free(sub->ubuf);
         sub->ubuf = NULL;
@@ -361,8 +361,6 @@ static void upipe_blit_sub_input(struct upipe *upipe, struct uref *uref,
         uref_free(uref);
         return;
     }
-    upipe_warn_va(upipe, "compatible subpicture: %d == %d, %d == %d",
-            hsize, sub->hsize, vsize, sub->vsize);
 
     ubuf_free(sub->ubuf);
     sub->ubuf = uref_detach_ubuf(uref);
@@ -372,7 +370,7 @@ static void upipe_blit_sub_input(struct upipe *upipe, struct uref *uref,
     if (!ubase_check(uref_clock_get_duration(uref, &duration)))
         duration = 0;
 	uref_clock_get_date_prog(uref, &sub->date_prog, &type);
-    upipe_notice_va(upipe, "\t\tDURATION %"PRIu64" PROG TYPE %d = %"PRIx64, duration, type, sub->date_prog);
+    upipe_verbose_va(upipe, "\t\tDURATION %"PRIu64" PROG TYPE %d = %"PRIx64, duration, type, sub->date_prog);
     if (type == UREF_DATE_NONE) {
         sub->date_prog = UINT64_MAX;
         sub->end_date = UINT64_MAX;
@@ -449,15 +447,12 @@ static int upipe_blit_sub_provide_flow_format(struct upipe *upipe)
         struct urational src_sar;
         src_sar.num = src_sar.den = 1;
         uref_pic_flow_get_sar(urequest->uref, &src_sar);
-        upipe_notice_va(upipe, "SRC SAR %d/%d", src_sar.num, src_sar.den);
 
         /* FIXME take into account overscan */
         struct urational src_dar;
         src_dar.num = src_hsize * src_sar.num;
         src_dar.den = src_vsize * src_sar.den;
         urational_simplify(&src_dar);
-        upipe_notice_va(upipe, "SRC DAR %d/%d = %d/%d",
-            src_hsize, src_vsize, src_dar.num, src_dar.den);
 
         struct uref *uref = uref_dup(urequest->uref);
         if (unlikely(uref == NULL)) {
@@ -466,14 +461,10 @@ static int upipe_blit_sub_provide_flow_format(struct upipe *upipe)
         }
 
         struct urational div = urational_divide(&dest_dar, &src_dar);
-        upipe_notice_va(upipe, "DIV (%d/%d) / (%d/%d) = %d/%d",
-            dest_dar.num, dest_dar.den, src_dar.num, src_dar.den, div.num, div.den);
         if (div.num > div.den) {
             /* Destination rectangle larger than source picture */
             sub->hsize = dest_hsize * div.den / div.num;
             sub->hsize -= sub->hsize % hround;
-            upipe_notice_va(upipe, "H %d = %d * %d / %d",
-                sub->hsize, dest_hsize, div.den, div.num);
             assert(sub->hsize <= dest_hsize);
             sub->vsize = dest_vsize;
             loffset += (dest_hsize - sub->hsize) / 2;
@@ -483,8 +474,6 @@ static int upipe_blit_sub_provide_flow_format(struct upipe *upipe)
             sub->hsize = dest_hsize;
             sub->vsize = dest_vsize * div.num / div.den;
             sub->vsize -= sub->vsize % vround;
-            upipe_notice_va(upipe, "V %d = %d * %d / %d",
-                sub->vsize, dest_vsize, div.den, div.num);
             assert(sub->vsize <= dest_vsize);
             toffset += (dest_vsize - sub->vsize) / 2;
             toffset -= toffset % hround;
