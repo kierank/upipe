@@ -707,13 +707,16 @@ static void upipe_bmd_sink_extract_ttx(struct upipe *upipe, IDeckLinkVideoFrameA
 static void upipe_bmd_sink_sub_init(struct upipe *upipe,
         struct upipe_mgr *sub_mgr, struct uprobe *uprobe, bool static_pipe)
 {
+    struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_sub_mgr(sub_mgr);
+
     if (static_pipe) {
         upipe_init(upipe, sub_mgr, uprobe);
-        upipe_mgr_release(sub_mgr); /* do not reference super pipe for static subpipes */
+        /* increment super pipe refcount only when the static pipes are retrieved */
+        upipe_mgr_release(sub_mgr);
+        upipe->refcount = &upipe_bmd_sink->urefcount;
     } else
         upipe_bmd_sink_sub_init_urefcount(upipe);
 
-    struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_sub_mgr(sub_mgr);
     struct upipe_bmd_sink_sub *upipe_bmd_sink_sub = upipe_bmd_sink_sub_from_upipe(upipe);
     upipe_bmd_sink_sub->upipe_bmd_sink = upipe_bmd_sink_to_upipe(upipe_bmd_sink);
 
@@ -1714,6 +1717,7 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
             *upipe_p =  upipe_bmd_sink_sub_to_upipe(
                             upipe_bmd_sink_to_pic_subpipe(
                                 upipe_bmd_sink_from_upipe(upipe)));
+            upipe_use(*upipe_p);
             return UBASE_ERR_NONE;
         }
         case UPIPE_BMD_SINK_GET_SUBPIC_SUB: {
@@ -1722,6 +1726,7 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
             *upipe_p =  upipe_bmd_sink_sub_to_upipe(
                             upipe_bmd_sink_to_subpic_subpipe(
                                 upipe_bmd_sink_from_upipe(upipe)));
+            upipe_use(*upipe_p);
             return UBASE_ERR_NONE;
         }
         case UPIPE_BMD_SINK_GET_UCLOCK: {
