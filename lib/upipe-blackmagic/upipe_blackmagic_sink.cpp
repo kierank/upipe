@@ -1396,6 +1396,7 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
 
     upipe_bmd_sink->pts_offset = 0;
     upipe_bmd_sink->offset = 0;
+    upipe_bmd_sink->uclock.refcount = upipe->refcount;
     upipe_bmd_sink->uclock.uclock_now = uclock_bmd_sink_now;
 
     upipe_throw_ready(upipe);
@@ -1733,6 +1734,7 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
             UBASE_SIGNATURE_CHECK(args, UPIPE_BMD_SINK_SIGNATURE)
             struct uclock **pp_uclock = va_arg(args, struct uclock **);
             *pp_uclock = &bmd_sink->uclock;
+            uclock_use(*pp_uclock);
             return UBASE_ERR_NONE;
         }
         case UPIPE_BMD_SINK_GET_GENLOCK_STATUS: {
