@@ -279,6 +279,9 @@ struct upipe_bmd_sink {
     /** output mode **/
     BMDDisplayMode mode;
 
+    /** video frame index (modulo 5) */
+    uint8_t frame_idx;
+
     /** started flag **/
     int started;
 
@@ -833,6 +836,35 @@ static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const 
     return buf;
 }
 
+static inline unsigned audio_samples_count(struct upipe_bmd_sink *upipe_bmd_sink,
+        BMDTimeValue timeValue, BMDTimeScale timeScale)
+{
+    const unsigned samples = (uint64_t)48000 * timeValue / timeScale;
+
+    /* fixed number of samples for 48kHz */
+    if (timeValue != 1001 || timeScale == 24000)
+        return samples;
+
+    if (unlikely(timeScale != 30000 && timeScale != 60000)) {
+        upipe_err_va(&upipe_bmd_sink->upipe,
+                "Unsupported rate %"PRIu64"/%"PRIu64, timeScale, timeValue);
+        return samples;
+    }
+
+    /* cyclic loop of 5 different sample counts */
+    if (++upipe_bmd_sink->frame_idx == 5)
+        upipe_bmd_sink->frame_idx = 0;
+
+    static const uint8_t samples_increment[2][5] = {
+        { 1, 0, 1, 0, 1 }, /* 30000 / 1001 */
+        { 1, 1, 1, 1, 0 }  /* 60000 / 1001 */
+    };
+
+    bool rate5994 = !!(timeScale == 60000);
+
+    return samples + samples_increment[rate5994][upipe_bmd_sink->frame_idx];
+}
+
 /** @internal @This handles input uref.
  *
  * @param upipe description structure of the pipe
@@ -979,8 +1011,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         video_frame->SetAncillaryData(ancillary);
 
         if( pts > 0 ) {
-            // FIXME: ntsc lookup table
-            const unsigned samples = (uint64_t)48000 * timeValue / timeScale;
+            const unsigned samples = audio_samples_count(upipe_bmd_sink, timeValue, timeScale);
 
             int32_t *audio = upipe_bmd_sink_sub_sound_get_samples(
                 &upipe_bmd_sink->upipe, pts, samples);
@@ -1176,6 +1207,7 @@ static int upipe_bmd_sink_sub_set_flow_def(struct upipe *upipe,
             uref_dump(flow_def, upipe->uprobe);
             return UBASE_ERR_EXTERNAL;
         }
+        upipe_bmd_sink->frame_idx = 0;
     }
 
     flow_def = uref_dup(flow_def);
