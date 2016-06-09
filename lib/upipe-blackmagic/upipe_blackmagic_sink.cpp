@@ -777,7 +777,7 @@ static void copy_samples(int32_t *out, uint8_t idx, struct uref *uref, uint64_t 
     const int32_t *in;
     uref_sound_read_int32_t(uref, 0, -1, &in, 1);
     for (int i = 0; i < samples; i++)
-        memcpy(&out[8 * (offset + i) + idx], &in[2*i], 2 * sizeof(int32_t));
+        memcpy(&out[DECKLINK_CHANNELS * (offset + i) + idx], &in[2*i], 2 * sizeof(int32_t));
 
     uref_sound_unmap(uref, 0, -1, 1);
 }
