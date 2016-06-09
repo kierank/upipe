@@ -782,6 +782,11 @@ static void copy_samples(int32_t *out, uint8_t idx, struct uref *uref, uint64_t 
     uref_sound_unmap(uref, 0, -1, 1);
 }
 
+static inline uint64_t length_to_samples(const uint64_t length)
+{
+    return (length * 48000 + UCLOCK_FREQ - 1) / UCLOCK_FREQ;
+}
+
 /** @internal @This fills the audio samples for one single stereo pair
  */
 static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
@@ -842,6 +847,29 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
             return;
         }
 
+        /* drop beginning of uref ? */
+        if (unlikely(pts < video_pts)) {
+            uint64_t drop_duration = video_pts - pts;
+            if (drift_rate.den && drift_rate.num) {
+                drop_duration *= drift_rate.num;
+                drop_duration /= drift_rate.den;
+            }
+
+            size_t drop_samples = length_to_samples(drop_duration);
+
+            upipe_verbose_va(upipe, "uref pts %"PRIu64", dropping %zu samples",
+                pts, drop_samples);
+
+            /* resize buffer */
+            uref_sound_resize(uref, drop_samples, -1);
+
+            pts = video_pts;
+            duration -= drop_duration;
+            size -= drop_samples;
+
+            uref_clock_set_pts_sys(uref, pts);
+        }
+
         /* we'll drop uref if we exhaust it */
         drop = size <= channel_samples;
 
@@ -861,7 +889,6 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
             /* we did not exhaust this uref, resize it and we're done */
             uref_clock_set_pts_sys(uref, pts + UCLOCK_FREQ * size / 48000);
             uref_sound_resize(uref, size, -1);
-            // TODO : duration
             return;
         }
 
