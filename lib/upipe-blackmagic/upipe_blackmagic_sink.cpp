@@ -762,14 +762,81 @@ static void upipe_bmd_sink_sub_write_watcher(struct upump *upump)
     upipe_bmd_sink_sub_unblock_input(upipe);
 }
 
+/** @internal @This fills the audio samples for one single stereo pair
+ */
+static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
+        const uint64_t pts, const unsigned samples,
+        struct upipe_bmd_sink_sub *upipe_bmd_sink_sub)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
+
+    const uint8_t channel_idx = upipe_bmd_sink_sub->channel_idx;
+    int32_t *buf = upipe_bmd_sink->pic_subpipe.audio_buf;
+
+    unsigned channel_samples = samples;
+
+    /* iterate through subpipe queue */
+    struct uchain *uchain2, *uchain_tmp;
+    ulist_delete_foreach(&upipe_bmd_sink_sub->urefs, uchain2, uchain_tmp) {
+        struct uref *uref = uref_from_uchain(uchain2);
+
+        uint64_t pts_sys = UINT64_MAX;
+        uref_clock_get_pts_sys(uref, &pts_sys);
+
+        if (pts_sys < pts) {
+            ulist_delete(uchain2);
+            upipe_bmd_sink_sub->nb_urefs--;
+            uref_free(uref);
+            continue;
+        }
+
+        size_t size = 0;
+        uref_sound_size(uref, &size, NULL);
+
+        bool drop = false;
+
+        if (size > channel_samples)
+            size = channel_samples;
+        else if (size == channel_samples)
+            drop = true;
+
+        const int32_t *buffers[1];
+        if (!ubase_check(uref_sound_read_int32_t(uref, 0, size, buffers, 1))) {
+            upipe_err(upipe, "Could not read channel");
+        }
+
+        for (size_t i = 0; i < size; i++) {
+            int32_t *dst = &buf[(samples - channel_samples + i) * DECKLINK_CHANNELS + channel_idx];
+
+            /* copy the 2 stereo samples */
+            memcpy(dst, &buffers[0][i*2], 2 * sizeof(int32_t));
+        }
+
+        uref_sound_unmap(uref, 0, size, 1);
+        channel_samples -= size;
+
+        if (channel_samples || drop) {
+            ulist_delete(uchain2);
+            upipe_bmd_sink_sub->nb_urefs--;
+            uref_free(uref);
+        } else {
+            uref_clock_set_pts_sys(uref, pts_sys + UCLOCK_FREQ * size / 48000);
+            uref_sound_resize(uref, size, -1);
+        }
+
+        if (!channel_samples)
+            return;
+    }
+}
+
+/** @internal @This fills one video frame worth of audio samples
+ */
 static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const uint64_t pts, const unsigned samples)
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
 
-    const uint8_t channels = DECKLINK_CHANNELS;
-
     int32_t *buf = upipe_bmd_sink->pic_subpipe.audio_buf;
-    memset(buf, 0, samples * channels * sizeof(int32_t));
+    memset(buf, 0, samples * DECKLINK_CHANNELS * sizeof(int32_t));
 
     /* interate through input subpipes */
     struct uchain *uchain;
@@ -779,61 +846,7 @@ static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const 
         if (!upipe_bmd_sink_sub->sound)
             continue;
 
-        unsigned channel_samples = samples;
-        const uint8_t channel_idx = upipe_bmd_sink_sub->channel_idx;
-
-        /* iterate through subpipe queue */
-        struct uchain *uchain2, *uchain_tmp;
-        ulist_delete_foreach(&upipe_bmd_sink_sub->urefs, uchain2, uchain_tmp) {
-            struct uref *uref = uref_from_uchain(uchain2);
-
-            uint64_t pts_sys = UINT64_MAX;
-            uref_clock_get_pts_sys(uref, &pts_sys);
-
-            if (pts_sys < pts) {
-                ulist_delete(uchain2);
-                upipe_bmd_sink_sub->nb_urefs--;
-                uref_free(uref);
-                continue;
-            }
-
-            size_t size = 0;
-            uref_sound_size(uref, &size, NULL);
-
-            bool drop = false;
-
-            if (size > channel_samples)
-                size = channel_samples;
-            else if (size == channel_samples)
-                drop = true;
-
-            const int32_t *buffers[1];
-            if (!ubase_check(uref_sound_read_int32_t(uref, 0, size, buffers, 1))) {
-                upipe_err(upipe, "Could not read channel");
-            }
-
-            for (size_t i = 0; i < size; i++) {
-                int32_t *dst = &buf[(samples - channel_samples + i) * channels + channel_idx];
-
-                /* copy the 2 stereo samples */
-                memcpy(dst, &buffers[0][i*2], 2 * sizeof(int32_t));
-            }
-
-            uref_sound_unmap(uref, 0, size, 1);
-            channel_samples -= size;
-
-            if (channel_samples || drop) {
-                ulist_delete(uchain2);
-                upipe_bmd_sink_sub->nb_urefs--;
-                uref_free(uref);
-            } else {
-                uref_clock_set_pts_sys(uref, pts_sys + UCLOCK_FREQ * size / 48000);
-                uref_sound_resize(uref, size, -1);
-            }
-
-            if (!channel_samples)
-                break;
-        }
+        upipe_bmd_sink_sub_sound_get_samples_channel(upipe, pts, samples, upipe_bmd_sink_sub);
     }
 
     return buf;
