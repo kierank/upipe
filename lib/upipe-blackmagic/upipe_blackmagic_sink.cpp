@@ -763,11 +763,8 @@ static void upipe_bmd_sink_sub_write_watcher(struct upump *upump)
 }
 
 static int upipe_bmd_sink_sub_read_uref_attributes(struct uref *uref,
-    uint64_t *duration, uint64_t *pts_sys, struct urational *drift_rate,
-    size_t *size)
+    uint64_t *pts_sys, struct urational *drift_rate, size_t *size)
 {
-    // XXX use # of samples / samplerate, rather than uref duration
-    UBASE_RETURN(uref_clock_get_duration(uref, duration));
     UBASE_RETURN(uref_clock_get_pts_sys(uref, pts_sys));
     UBASE_RETURN(uref_clock_get_rate(uref, drift_rate));
     UBASE_RETURN(uref_sound_size(uref, size, NULL));
@@ -793,39 +790,61 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
 
+    /* the number of samples we want to fill */
     unsigned channel_samples = samples;
 
-    /* iterate through subpipe queue */
-    struct uchain *uchain2, *uchain_tmp;
-    ulist_delete_foreach(&upipe_bmd_sink_sub->urefs, uchain2, uchain_tmp) {
-        struct uref *uref = uref_from_uchain(uchain2);
+    /* the exact duration we want to fill */
+    uint64_t channel_duration = samples * UCLOCK_FREQ / 48000;
 
-        const int32_t *buffers[1];
-        bool drop;
-        size_t size = 0;
-        struct urational drift_rate = { 0, 0 };
-        uint64_t pts_sys = UINT64_MAX, duration = UINT64_MAX;
-        
+    /* iterate through subpipe queue */
+    struct uchain *uchain, *uchain_tmp;
+    ulist_delete_foreach(&upipe_bmd_sink_sub->urefs, uchain, uchain_tmp) {
+        struct uref *uref = uref_from_uchain(uchain);
+
+        bool drop;                              /* whether to release uref */
+        size_t size = 0;                        /* number of samples */
+        struct urational drift_rate = { 0, 0 }; /* playing rate */
+        uint64_t duration;                      /* uref real duration */
+        uint64_t pts_sys = UINT64_MAX;          /* presentation timestamp */
+
+        /* read uref attributes */
         if (!ubase_check(upipe_bmd_sink_sub_read_uref_attributes(uref,
-            &duration, &pts_sys, &drift_rate, &size))) {
+            &pts_sys, &drift_rate, &size))) {
             upipe_err(upipe, "Could not read uref attributes");
             goto drop_uref;
         }
 
+        /* samples / sample rate = duration */
+        duration = size * UCLOCK_FREQ / 48000;
+
+        /* multiply uref duration by its playing rate to get its real duration */
+        if (drift_rate.den && drift_rate.num) {
+            duration *= drift_rate.num;
+            duration /= drift_rate.den;
+        }
+
+        upipe_verbose_va(upipe,
+                "uref pts %"PRIu64" duration %"PRIu64, pts_sys, duration);
+
+        /* too far in the past ? */
         if (pts_sys + duration < pts) {
             upipe_err(upipe, "uref too early, dropping");
             goto drop_uref;
         }
 
+        /* we'll drop uref if we exhaust it */
         drop = size <= channel_samples;
 
+        /* if the uref is too big, read it partially */
         if (size > channel_samples)
             size = channel_samples;
 
+        /* read the samples into our final buffer */
         copy_samples(upipe_bmd_sink->pic_subpipe.audio_buf, 
                 upipe_bmd_sink_sub->channel_idx, uref,
                 samples - channel_samples, size);
 
+        /* account for the samples we just read */
         channel_samples -= size;
 
         if (!drop) {
@@ -837,11 +856,12 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         }
 
 drop_uref:
-        ulist_delete(uchain2);
+        ulist_delete(uchain);
         upipe_bmd_sink_sub->nb_urefs--;
         uref_free(uref);
 
-        if (!channel_samples) /* done */
+        /* no more samples to read */
+        if (!channel_samples)
             return;
     }
 }
