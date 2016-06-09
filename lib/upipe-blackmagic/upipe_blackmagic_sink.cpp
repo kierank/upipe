@@ -903,8 +903,8 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
         if (uref_samples) {
             /* we did not exhaust this uref, resize it and we're done */
-            uref_clock_set_pts_sys(uref, pts + UCLOCK_FREQ * uref_samples / 48000);
-            uref_sound_resize(uref, uref_samples, -1);
+            uref_clock_set_pts_sys(uref, pts + UCLOCK_FREQ * missing_samples / 48000);
+            uref_sound_resize(uref, missing_samples, -1);
             assert(end_offset == samples);
             break;
         }
