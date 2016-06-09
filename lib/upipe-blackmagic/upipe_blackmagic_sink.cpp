@@ -775,6 +775,16 @@ static int upipe_bmd_sink_sub_read_uref_attributes(struct uref *uref,
     return UBASE_ERR_NONE;
 }
 
+static void copy_samples(int32_t *out, uint8_t idx, struct uref *uref, uint64_t offset, uint64_t samples)
+{
+    const int32_t *in;
+    uref_sound_read_int32_t(uref, 0, -1, &in, 1);
+    for (int i = 0; i < samples; i++)
+        memcpy(&out[8 * (offset + i) + idx], &in[2*i], 2 * sizeof(int32_t));
+
+    uref_sound_unmap(uref, 0, -1, 1);
+}
+
 /** @internal @This fills the audio samples for one single stereo pair
  */
 static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
@@ -782,9 +792,6 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         struct upipe_bmd_sink_sub *upipe_bmd_sink_sub)
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
-
-    const uint8_t channel_idx = upipe_bmd_sink_sub->channel_idx;
-    int32_t *buf = upipe_bmd_sink->pic_subpipe.audio_buf;
 
     unsigned channel_samples = samples;
 
@@ -815,19 +822,10 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         if (size > channel_samples)
             size = channel_samples;
 
-        if (!ubase_check(uref_sound_read_int32_t(uref, 0, size, buffers, 1))) {
-            upipe_err(upipe, "Could not read channel");
-            goto drop_uref;
-        }
+        copy_samples(upipe_bmd_sink->pic_subpipe.audio_buf, 
+                upipe_bmd_sink_sub->channel_idx, uref,
+                samples - channel_samples, size);
 
-        for (size_t i = 0; i < size; i++) {
-            int32_t *dst = &buf[(samples - channel_samples + i) * DECKLINK_CHANNELS + channel_idx];
-
-            /* copy the 2 stereo samples */
-            memcpy(dst, &buffers[0][i*2], 2 * sizeof(int32_t));
-        }
-
-        uref_sound_unmap(uref, 0, size, 1);
         channel_samples -= size;
 
         if (!drop) {
