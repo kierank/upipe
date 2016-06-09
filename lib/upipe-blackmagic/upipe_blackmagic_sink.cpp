@@ -785,7 +785,7 @@ static void copy_samples(int32_t *out, uint8_t idx, struct uref *uref, uint64_t 
 /** @internal @This fills the audio samples for one single stereo pair
  */
 static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
-        const uint64_t pts, const unsigned samples,
+        const uint64_t video_pts, const unsigned samples,
         struct upipe_bmd_sink_sub *upipe_bmd_sink_sub)
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
@@ -794,7 +794,10 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
     unsigned channel_samples = samples;
 
     /* the exact duration we want to fill */
-    uint64_t channel_duration = samples * UCLOCK_FREQ / 48000;
+    const uint64_t channel_duration = samples * UCLOCK_FREQ / 48000;
+
+    /* timestamp of next video frame */
+    const uint64_t last_pts = video_pts + channel_duration;
 
     /* iterate through subpipe queue */
     struct uchain *uchain, *uchain_tmp;
@@ -806,7 +809,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         struct urational drift_rate = { 0, 0 }; /* playing rate */
         uint64_t duration;                      /* uref real duration */
         uint64_t pts = UINT64_MAX;              /* presentation timestamp */
-        uint64_t last_pts;                      /* pts + duration */
+
 
         /* read uref attributes */
         if (!ubase_check(upipe_bmd_sink_sub_read_uref_attributes(uref,
@@ -824,13 +827,11 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
             duration /= drift_rate.den;
         }
 
-        last_pts = pts + duration;
-
         upipe_verbose_va(upipe,
                 "uref pts %"PRIu64" duration %"PRIu64, pts, duration);
 
         /* too far in the past ? */
-        if (unlikely(pts + duration < pts)) {
+        if (unlikely(pts + duration < video_pts)) {
             upipe_err(upipe, "uref too late, dropping");
             goto drop_uref;
         }
@@ -877,7 +878,8 @@ drop_uref:
 
 /** @internal @This fills one video frame worth of audio samples
  */
-static void upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const uint64_t pts, const unsigned samples)
+static void upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe,
+        const uint64_t video_pts, const unsigned samples)
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
 
@@ -892,7 +894,7 @@ static void upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const uint
             upipe_bmd_sink_sub_from_uchain(uchain);
 
         if (upipe_bmd_sink_sub->sound)
-            upipe_bmd_sink_sub_sound_get_samples_channel(upipe, pts, samples, upipe_bmd_sink_sub);
+            upipe_bmd_sink_sub_sound_get_samples_channel(upipe, video_pts, samples, upipe_bmd_sink_sub);
     }
 }
 
