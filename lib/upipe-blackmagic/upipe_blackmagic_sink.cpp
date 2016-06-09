@@ -835,6 +835,7 @@ static void upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const uint
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
 
+    /* Clear buffer */
     memset(upipe_bmd_sink->pic_subpipe.audio_buf, 0,
             samples * DECKLINK_CHANNELS * sizeof(int32_t));
 
@@ -843,10 +844,9 @@ static void upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const uint
     ulist_foreach(&upipe_bmd_sink->inputs, uchain) {
         struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
             upipe_bmd_sink_sub_from_uchain(uchain);
-        if (!upipe_bmd_sink_sub->sound)
-            continue;
 
-        upipe_bmd_sink_sub_sound_get_samples_channel(upipe, pts, samples, upipe_bmd_sink_sub);
+        if (upipe_bmd_sink_sub->sound)
+            upipe_bmd_sink_sub_sound_get_samples_channel(upipe, pts, samples, upipe_bmd_sink_sub);
     }
 }
 
