@@ -763,11 +763,11 @@ static void upipe_bmd_sink_sub_write_watcher(struct upump *upump)
 }
 
 static int upipe_bmd_sink_sub_read_uref_attributes(struct uref *uref,
-    uint64_t *pts_sys, struct urational *drift_rate, size_t *size)
+    uint64_t *pts, struct urational *drift_rate, size_t *size)
 {
-    UBASE_RETURN(uref_clock_get_pts_sys(uref, pts_sys));
+    UBASE_RETURN(uref_clock_get_pts_sys(uref, pts));
     UBASE_RETURN(uref_clock_get_rate(uref, drift_rate));
-    UBASE_RETURN(uref_sound_size(uref, size, NULL));
+    UBASE_RETURN(uref_sound_size(uref, size, NULL /* sample_size */));
 
     return UBASE_ERR_NONE;
 }
@@ -805,11 +805,12 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         size_t size = 0;                        /* number of samples */
         struct urational drift_rate = { 0, 0 }; /* playing rate */
         uint64_t duration;                      /* uref real duration */
-        uint64_t pts_sys = UINT64_MAX;          /* presentation timestamp */
+        uint64_t pts = UINT64_MAX;              /* presentation timestamp */
+        uint64_t last_pts;                      /* pts + duration */
 
         /* read uref attributes */
         if (!ubase_check(upipe_bmd_sink_sub_read_uref_attributes(uref,
-            &pts_sys, &drift_rate, &size))) {
+            &pts, &drift_rate, &size))) {
             upipe_err(upipe, "Could not read uref attributes");
             goto drop_uref;
         }
@@ -823,13 +824,21 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
             duration /= drift_rate.den;
         }
 
+        last_pts = pts + duration;
+
         upipe_verbose_va(upipe,
-                "uref pts %"PRIu64" duration %"PRIu64, pts_sys, duration);
+                "uref pts %"PRIu64" duration %"PRIu64, pts, duration);
 
         /* too far in the past ? */
-        if (pts_sys + duration < pts) {
-            upipe_err(upipe, "uref too early, dropping");
+        if (unlikely(pts + duration < pts)) {
+            upipe_err(upipe, "uref too late, dropping");
             goto drop_uref;
+        }
+
+        /* too far in the future ? */
+        if (unlikely(pts > last_pts)) {
+            upipe_err(upipe, "uref too early");
+            return;
         }
 
         /* we'll drop uref if we exhaust it */
@@ -849,7 +858,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
         if (!drop) {
             /* we did not exhaust this uref, resize it and we're done */
-            uref_clock_set_pts_sys(uref, pts_sys + UCLOCK_FREQ * size / 48000);
+            uref_clock_set_pts_sys(uref, pts + UCLOCK_FREQ * size / 48000);
             uref_sound_resize(uref, size, -1);
             // TODO : duration
             return;
