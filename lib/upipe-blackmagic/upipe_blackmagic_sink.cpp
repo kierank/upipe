@@ -831,12 +831,12 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
 /** @internal @This fills one video frame worth of audio samples
  */
-static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const uint64_t pts, const unsigned samples)
+static void upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const uint64_t pts, const unsigned samples)
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
 
-    int32_t *buf = upipe_bmd_sink->pic_subpipe.audio_buf;
-    memset(buf, 0, samples * DECKLINK_CHANNELS * sizeof(int32_t));
+    memset(upipe_bmd_sink->pic_subpipe.audio_buf, 0,
+            samples * DECKLINK_CHANNELS * sizeof(int32_t));
 
     /* interate through input subpipes */
     struct uchain *uchain;
@@ -848,8 +848,6 @@ static int32_t *upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe, const 
 
         upipe_bmd_sink_sub_sound_get_samples_channel(upipe, pts, samples, upipe_bmd_sink_sub);
     }
-
-    return buf;
 }
 
 static inline unsigned audio_samples_count(struct upipe_bmd_sink *upipe_bmd_sink,
@@ -1028,29 +1026,26 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
 
         if( pts > 0 ) {
             const unsigned samples = audio_samples_count(upipe_bmd_sink, timeValue, timeScale);
+            upipe_bmd_sink_sub_sound_get_samples(&upipe_bmd_sink->upipe, pts, samples);
 
-            int32_t *audio = upipe_bmd_sink_sub_sound_get_samples(
-                &upipe_bmd_sink->upipe, pts, samples);
+            uint32_t written;
+            result = upipe_bmd_sink->deckLinkOutput->ScheduleAudioSamples(
+                    upipe_bmd_sink->pic_subpipe.audio_buf, samples, pts,
+                    UCLOCK_FREQ, &written);
+            if( result != S_OK )
+                upipe_err_va(upipe, "DROPPED AUDIO");
 
-            if (audio) {
-                uint32_t written;
-                result = upipe_bmd_sink->deckLinkOutput->ScheduleAudioSamples(audio, samples, pts, UCLOCK_FREQ, &written);
-                if( result != S_OK )
-                    upipe_err_va(upipe, "DROPPED AUDIO");
+            uint32_t buffered;
+            upipe_bmd_sink->deckLinkOutput->GetBufferedAudioSampleFrameCount(&buffered);
 
-                uint32_t buffered;
-                upipe_bmd_sink->deckLinkOutput->GetBufferedAudioSampleFrameCount(&buffered);
-
-                if (buffered == 0) {
-                    /* TODO: get notified as soon as audio buffers empty */
-                    upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
-                    upipe_bmd_sink->started = 0;
-                }
-                if (written != samples)
-                    upipe_dbg_va(upipe, "written %u/%u", written, samples);
-                upipe_dbg_va(upipe, "buffered samples: %u", buffered );
-            } else
-                upipe_err(upipe, "NO AUDIO SAMPLES!");
+            if (buffered == 0) {
+                /* TODO: get notified as soon as audio buffers empty */
+                upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
+                upipe_bmd_sink->started = 0;
+            }
+            if (written != samples)
+                upipe_dbg_va(upipe, "written %u/%u", written, samples);
+            upipe_dbg_va(upipe, "buffered samples: %u", buffered );
 
             result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
             if( result != S_OK )
