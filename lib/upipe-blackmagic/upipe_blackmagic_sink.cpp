@@ -795,14 +795,14 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
 
-    /* the number of samples we want to fill */
-    unsigned channel_samples = samples;
-
     /* the exact duration we want to fill */
     const uint64_t channel_duration = samples * UCLOCK_FREQ / 48000;
 
     /* timestamp of next video frame */
     const uint64_t last_pts = video_pts + channel_duration;
+
+    uint64_t start_offset = UINT64_MAX;
+    uint64_t end_offset = 0;
 
     /* iterate through subpipe queue */
     struct uchain *uchain, *uchain_tmp;
@@ -810,21 +810,22 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         struct uref *uref = uref_from_uchain(uchain);
 
         bool drop;                              /* whether to release uref */
-        size_t size = 0;                        /* number of samples */
+        size_t uref_samples = 0;                /* samples in the uref */
         struct urational drift_rate = { 0, 0 }; /* playing rate */
         uint64_t duration;                      /* uref real duration */
         uint64_t pts = UINT64_MAX;              /* presentation timestamp */
-
+        uint64_t samples_offset;                /* samples already written */
+        uint64_t missing_samples;               /* samples yet to be read */
 
         /* read uref attributes */
         if (!ubase_check(upipe_bmd_sink_sub_read_uref_attributes(uref,
-            &pts, &drift_rate, &size))) {
+            &pts, &drift_rate, &uref_samples))) {
             upipe_err(upipe, "Could not read uref attributes");
             goto drop_uref;
         }
 
         /* samples / sample rate = duration */
-        duration = size * UCLOCK_FREQ / 48000;
+        duration = uref_samples * UCLOCK_FREQ / 48000;
 
         /* multiply uref duration by its playing rate to get its real duration */
         if (drift_rate.den && drift_rate.num) {
@@ -865,31 +866,47 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
             pts = video_pts;
             duration -= drop_duration;
-            size -= drop_samples;
+            uref_samples -= drop_samples;
 
             uref_clock_set_pts_sys(uref, pts);
         }
 
-        /* we'll drop uref if we exhaust it */
-        drop = size <= channel_samples;
+        /* at which position in the buffer do we start writing */
+        samples_offset = length_to_samples(pts - video_pts);
+        if (samples_offset > samples - 1)
+            samples_offset = samples - 1;
 
-        /* if the uref is too big, read it partially */
-        if (size > channel_samples)
-            size = channel_samples;
+        /* */
+        if (start_offset > samples_offset)
+            start_offset = samples_offset;
+
+        /* how many samples we still want to read */
+        missing_samples = length_to_samples(last_pts - pts);
+        if (missing_samples > samples - samples_offset)
+            missing_samples = samples - samples_offset;
+
+        /* is our uref too small ? */
+        if (missing_samples > uref_samples)
+            missing_samples = uref_samples;
 
         /* read the samples into our final buffer */
         copy_samples(upipe_bmd_sink->pic_subpipe.audio_buf, 
                 upipe_bmd_sink_sub->channel_idx, uref,
-                samples - channel_samples, size);
+                samples_offset, missing_samples);
+
+        /* */
+        if (end_offset < samples_offset + missing_samples)
+            end_offset = samples_offset + missing_samples;
 
         /* account for the samples we just read */
-        channel_samples -= size;
+        uref_samples -= missing_samples;
 
-        if (!drop) {
+        if (uref_samples) {
             /* we did not exhaust this uref, resize it and we're done */
-            uref_clock_set_pts_sys(uref, pts + UCLOCK_FREQ * size / 48000);
-            uref_sound_resize(uref, size, -1);
-            return;
+            uref_clock_set_pts_sys(uref, pts + UCLOCK_FREQ * uref_samples / 48000);
+            uref_sound_resize(uref, uref_samples, -1);
+            assert(end_offset == samples);
+            break;
         }
 
 drop_uref:
@@ -897,9 +914,16 @@ drop_uref:
         upipe_bmd_sink_sub->nb_urefs--;
         uref_free(uref);
 
-        /* no more samples to read */
-        if (!channel_samples)
-            return;
+        if (end_offset == samples)
+            break;
+    }
+
+    if (start_offset > 0) {
+        // TODO : fix hole
+    }
+
+    if (end_offset < samples) {
+        // TODO : fix hole
     }
 }
 
