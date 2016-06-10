@@ -866,7 +866,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         /* too far in the future ? */
         if (unlikely(pts > last_pts)) {
             upipe_err(upipe, "uref too early");
-            return;
+            break;
         }
 
         /* drop beginning of uref ? */
@@ -943,7 +943,10 @@ drop_uref:
     }
 
     if (start_offset == UINT64_MAX) {
-        assert(upipe_bmd_sink_sub->nb_urefs == 0);
+        //assert(upipe_bmd_sink_sub->nb_urefs == 0);
+        if (upipe_bmd_sink_sub->nb_urefs != 0)
+            upipe_err_va(upipe, "COULD NOT START DESPITE %u buffered urefs",
+                    upipe_bmd_sink_sub->nb_urefs);
         upipe_err_va(upipe, "IDX %hu NO BUFFERS for vid PTS %f",
                 upipe_bmd_sink_sub->channel_idx /2,
                 pts_to_time(video_pts)
@@ -959,7 +962,10 @@ drop_uref:
     }
 
     if (end_offset < samples) {
-        assert(upipe_bmd_sink_sub->nb_urefs == 0);
+        if (upipe_bmd_sink_sub->nb_urefs != 0)
+            upipe_err_va(upipe, "COULD NOT END DESPITE %u buffered urefs",
+                    upipe_bmd_sink_sub->nb_urefs);
+        //assert(upipe_bmd_sink_sub->nb_urefs == 0);
         upipe_err_va(upipe, "IDX %hu End offset %"PRIu64" last pts %f",
                 upipe_bmd_sink_sub->channel_idx /2,
                 end_offset, pts_to_time(last_pts));
@@ -1036,6 +1042,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
     if (unlikely(ubase_check(uref_flow_get_def(uref, &def)))) {
         upipe_bmd_sink_sub->latency = 0;
         uref_clock_get_latency(uref, &upipe_bmd_sink_sub->latency);
+        printf("LATENCY %zu\n", upipe_bmd_sink_sub->latency);
 
         upipe_bmd_sink_sub_check_upump_mgr(upipe);
 
