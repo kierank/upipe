@@ -1027,9 +1027,6 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
     struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
         upipe_bmd_sink_sub_from_upipe(upipe);
 
-    HRESULT result;
-    IDeckLinkVideoFrameAncillary *ancillary = NULL;
-
     const char *def;
     if (unlikely(ubase_check(uref_flow_get_def(uref, &def)))) {
         upipe_bmd_sink_sub->latency = 0;
@@ -1040,6 +1037,9 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         uref_free(uref);
         return true;
     }
+
+    if (upipe_bmd_sink_sub->sound)
+        return false;
 
     if (upipe_bmd_sink_sub == &upipe_bmd_sink->subpic_subpipe) {
         ulist_add(&upipe_bmd_sink->subpic_queue, uref_to_uchain(uref));
@@ -1074,127 +1074,124 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         }
     }
 
-    if (upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe) {
-        int w = upipe_bmd_sink->displayMode->GetWidth();
-        int h = upipe_bmd_sink->displayMode->GetHeight();
-        int sd = upipe_bmd_sink->mode == bmdModePAL || upipe_bmd_sink->mode == bmdModeNTSC;
-        int ttx = upipe_bmd_sink->mode == bmdModePAL || upipe_bmd_sink->mode == bmdModeHD1080i50;
-        const uint8_t *pic_data = NULL;
-        size_t pic_data_size = 0;
-
-        if(!upipe_bmd_sink->started && pts > 0) {
-            upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(pts, UCLOCK_FREQ, 1.0);
-            upipe_bmd_sink->started = 1;
-        }
-
-        const char *v210 = "u10y10v10y10u10y10v10y10u10y10v10y10";
-        size_t stride;
-        const uint8_t *plane;
-        if (unlikely(!ubase_check(uref_pic_plane_size(uref, v210, &stride,
-                                          NULL, NULL, NULL)) ||
-                     !ubase_check(uref_pic_plane_read(uref, v210, 0, 0, -1, -1,
-                                          &plane)))) {
-            upipe_err_va(upipe, "Could not read v210 plane");
-            return NULL;
-        }
-
-        upipe_bmd_sink_frame *video_frame = new upipe_bmd_sink_frame(uref, (void*)plane,
-                                                                     w, h);
-        if (!video_frame) {
-            uref_free(uref);
-            return true;
-        }
-
-        BMDTimeValue timeValue;
-        BMDTimeScale timeScale;
-        upipe_bmd_sink->displayMode->GetFrameRate(&timeValue, &timeScale);
-
-        upipe_bmd_sink->deckLinkOutput->CreateAncillaryData(video_frame->GetPixelFormat(), &ancillary);
-
-        uref_pic_get_cea_708(uref, &pic_data, &pic_data_size);
-        if( pic_data_size > 0 )
-        {
-            void *vanc;
-            ancillary->GetBufferForVerticalBlankingLine(CC_LINE, &vanc);
-            upipe_bmd_sink_clear_vanc(upipe_bmd_sink->vanc_tmp[0]);
-            upipe_bmd_sink_start_anc(upipe, upipe_bmd_sink->vanc_tmp[0], 0, 0x61, 0x1);
-            upipe_bmd_sink_write_cdp(upipe, pic_data, pic_data_size, &upipe_bmd_sink->vanc_tmp[0][ANC_START_LEN]);
-            upipe_bmd_sink_calc_parity_checksum(upipe, 0);
-
-            upipe_bmd_sink_encode_v210(upipe, (uint32_t*)vanc, 0, sd);
-        }
-
-        /* Loop through subpic data */
-        //printf("\n subpic depth %i \n", ulist_depth(&upipe_bmd_sink->subpic_queue));
-        struct uchain *uchain, *uchain_tmp;
-        ulist_delete_foreach(&upipe_bmd_sink->subpic_queue, uchain, uchain_tmp) {
-            //printf("\n VIDEO PTS %"PRIu64" \n", pts );
-            struct uref *uref = uref_from_uchain(uchain);
-            uint64_t subpic_pts = 0;
-            uref_clock_get_pts_sys(uref, &subpic_pts);
-            subpic_pts += upipe_bmd_sink->subpic_subpipe.latency;
-            //printf("\n SUBPIC PTS %"PRIu64" \n", subpic_pts );
-
-            /* Delete old urefs */
-            if (subpic_pts + (UCLOCK_FREQ/25) < pts) {
-                ulist_delete(uchain);
-                uref_free(uref);
-                continue;
-            }
-
-            /* Choose the closest subpic in the past */
-            if (ttx && pts - (UCLOCK_FREQ/25) < subpic_pts) {
-                //printf("\n CHOSEN SUBPIC %"PRIu64" \n", subpic_pts);
-                const uint8_t *buf;
-                int size = -1;
-                uref_block_read(uref, 0, &size, &buf);
-                upipe_bmd_sink_extract_ttx(upipe, ancillary, buf, size, sd);
-                uref_block_unmap(uref, 0);
-                ulist_delete(uchain);
-                uref_free(uref);
-                break;
-            }
-        }
-
-        video_frame->SetAncillaryData(ancillary);
-
-        if( pts > 0 ) {
-            const unsigned samples = audio_samples_count(upipe_bmd_sink, timeValue, timeScale);
-            upipe_bmd_sink_sub_sound_get_samples(&upipe_bmd_sink->upipe, pts, samples);
-
-            uint32_t written;
-            result = upipe_bmd_sink->deckLinkOutput->ScheduleAudioSamples(
-                    upipe_bmd_sink->pic_subpipe.audio_buf, samples, pts,
-                    UCLOCK_FREQ, &written);
-            if( result != S_OK )
-                upipe_err_va(upipe, "DROPPED AUDIO");
-
-            uint32_t buffered;
-            upipe_bmd_sink->deckLinkOutput->GetBufferedAudioSampleFrameCount(&buffered);
-
-            if (buffered == 0) {
-                /* TODO: get notified as soon as audio buffers empty */
-                upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
-                upipe_bmd_sink->started = 0;
-            }
-            if (written != samples)
-                upipe_dbg_va(upipe, "written %u/%u", written, samples);
-            upipe_dbg_va(upipe, "buffered samples: %u", buffered );
-
-            result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
-            if( result != S_OK )
-                upipe_err_va(upipe, "DROPPED FRAME %x", result);
-        }
-
-        video_frame->Release();
-    }
-    else if (upipe_bmd_sink_sub->sound && upipe_bmd_sink->started) {
-        return false; /* buffer urefs */
-    }
-    else {
+    if (upipe_bmd_sink_sub != &upipe_bmd_sink->pic_subpipe) {
         uref_free(uref);
+        return true;
     }
 
+    int w = upipe_bmd_sink->displayMode->GetWidth();
+    int h = upipe_bmd_sink->displayMode->GetHeight();
+    int sd = upipe_bmd_sink->mode == bmdModePAL || upipe_bmd_sink->mode == bmdModeNTSC;
+    int ttx = upipe_bmd_sink->mode == bmdModePAL || upipe_bmd_sink->mode == bmdModeHD1080i50;
+    const uint8_t *pic_data = NULL;
+    size_t pic_data_size = 0;
+
+    if(!upipe_bmd_sink->started && pts > 0) {
+        upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(pts, UCLOCK_FREQ, 1.0);
+        upipe_bmd_sink->started = 1;
+    }
+
+    const char *v210 = "u10y10v10y10u10y10v10y10u10y10v10y10";
+    size_t stride;
+    const uint8_t *plane;
+    if (unlikely(!ubase_check(uref_pic_plane_size(uref, v210, &stride,
+                                      NULL, NULL, NULL)) ||
+                 !ubase_check(uref_pic_plane_read(uref, v210, 0, 0, -1, -1,
+                                      &plane)))) {
+        upipe_err_va(upipe, "Could not read v210 plane");
+        return NULL;
+    }
+
+    upipe_bmd_sink_frame *video_frame = new upipe_bmd_sink_frame(uref, (void*)plane,
+                                                                 w, h);
+    if (!video_frame) {
+        uref_free(uref);
+        return true;
+    }
+
+    BMDTimeValue timeValue;
+    BMDTimeScale timeScale;
+    upipe_bmd_sink->displayMode->GetFrameRate(&timeValue, &timeScale);
+
+    IDeckLinkVideoFrameAncillary *ancillary = NULL;
+    upipe_bmd_sink->deckLinkOutput->CreateAncillaryData(video_frame->GetPixelFormat(), &ancillary);
+
+    uref_pic_get_cea_708(uref, &pic_data, &pic_data_size);
+    if( pic_data_size > 0 )
+    {
+        void *vanc;
+        ancillary->GetBufferForVerticalBlankingLine(CC_LINE, &vanc);
+        upipe_bmd_sink_clear_vanc(upipe_bmd_sink->vanc_tmp[0]);
+        upipe_bmd_sink_start_anc(upipe, upipe_bmd_sink->vanc_tmp[0], 0, 0x61, 0x1);
+        upipe_bmd_sink_write_cdp(upipe, pic_data, pic_data_size, &upipe_bmd_sink->vanc_tmp[0][ANC_START_LEN]);
+        upipe_bmd_sink_calc_parity_checksum(upipe, 0);
+
+        upipe_bmd_sink_encode_v210(upipe, (uint32_t*)vanc, 0, sd);
+    }
+
+    /* Loop through subpic data */
+    //printf("\n subpic depth %i \n", ulist_depth(&upipe_bmd_sink->subpic_queue));
+    struct uchain *uchain, *uchain_tmp;
+    ulist_delete_foreach(&upipe_bmd_sink->subpic_queue, uchain, uchain_tmp) {
+        //printf("\n VIDEO PTS %"PRIu64" \n", pts );
+        struct uref *uref = uref_from_uchain(uchain);
+        uint64_t subpic_pts = 0;
+        uref_clock_get_pts_sys(uref, &subpic_pts);
+        subpic_pts += upipe_bmd_sink->subpic_subpipe.latency;
+        //printf("\n SUBPIC PTS %"PRIu64" \n", subpic_pts );
+
+        /* Delete old urefs */
+        if (subpic_pts + (UCLOCK_FREQ/25) < pts) {
+            ulist_delete(uchain);
+            uref_free(uref);
+            continue;
+        }
+
+        /* Choose the closest subpic in the past */
+        if (ttx && pts - (UCLOCK_FREQ/25) < subpic_pts) {
+            //printf("\n CHOSEN SUBPIC %"PRIu64" \n", subpic_pts);
+            const uint8_t *buf;
+            int size = -1;
+            uref_block_read(uref, 0, &size, &buf);
+            upipe_bmd_sink_extract_ttx(upipe, ancillary, buf, size, sd);
+            uref_block_unmap(uref, 0);
+            ulist_delete(uchain);
+            uref_free(uref);
+            break;
+        }
+    }
+
+    video_frame->SetAncillaryData(ancillary);
+
+    if (pts > 0) {
+        const unsigned samples = audio_samples_count(upipe_bmd_sink, timeValue, timeScale);
+        upipe_bmd_sink_sub_sound_get_samples(&upipe_bmd_sink->upipe, pts, samples);
+
+        uint32_t written;
+        HRESULT result = upipe_bmd_sink->deckLinkOutput->ScheduleAudioSamples(
+                upipe_bmd_sink->pic_subpipe.audio_buf, samples, pts,
+                UCLOCK_FREQ, &written);
+        if( result != S_OK )
+            upipe_err_va(upipe, "DROPPED AUDIO");
+
+        uint32_t buffered;
+        upipe_bmd_sink->deckLinkOutput->GetBufferedAudioSampleFrameCount(&buffered);
+
+        if (buffered == 0) {
+            /* TODO: get notified as soon as audio buffers empty */
+            upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
+            upipe_bmd_sink->started = 0;
+        }
+        if (written != samples)
+            upipe_dbg_va(upipe, "written %u/%u", written, samples);
+        upipe_dbg_va(upipe, "buffered samples: %u", buffered );
+
+        result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
+        if( result != S_OK )
+            upipe_err_va(upipe, "DROPPED FRAME %x", result);
+    }
+
+    video_frame->Release();
     return true;
 }
 
