@@ -1188,8 +1188,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
             upipe_bmd_sink->started = 0;
         }
         if (written != samples)
-            upipe_dbg_va(upipe, "written %u/%u", written, samples);
-        upipe_dbg_va(upipe, "buffered samples: %u", buffered );
+            upipe_dbg_va(upipe, "written %u/%u, buffered %u", written, samples, buffered);
 
         result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
         if( result != S_OK )
