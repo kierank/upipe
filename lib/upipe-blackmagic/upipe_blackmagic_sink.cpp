@@ -876,6 +876,8 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
             }
 
             size_t drop_samples = length_to_samples(drop_duration);
+            if (drop_samples > uref_samples)
+                drop_samples = uref_samples;
 
             upipe_verbose_va(upipe, "uref pts %"PRIu64", dropping %zu samples",
                 pts, drop_samples);
