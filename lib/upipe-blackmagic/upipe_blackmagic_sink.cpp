@@ -780,11 +780,11 @@ static int upipe_bmd_sink_sub_read_uref_attributes(struct uref *uref,
 static void copy_samples(int32_t *out, uint8_t idx, struct uref *uref, uint64_t offset, uint64_t samples)
 {
     const int32_t *in;
-    uref_sound_read_int32_t(uref, 0, -1, &in, 1);
+    uref_sound_read_int32_t(uref, 0, samples, &in, 1);
     for (int i = 0; i < samples; i++)
         memcpy(&out[DECKLINK_CHANNELS * (offset + i) + idx], &in[2*i], 2 * sizeof(int32_t));
 
-    uref_sound_unmap(uref, 0, -1, 1);
+    uref_sound_unmap(uref, 0, samples, 1);
 }
 
 static inline uint64_t length_to_samples(const uint64_t length)
