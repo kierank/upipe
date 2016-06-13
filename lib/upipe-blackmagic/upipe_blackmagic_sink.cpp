@@ -854,8 +854,9 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
         /* too far in the past ? */
         if (unlikely(pts + duration < video_pts)) {
-            upipe_err_va(upipe, "IDX %hu uref too late, dropping %zu samples (%f + %f < %f)",
+            upipe_err_va(upipe, "IDX %hu uref too late by %"PRIu64" ticks, dropping %zu samples (%f + %f < %f)",
                     upipe_bmd_sink_sub->channel_idx/2,
+                    video_pts - pts - duration,
                     uref_samples,
                     pts_to_time(pts), dur_to_time(duration), pts_to_time(video_pts)
                     );
