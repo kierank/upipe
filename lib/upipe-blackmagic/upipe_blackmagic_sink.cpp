@@ -821,7 +821,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
     uint64_t start_offset = UINT64_MAX;
     uint64_t end_offset = 0;
 
-    upipe_dbg_va(upipe, "\n\n\tChannel %hu - video pts %f (%"PRIu64")",
+    upipe_dbg_va(upipe, "\tChannel %hu - video pts %f (%"PRIu64")",
             upipe_bmd_sink_sub->channel_idx/2, pts_to_time(video_pts), video_pts);
 
     uint64_t old_pts = 0; // debug
@@ -859,7 +859,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
         if (!old_pts)
             old_pts = pts;
-        upipe_dbg_va(upipe, "uref pts %f (%"PRIu64", +%"PRIu64") duration %"PRIu64" offset %"PRId64,
+        if (0) upipe_dbg_va(upipe, "uref pts %f (%"PRIu64", +%"PRIu64") duration %"PRIu64" offset %"PRId64,
                 pts_to_time(pts), pts, pts - old_pts, duration, time_offset);
         old_pts = pts;
 
@@ -884,8 +884,8 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
                 drop_samples = uref_samples;
 
             if (drop_samples) {
-                upipe_dbg_va(upipe, "DROPPING %zu samples / %"PRIu64" ticks (%f)",
-                        drop_samples, drop_duration, dur_to_time(drop_duration));
+                upipe_dbg_va(upipe, "DROPPING %zu samples for PTS %f / %"PRIu64" ticks (%f)",
+                        drop_samples, pts_to_time(pts), drop_duration, dur_to_time(drop_duration));
 
                 /* resize buffer */
                 uref_sound_resize(uref, drop_samples, -1);
@@ -917,7 +917,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
         // assert(samples_offset == end_offset);
         if (samples_offset < end_offset) {
-            assert(samples_offset == end_offset - 1);
+            //assert(samples_offset == end_offset - 1);
             //upipe_err_va(upipe, "Mismatching offsets: %"PRIu64" != %u", samples_offset, end_offset);
             samples_offset = end_offset; // TODO : fix timestamps
         }
@@ -943,7 +943,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         if (missing_samples > uref_samples)
             missing_samples = uref_samples;
 
-        upipe_dbg_va(upipe, "reading %u samples", missing_samples);
+        if (0) upipe_dbg_va(upipe, "reading %u samples", missing_samples);
 
         /* read the samples into our final buffer */
         copy_samples(upipe_bmd_sink->pic_subpipe.audio_buf, 
