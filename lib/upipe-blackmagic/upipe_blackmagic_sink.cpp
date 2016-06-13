@@ -883,11 +883,13 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
             if (drop_samples > uref_samples)
                 drop_samples = uref_samples;
 
-            upipe_dbg_va(upipe, "DROPPING %zu samples / %"PRIu64" ticks (%f)",
-                    drop_samples, drop_duration, dur_to_time(drop_duration));
+            if (drop_samples) {
+                upipe_dbg_va(upipe, "DROPPING %zu samples / %"PRIu64" ticks (%f)",
+                        drop_samples, drop_duration, dur_to_time(drop_duration));
 
-            /* resize buffer */
-            uref_sound_resize(uref, drop_samples, -1);
+                /* resize buffer */
+                uref_sound_resize(uref, drop_samples, -1);
+            }
 
             pts = video_pts;
             time_offset = 0;
@@ -931,6 +933,8 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         /* is our uref too small ? */
         if (missing_samples > uref_samples)
             missing_samples = uref_samples;
+
+        upipe_dbg_va(upipe, "reading %u samples", missing_samples);
 
         /* read the samples into our final buffer */
         copy_samples(upipe_bmd_sink->pic_subpipe.audio_buf, 
