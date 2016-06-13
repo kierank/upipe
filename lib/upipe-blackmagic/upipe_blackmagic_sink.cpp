@@ -823,6 +823,8 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
     upipe_dbg_va(upipe, "\tChannel %hu", upipe_bmd_sink_sub->channel_idx/2);
 
+    uint64_t old_pts = 0; // debug
+
     /* iterate through subpipe queue */
     struct uchain *uchain, *uchain_tmp;
     ulist_delete_foreach(&upipe_bmd_sink_sub->urefs, uchain, uchain_tmp) {
@@ -851,7 +853,11 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         duration *= drift_rate.num;
         duration /= drift_rate.den;
 
-        upipe_verbose_va(upipe, "uref pts %f (%"PRIu64") duration %"PRIu64, pts_to_time(pts), pts, duration);
+        if (!old_pts)
+            old_pts = pts;
+        upipe_dbg_va(upipe, "uref pts %f (%"PRIu64", +%"PRIu64") duration %"PRIu64,
+                pts_to_time(pts), pts, pts - old_pts, duration);
+        old_pts = pts;
 
         /* likely to happen when starting but not after */
         if (unlikely(pts < video_pts)) {
@@ -898,6 +904,11 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         /* we can't write past the end of the buffer */
         if (samples_offset > samples - 1) {
             samples_offset = samples - 1;
+        }
+
+        // assert(samples_offset == end_offset);
+        if (samples_offset != end_offset) {
+            upipe_err_va(upipe, "Mismatching offsets: %"PRIu64" != %u", samples_offset, end_offset);
         }
 
         /* The earliest in the outgoing block we've written to */
