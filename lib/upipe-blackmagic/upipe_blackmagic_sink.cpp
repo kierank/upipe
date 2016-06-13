@@ -769,6 +769,11 @@ static int upipe_bmd_sink_sub_read_uref_attributes(struct uref *uref,
     UBASE_RETURN(uref_clock_get_rate(uref, drift_rate));
     UBASE_RETURN(uref_sound_size(uref, size, NULL /* sample_size */));
 
+    if (drift_rate->num == 0 || drift_rate->den == 0) {
+        drift_rate->num = 1;
+        drift_rate->den = 1;
+    }
+
     return UBASE_ERR_NONE;
 }
 
@@ -784,7 +789,8 @@ static void copy_samples(int32_t *out, uint8_t idx, struct uref *uref, uint64_t 
 
 static inline uint64_t length_to_samples(const uint64_t length)
 {
-    return (length * 48000 + UCLOCK_FREQ - 1) / UCLOCK_FREQ;
+    /* rounding down */
+    return (length * 48000) / UCLOCK_FREQ;
 }
 
 static float dur_to_time(uint64_t dur)
@@ -809,21 +815,19 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
 
-    /* the exact duration we want to fill */
-    const uint64_t channel_duration = samples * UCLOCK_FREQ / 48000;
-
     /* timestamp of next video frame */
-    const uint64_t last_pts = video_pts + channel_duration;
+    const uint64_t last_pts = video_pts + samples * UCLOCK_FREQ / 48000;
 
     uint64_t start_offset = UINT64_MAX;
     uint64_t end_offset = 0;
+
+    upipe_dbg_va(upipe, "\tChannel %hu", upipe_bmd_sink_sub->channel_idx/2);
 
     /* iterate through subpipe queue */
     struct uchain *uchain, *uchain_tmp;
     ulist_delete_foreach(&upipe_bmd_sink_sub->urefs, uchain, uchain_tmp) {
         struct uref *uref = uref_from_uchain(uchain);
 
-        bool drop;                              /* whether to release uref */
         size_t uref_samples = 0;                /* samples in the uref */
         struct urational drift_rate = { 0, 0 }; /* playing rate */
         uint64_t duration;                      /* uref real duration */
@@ -844,46 +848,33 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         duration = uref_samples * UCLOCK_FREQ / 48000;
 
         /* multiply uref duration by its playing rate to get its real duration */
-        if (drift_rate.den && drift_rate.num) {
-            duration *= drift_rate.num;
-            duration /= drift_rate.den;
-        }
+        duration *= drift_rate.num;
+        duration /= drift_rate.den;
 
-        upipe_verbose_va(upipe,
-                "uref pts %"PRIu64" duration %"PRIu64, pts_to_time(pts), duration);
+        upipe_verbose_va(upipe, "uref pts %"PRIu64" duration %"PRIu64, pts_to_time(pts), duration);
 
-        /* too far in the past ? */
-        if (unlikely(pts + duration < video_pts)) {
-            upipe_err_va(upipe, "IDX %hu uref too late by %"PRIu64" ticks, dropping %zu samples (%f + %f < %f)",
-                    upipe_bmd_sink_sub->channel_idx/2,
-                    video_pts - pts - duration,
-                    uref_samples,
-                    pts_to_time(pts), dur_to_time(duration), pts_to_time(video_pts)
-                    );
-
-            goto drop_uref;
-        }
-
-        /* too far in the future ? */
-        if (unlikely(pts > last_pts)) {
-            upipe_err(upipe, "uref too early");
-            break;
-        }
-
-        /* drop beginning of uref ? */
+        /* likely to happen when starting but not after */
         if (unlikely(pts < video_pts)) {
             uint64_t drop_duration = video_pts - pts;
-            if (drift_rate.den && drift_rate.num) {
-                drop_duration *= drift_rate.num;
-                drop_duration /= drift_rate.den;
+
+            /* too late */
+            if (unlikely(duration < drop_duration)) {
+                upipe_err_va(upipe, "uref too late by %"PRIu64" ticks, dropping %zu samples (%f + %f < %f)",
+                        video_pts - pts - duration,
+                        uref_samples,
+                        pts_to_time(pts), dur_to_time(duration), pts_to_time(video_pts)
+                        );
+
+                goto drop_uref;
             }
 
+            /* drop beginning of uref */
             size_t drop_samples = length_to_samples(drop_duration);
             if (drop_samples > uref_samples)
                 drop_samples = uref_samples;
 
-            upipe_verbose_va(upipe, "uref pts %"PRIu64", dropping %zu samples",
-                pts, drop_samples);
+            upipe_dbg_va(upipe, "uref pts %"PRIu64", dropping %zu samples / %"PRIu64" ticks (%f)",
+                    pts, drop_samples, drop_duration, dur_to_time(drop_duration));
 
             /* resize buffer */
             uref_sound_resize(uref, drop_samples, -1);
@@ -893,19 +884,31 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
             uref_samples -= drop_samples;
 
             uref_clock_set_pts_sys(uref, pts);
+        } else if (unlikely(pts > last_pts)) { /* too far in the future ? */
+            upipe_err_va(upipe, "uref too early (%f > %f) by %fs (%"PRIu64" ticks)",
+                    pts_to_time(pts), pts_to_time(last_pts),
+                    dur_to_time(pts - last_pts), pts - last_pts
+                    );
+            upipe_dbg_va(upipe, "\t\tStart %u End %u Samples %"PRIu64, start_offset, end_offset, samples_offset);
+            //break;
         }
 
-        /* at which position in the buffer do we start writing */
+        /* writing position in the outgoing block */
         samples_offset = length_to_samples(pts - video_pts);
-        if (samples_offset > samples - 1)
+        /* we can't write past the end of the buffer */
+        if (samples_offset > samples - 1) {
             samples_offset = samples - 1;
+        }
 
-        /* */
+        /* The earliest in the outgoing block we've written to */
         if (start_offset > samples_offset)
             start_offset = samples_offset;
 
-        /* how many samples we still want to read */
+        /* how many samples we want to read */
+        // XXX : rounding here
         missing_samples = length_to_samples(last_pts - pts);
+
+        /* we can't read more samples than available in our buffer */
         if (missing_samples > samples - samples_offset)
             missing_samples = samples - samples_offset;
 
@@ -918,19 +921,17 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
                 upipe_bmd_sink_sub->channel_idx, uref,
                 samples_offset, missing_samples);
 
-        /* */
+        /* The latest in the outgoing block we've written to */
         if (end_offset < samples_offset + missing_samples)
             end_offset = samples_offset + missing_samples;
 
-        /* account for the samples we just read */
-        uref_samples -= missing_samples;
-
-        if (uref_samples) {
+        if (uref_samples - missing_samples > 0) {
             /* we did not exhaust this uref, resize it and we're done */
             pts -= upipe_bmd_sink_sub->latency;
-            uref_clock_set_pts_sys(uref, pts + UCLOCK_FREQ * missing_samples / 48000);
+            pts += missing_samples * UCLOCK_FREQ / 48000;
+            uref_clock_set_pts_sys(uref, pts);
             uref_sound_resize(uref, missing_samples, -1);
-            assert(end_offset == samples);
+            //assert(end_offset == samples);
             break;
         }
 
@@ -946,30 +947,21 @@ drop_uref:
     if (start_offset == UINT64_MAX) {
         //assert(upipe_bmd_sink_sub->nb_urefs == 0);
         if (upipe_bmd_sink_sub->nb_urefs != 0)
-            upipe_err_va(upipe, "COULD NOT START DESPITE %u buffered urefs",
-                    upipe_bmd_sink_sub->nb_urefs);
-        upipe_err_va(upipe, "IDX %hu NO BUFFERS for vid PTS %f",
-                upipe_bmd_sink_sub->channel_idx /2,
-                pts_to_time(video_pts)
-                );
+            upipe_err_va(upipe, "COULD NOT START DESPITE %u buffered urefs", upipe_bmd_sink_sub->nb_urefs);
+        upipe_err_va(upipe, "NO BUFFERS for vid PTS %f", pts_to_time(video_pts));
         return;
     }
 
     if (start_offset > 0) {
-        upipe_err_va(upipe, "IDX %hu Start offset %"PRIu64,
-                upipe_bmd_sink_sub->channel_idx /2,
-                start_offset);
+        upipe_err_va(upipe, "Start offset %"PRIu64, start_offset);
         // TODO : fix hole
     }
 
     if (end_offset < samples) {
         if (upipe_bmd_sink_sub->nb_urefs != 0)
-            upipe_err_va(upipe, "COULD NOT END DESPITE %u buffered urefs",
-                    upipe_bmd_sink_sub->nb_urefs);
+            upipe_err_va(upipe, "COULD NOT END DESPITE %u buffered urefs", upipe_bmd_sink_sub->nb_urefs);
         //assert(upipe_bmd_sink_sub->nb_urefs == 0);
-        upipe_err_va(upipe, "IDX %hu End offset %"PRIu64" last pts %f",
-                upipe_bmd_sink_sub->channel_idx /2,
-                end_offset, pts_to_time(last_pts));
+        upipe_err_va(upipe, "End offset %"PRIu64" last pts %f", end_offset, pts_to_time(last_pts));
         // TODO : fix hole
     }
 }
