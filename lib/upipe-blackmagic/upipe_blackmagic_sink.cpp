@@ -851,7 +851,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         duration *= drift_rate.num;
         duration /= drift_rate.den;
 
-        upipe_verbose_va(upipe, "uref pts %"PRIu64" duration %"PRIu64, pts_to_time(pts), duration);
+        upipe_verbose_va(upipe, "uref pts %f (%"PRIu64") duration %"PRIu64, pts_to_time(pts), pts, duration);
 
         /* likely to happen when starting but not after */
         if (unlikely(pts < video_pts)) {
