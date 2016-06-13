@@ -910,12 +910,16 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         samples_offset = length_to_samples(time_offset);
         /* we can't write past the end of the buffer */
         if (samples_offset > samples - 1) {
+            upipe_err_va(upipe, "FIXING offset: %"PRIu64" > %u",
+                samples_offset, samples - 1);
             samples_offset = samples - 1;
         }
 
         // assert(samples_offset == end_offset);
-        if (samples_offset != end_offset) {
-            upipe_err_va(upipe, "Mismatching offsets: %"PRIu64" != %u", samples_offset, end_offset);
+        if (samples_offset < end_offset) {
+            assert(samples_offset == end_offset - 1);
+            //upipe_err_va(upipe, "Mismatching offsets: %"PRIu64" != %u", samples_offset, end_offset);
+            samples_offset = end_offset; // TODO : fix timestamps
         }
 
         /* The earliest in the outgoing block we've written to */
@@ -925,6 +929,11 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         /* how many samples we want to read */
         // XXX : rounding here
         missing_samples = length_to_samples(last_pts - pts);
+
+        if (missing_samples == samples - samples_offset - 1) {
+            missing_samples = samples - samples_offset;
+            // XXX
+        }
 
         /* we can't read more samples than available in our buffer */
         if (missing_samples > samples - samples_offset)
