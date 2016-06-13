@@ -821,8 +821,8 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
     uint64_t start_offset = UINT64_MAX;
     uint64_t end_offset = 0;
 
-    upipe_dbg_va(upipe, "\tChannel %hu - video pts %f",
-            upipe_bmd_sink_sub->channel_idx/2, pts_to_time(video_pts));
+    upipe_dbg_va(upipe, "\n\n\tChannel %hu - video pts %f (%"PRIu64")",
+            upipe_bmd_sink_sub->channel_idx/2, pts_to_time(video_pts), video_pts);
 
     uint64_t old_pts = 0; // debug
 
@@ -866,11 +866,10 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         /* likely to happen when starting but not after */
         if (unlikely(time_offset < 0)) {
             uint64_t drop_duration = -time_offset;
-            upipe_err_va(upipe, "\tdrop dur %"PRIu64, drop_duration);
 
             /* too late */
             if (unlikely(duration < drop_duration)) {
-                upipe_err_va(upipe, "uref too late by %"PRIu64" ticks, dropping %zu samples (%f + %f < %f)",
+                upipe_err_va(upipe, "TOO LATE by %"PRIu64" ticks, dropping %zu samples (%f + %f < %f)",
                         video_pts - pts - duration,
                         uref_samples,
                         pts_to_time(pts), dur_to_time(duration), pts_to_time(video_pts)
@@ -884,7 +883,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
             if (drop_samples > uref_samples)
                 drop_samples = uref_samples;
 
-            upipe_dbg_va(upipe, "dropping %zu samples / %"PRIu64" ticks (%f)",
+            upipe_dbg_va(upipe, "DROPPING %zu samples / %"PRIu64" ticks (%f)",
                     drop_samples, drop_duration, dur_to_time(drop_duration));
 
             /* resize buffer */
@@ -897,7 +896,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
             uref_clock_set_pts_sys(uref, pts);
         } else if (unlikely(pts > last_pts)) { /* too far in the future ? */
-            upipe_err_va(upipe, "uref too early (%f > %f) by %fs (%"PRIu64" ticks)",
+            upipe_err_va(upipe, "TOO EARLY (%f > %f) by %fs (%"PRIu64" ticks)",
                     pts_to_time(pts), pts_to_time(last_pts),
                     dur_to_time(pts - last_pts), pts - last_pts
                     );
@@ -975,10 +974,9 @@ drop_uref:
     }
 
     if (end_offset < samples) {
-        if (upipe_bmd_sink_sub->nb_urefs != 0)
-            upipe_err_va(upipe, "COULD NOT END DESPITE %u buffered urefs", upipe_bmd_sink_sub->nb_urefs);
         //assert(upipe_bmd_sink_sub->nb_urefs == 0);
-        upipe_err_va(upipe, "End offset %"PRIu64" last pts %f", end_offset, pts_to_time(last_pts));
+        upipe_err_va(upipe, "MISSED %"PRIu64" samples, last pts %f (%u urefs buffered)",
+                samples - end_offset, pts_to_time(last_pts), upipe_bmd_sink_sub->nb_urefs);
         // TODO : fix hole
     }
 }
