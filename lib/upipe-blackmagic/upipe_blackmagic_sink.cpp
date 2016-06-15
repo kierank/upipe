@@ -917,9 +917,10 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
         // assert(samples_offset == end_offset);
         if (samples_offset < end_offset) {
-            //assert(samples_offset == end_offset - 1);
-            //upipe_err_va(upipe, "Mismatching offsets: %"PRIu64" != %u", samples_offset, end_offset);
-            samples_offset = end_offset; // TODO : fix timestamps
+            if (samples_offset == end_offset - 1)
+                samples_offset = end_offset; // TODO : fix timestamps
+            else
+                upipe_err_va(upipe, "Mismatching offsets: %"PRIu64" != %u", samples_offset, end_offset);
         }
 
         /* The earliest in the outgoing block we've written to */
