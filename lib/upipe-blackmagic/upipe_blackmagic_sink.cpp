@@ -1362,6 +1362,15 @@ static int upipe_bmd_sink_sub_set_flow_def(struct upipe *upipe,
     if (flow_def == NULL)
         return UBASE_ERR_INVALID;
 
+    uint64_t latency;
+    if (ubase_check(uref_clock_get_latency(flow_def, &latency))) {
+        if (/*upipe_bmd_sink_sub->latency && */latency != upipe_bmd_sink_sub->latency) {
+            upipe_dbg_va(upipe, "latency %"PRIu64" -> %"PRIu64,
+                    upipe_bmd_sink_sub->latency, latency);
+            upipe_bmd_sink_sub->latency = latency;
+        }
+    }
+
     if (upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe) {
         uint8_t macropixel;
         if (!ubase_check(uref_pic_flow_get_macropixel(flow_def, &macropixel))) {
