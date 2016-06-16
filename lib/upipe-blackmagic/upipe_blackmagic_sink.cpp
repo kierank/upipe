@@ -1065,7 +1065,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         upipe_bmd_sink_sub->latency = 0;
 
         uref_clock_get_latency(uref, &upipe_bmd_sink_sub->latency);
-        upipe_dbg_va(upipe, "latency %zu", upipe_bmd_sink_sub->latency);
+        upipe_dbg_va(upipe, "latency %"PRIu64, upipe_bmd_sink_sub->latency);
 
         upipe_bmd_sink_sub_check_upump_mgr(upipe);
 
