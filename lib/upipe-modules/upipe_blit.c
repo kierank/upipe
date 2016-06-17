@@ -370,8 +370,16 @@ static int upipe_blit_sub_provide_flow_format(struct upipe *upipe)
 
         uref_pic_flow_set_hsize(uref, sub->hsize);
         uref_pic_flow_set_vsize(uref, sub->vsize);
+
+        bool alpha = ubase_check(uref_pic_flow_check_chroma(
+                uref, 1, 1, 1, "a8"));
+
         uref_pic_flow_clear_format(uref);
         uref_pic_flow_copy_format(uref, upipe_blit->flow_def);
+
+        if (alpha)
+            uref_pic_flow_add_plane(uref, 1, 1, 1, "a8");
+
         uref_pic_flow_delete_sar(uref);
         uref_pic_flow_delete_overscan(uref);
         uref_pic_flow_delete_dar(uref);
