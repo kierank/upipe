@@ -174,7 +174,7 @@ static void upipe_blit_sub_work(struct upipe *upipe, struct uref *uref)
         return;
 
     int err = uref_pic_blit(uref, sub->ubuf, sub->hposition, sub->vposition,
-                            0, 0, sub->hsize, sub->vsize);
+                            0, 0, sub->hsize, sub->vsize, 0 /* memcpy */);
     if (unlikely(!ubase_check(err))) {
         upipe_warn(upipe, "unable to blit picture");
         upipe_throw_error(upipe, err);
