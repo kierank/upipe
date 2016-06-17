@@ -1082,10 +1082,10 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
     }
 
     uint64_t pts = 0;
-    uint64_t pts_prog = 0;
-    uref_clock_get_pts_prog(uref, &pts_prog);
     if (likely(ubase_check(uref_clock_get_pts_sys(uref, &pts)))) {
 #if 0   /* workaround for files */
+        uint64_t pts_prog = 0;
+        uref_clock_get_pts_prog(uref, &pts_prog);
         if (upipe_bmd_sink->pts_offset == 0) {
             upipe_bmd_sink->pts_offset = pts_prog - pts;
         } else
