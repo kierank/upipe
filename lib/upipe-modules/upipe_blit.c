@@ -101,6 +101,8 @@ struct upipe_blit_sub {
     /** structure for double-linked lists */
     struct uchain uchain;
 
+    /** alpha blending method */
+    uint8_t alpha_threshold;
     /** offset from the left border */
     uint64_t loffset;
     /** offset from the right border */
@@ -160,6 +162,7 @@ static struct upipe *upipe_blit_sub_alloc(struct upipe_mgr *mgr,
     upipe_blit_sub_init_urefcount(upipe);
     upipe_blit_sub_init_sub(upipe);
     sub->loffset = sub->roffset = sub->toffset = sub->boffset = 0;
+    sub->alpha_threshold = 0; /* ignore alpha */
     sub->ubuf = NULL;
     sub->date_prog = UINT64_MAX;
     sub->end_date = UINT64_MAX;
@@ -273,59 +276,34 @@ static void upipe_blit_sub_work(struct upipe *upipe, struct uref *uref)
     if (unlikely(sub->ubuf == NULL))
         return;
 
-    bool is_alpha = false;
+    int type;
+    uint64_t date;
+	uref_clock_get_date_prog(uref, &date, &type);
+    if (type == UREF_DATE_NONE)
+        date = UINT64_MAX;
 
-    const char *chroma = NULL;
-    while (ubase_check(ubuf_pic_plane_iterate(sub->ubuf, &chroma)) && chroma)
-        if (chroma[0] == 'a') {
-            is_alpha = true;
-            break;
-        }
+    if (sub->date_prog != UINT64_MAX && sub->date_prog > date)
+        return;
 
-    int err;
-    if (!is_alpha) {
-        err = uref_pic_blit(uref, sub->ubuf, sub->hposition, sub->vposition,
-                0, 0, sub->hsize, sub->vsize);
-    } else {
-        const uint8_t *alpha;
-        if (unlikely(!ubase_check(ubuf_pic_plane_read(sub->ubuf, "a8", 0, 0,
-                            -1, -1, &alpha)))) {
-            upipe_err(upipe, "Couldn't read sub alpha plane");
-            return;
-        }
-
-        size_t stride;
-        if (unlikely(!ubase_check(ubuf_pic_plane_size(sub->ubuf, "a8", &stride,
-                    NULL, NULL, NULL)))) {
-            upipe_err(upipe, "Couldn't read sub alpha plane sizes");
-            ubuf_pic_plane_unmap(sub->ubuf, "a8", 0, 0, -1, -1);
-            return;
-        }
-
-        err = upipe_blit_alpha(uref, sub->ubuf, sub->hposition, sub->vposition,
-                0, 0, sub->hsize, sub->vsize, alpha, stride);
-
-        ubuf_pic_plane_unmap(sub->ubuf, "a8", 0, 0, -1, -1);
-    }
-
+    int err = uref_pic_blit(uref, sub->ubuf, sub->hposition, sub->vposition,
+                            0, 0, sub->hsize, sub->vsize, sub->alpha_threshold);
     if (unlikely(!ubase_check(err))) {
         upipe_warn(upipe, "unable to blit picture");
         upipe_throw_error(upipe, err);
     }
 
-    int type;
-    uint64_t date;
-	uref_clock_get_date_prog(uref, &date, &type);
-    if (type == UREF_DATE_NONE)
-        upipe_err(upipe, "CANT READ DATE");
+    if (sub->end_date == UINT64_MAX)
+        return;
 
-    if (sub->end_date != UINT64_MAX && date > sub->end_date) { // XXX
-        upipe_verbose_va(upipe, "Subtitle duration elapsed: pic %"PRIx64" end %"PRIx64,
-            date, sub->end_date);
-        ubuf_free(sub->ubuf);
-        sub->ubuf = NULL;
-        sub->date_prog = UINT64_MAX;
-    }
+    /* subtitle not yet elapsed */
+    if (date <= sub->end_date)
+        return;
+
+    upipe_verbose(upipe, "Subtitle duration elapsed");
+
+    ubuf_free(sub->ubuf);
+    sub->ubuf = NULL;
+    sub->date_prog = UINT64_MAX;
 }
 
 /** @internal @This receives data.
@@ -487,8 +465,16 @@ static int upipe_blit_sub_provide_flow_format(struct upipe *upipe)
 
         uref_pic_flow_set_hsize(uref, sub->hsize);
         uref_pic_flow_set_vsize(uref, sub->vsize);
+
+        bool alpha = ubase_check(uref_pic_flow_check_chroma(
+                uref, 1, 1, 1, "a8"));
+
         uref_pic_flow_clear_format(uref);
         uref_pic_flow_copy_format(uref, upipe_blit->flow_def);
+
+        if (alpha)
+            uref_pic_flow_add_plane(uref, 1, 1, 1, "a8");
+
         uref_pic_flow_delete_sar(uref);
         uref_pic_flow_delete_overscan(uref);
         uref_pic_flow_delete_dar(uref);
@@ -577,6 +563,20 @@ static int upipe_blit_sub_set_flow_def(struct upipe *upipe,
     return UBASE_ERR_NONE;
 }
 
+/** @internal @This sets the method for alpha blending for this subpipe.
+ *
+ * @param upipe description structure of the pipe
+ * @param threshold method for alpha blending (@see ubuf_pic_blit)
+ * @return an error code
+ */
+static int _upipe_blit_sub_set_alpha_threshold(struct upipe *upipe,
+        uint8_t threshold)
+{
+    struct upipe_blit_sub *sub = upipe_blit_sub_from_upipe(upipe);
+    sub->alpha_threshold = threshold;
+    return UBASE_ERR_NONE;
+}
+
 /** @internal @This gets the offsets (from the respective borders of the frame)
  * of the rectangle onto which the input of the subpipe will be blitted.
  *
@@ -662,6 +662,11 @@ static int upipe_blit_sub_control(struct upipe *upipe,
             return upipe_blit_sub_get_super(upipe, p);
         }
 
+        case UPIPE_BLIT_SUB_SET_ALPHA_THRESHOLD: {
+            UBASE_SIGNATURE_CHECK(args, UPIPE_BLIT_SUB_SIGNATURE);
+            uint8_t threshold = va_arg(args, unsigned);
+            return _upipe_blit_sub_set_alpha_threshold(upipe, threshold);
+        }
         case UPIPE_BLIT_SUB_GET_RECT: {
             UBASE_SIGNATURE_CHECK(args, UPIPE_BLIT_SUB_SIGNATURE);
             uint64_t *loffset_p = va_arg(args, uint64_t *);
