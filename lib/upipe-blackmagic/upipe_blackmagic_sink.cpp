@@ -298,9 +298,6 @@ struct upipe_bmd_sink {
     /** OP47 total number of teletext packets written **/
     int op47_number_of_packets[2];
 
-    /** subpic queue **/
-    struct uchain subpic_queue;
-
     /** vbi **/
     vbi_sampling_par sp;
     vbi_sliced sliced[1];
@@ -1073,13 +1070,9 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         return true;
     }
 
-    if (upipe_bmd_sink_sub->sound)
+    if (upipe_bmd_sink_sub->sound
+        || upipe_bmd_sink_sub == &upipe_bmd_sink->subpic_subpipe)
         return false;
-
-    if (upipe_bmd_sink_sub == &upipe_bmd_sink->subpic_subpipe) {
-        ulist_add(&upipe_bmd_sink->subpic_queue, uref_to_uchain(uref));
-        return true;
-    }
 
     uint64_t pts = 0;
     if (likely(ubase_check(uref_clock_get_pts_sys(uref, &pts)))) {
@@ -1165,9 +1158,9 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
     }
 
     /* Loop through subpic data */
-    //printf("\n subpic depth %i \n", ulist_depth(&upipe_bmd_sink->subpic_queue));
+    //printf("\n subpic depth %i \n", upipe_bmd_sink_sub->nb_urefs);
     struct uchain *uchain, *uchain_tmp;
-    ulist_delete_foreach(&upipe_bmd_sink->subpic_queue, uchain, uchain_tmp) {
+    ulist_delete_foreach(&upipe_bmd_sink_sub->urefs, uchain, uchain_tmp) {
         //printf("\n VIDEO PTS %"PRIu64" \n", pts );
         struct uref *uref = uref_from_uchain(uchain);
         uint64_t subpic_pts = 0;
@@ -1178,6 +1171,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         /* Delete old urefs */
         if (subpic_pts + (UCLOCK_FREQ/25) < pts) {
             ulist_delete(uchain);
+            upipe_bmd_sink_sub->nb_urefs--;
             uref_free(uref);
             continue;
         }
@@ -1187,10 +1181,12 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
             //printf("\n CHOSEN SUBPIC %"PRIu64" \n", subpic_pts);
             const uint8_t *buf;
             int size = -1;
-            uref_block_read(uref, 0, &size, &buf);
-            upipe_bmd_sink_extract_ttx(upipe, ancillary, buf, size, sd);
-            uref_block_unmap(uref, 0);
+            if (ubase_check(uref_block_read(uref, 0, &size, &buf))) {
+                upipe_bmd_sink_extract_ttx(upipe, ancillary, buf, size, sd);
+                uref_block_unmap(uref, 0);
+            }
             ulist_delete(uchain);
+            upipe_bmd_sink_sub->nb_urefs--;
             uref_free(uref);
             break;
         }
@@ -1578,8 +1574,6 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
     const size_t audio_buf_size = max_samples * DECKLINK_CHANNELS * sizeof(int32_t);
     upipe_bmd_sink->pic_subpipe.audio_buf = (int32_t*)malloc(audio_buf_size);
 
-    ulist_init(&upipe_bmd_sink->subpic_queue);
-
     upipe_bmd_sink->pts_offset = 0;
     upipe_bmd_sink->offset = 0;
     upipe_bmd_sink->uclock.refcount = upipe->refcount;
@@ -1952,13 +1946,6 @@ static int upipe_bmd_sink_control(struct upipe *upipe, int command, va_list args
 static void upipe_bmd_sink_free(struct upipe *upipe)
 {
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
-
-    struct uchain *uchain, *uchain_tmp;
-    ulist_delete_foreach(&upipe_bmd_sink->subpic_queue, uchain, uchain_tmp) {
-        struct uref *uref = uref_from_uchain(uchain);
-        ulist_delete(uchain);
-        uref_free(uref);
-    }
 
     upipe_bmd_sink_sub_free(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->pic_subpipe));
     upipe_bmd_sink_sub_free(upipe_bmd_sink_sub_to_upipe(&upipe_bmd_sink->subpic_subpipe));
