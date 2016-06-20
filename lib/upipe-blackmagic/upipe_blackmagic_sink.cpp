@@ -1102,6 +1102,11 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         }
     }
 
+    if (pts <= 0) {
+        uref_free(uref);
+        return true;
+    }
+
     if (upipe_bmd_sink_sub != &upipe_bmd_sink->pic_subpipe) {
         uref_free(uref);
         return true;
@@ -1114,7 +1119,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
     const uint8_t *pic_data = NULL;
     size_t pic_data_size = 0;
 
-    if(!upipe_bmd_sink->started && pts > 0) {
+    if(!upipe_bmd_sink->started) {
         upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(pts, UCLOCK_FREQ, 1.0);
         upipe_bmd_sink->started = 1;
     }
@@ -1194,32 +1199,30 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
 
     video_frame->SetAncillaryData(ancillary);
 
-    if (pts > 0) {
-        const unsigned samples = audio_samples_count(upipe_bmd_sink, timeValue, timeScale);
-        upipe_bmd_sink_sub_sound_get_samples(&upipe_bmd_sink->upipe, pts, samples);
+    const unsigned samples = audio_samples_count(upipe_bmd_sink, timeValue, timeScale);
+    upipe_bmd_sink_sub_sound_get_samples(&upipe_bmd_sink->upipe, pts, samples);
 
-        uint32_t written;
-        HRESULT result = upipe_bmd_sink->deckLinkOutput->ScheduleAudioSamples(
-                upipe_bmd_sink->pic_subpipe.audio_buf, samples, pts,
-                UCLOCK_FREQ, &written);
-        if( result != S_OK )
-            upipe_err_va(upipe, "DROPPED AUDIO");
+    uint32_t written;
+    HRESULT result = upipe_bmd_sink->deckLinkOutput->ScheduleAudioSamples(
+            upipe_bmd_sink->pic_subpipe.audio_buf, samples, pts,
+            UCLOCK_FREQ, &written);
+    if( result != S_OK )
+        upipe_err_va(upipe, "DROPPED AUDIO");
 
-        uint32_t buffered;
-        upipe_bmd_sink->deckLinkOutput->GetBufferedAudioSampleFrameCount(&buffered);
+    uint32_t buffered;
+    upipe_bmd_sink->deckLinkOutput->GetBufferedAudioSampleFrameCount(&buffered);
 
-        if (buffered == 0) {
-            /* TODO: get notified as soon as audio buffers empty */
-            upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
-            upipe_bmd_sink->started = 0;
-        }
-        if (written != samples)
-            upipe_dbg_va(upipe, "written %u/%u, buffered %u", written, samples, buffered);
-
-        result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
-        if( result != S_OK )
-            upipe_err_va(upipe, "DROPPED FRAME %x", result);
+    if (buffered == 0) {
+        /* TODO: get notified as soon as audio buffers empty */
+        upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
+        upipe_bmd_sink->started = 0;
     }
+    if (written != samples)
+        upipe_dbg_va(upipe, "written %u/%u, buffered %u", written, samples, buffered);
+
+    result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
+    if( result != S_OK )
+        upipe_err_va(upipe, "DROPPED FRAME %x", result);
 
     video_frame->Release();
     return true;
