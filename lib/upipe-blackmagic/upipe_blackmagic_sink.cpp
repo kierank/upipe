@@ -312,6 +312,9 @@ struct upipe_bmd_sink {
     /** hardware uclock */
     struct uclock uclock;
 
+    /** genlock status */
+    int genlock_status;
+
     /** clock offset to ensure it is increasing */
     uint64_t offset;
 
@@ -1225,6 +1228,19 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         upipe_err_va(upipe, "DROPPED FRAME %x", result);
 
     video_frame->Release();
+
+    int genlock_status;
+    upipe_bmd_sink_get_genlock_status(&upipe_bmd_sink->upipe, &genlock_status);
+    if (upipe_bmd_sink->genlock_status == UPIPE_BMD_SINK_GENLOCK_UNLOCKED) {
+        if (genlock_status == UPIPE_BMD_SINK_GENLOCK_LOCKED) {
+            upipe_warn(upipe, "genlock synchronized, restarting");
+            upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
+            upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(pts, UCLOCK_FREQ, 1.0);
+        }
+    }
+
+    upipe_bmd_sink->genlock_status = genlock_status;
+
     return true;
 }
 
@@ -1659,6 +1675,8 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
         err = UBASE_ERR_EXTERNAL;
         goto end;
     }
+
+    upipe_bmd_sink->genlock_status = -1;
 
     if (upipe_bmd_sink->mode == bmdModePAL) {
         upipe_bmd_sink->sp.scanning         = 625; /* PAL */
