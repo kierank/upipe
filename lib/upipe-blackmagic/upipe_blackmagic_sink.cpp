@@ -1342,17 +1342,27 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
     uint32_t buffered;
     upipe_bmd_sink->deckLinkOutput->GetBufferedAudioSampleFrameCount(&buffered);
 
-    if (buffered == 0) {
+    if (0) if (buffered == 0) {
         /* TODO: get notified as soon as audio buffers empty */
         upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
         upipe_bmd_sink->started = 0;
     }
     if (written != samples)
-        upipe_dbg_va(upipe, "written %u/%u, buffered %u", written, samples, buffered);
+        upipe_dbg_va(upipe, "written %u/%u", written, samples);
 
     result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
     if( result != S_OK )
         upipe_err_va(upipe, "DROPPED FRAME %x", result);
+
+    uint32_t vbuffered;
+    upipe_bmd_sink->deckLinkOutput->GetBufferedVideoFrameCount(&vbuffered);
+    upipe_dbg_va(upipe, "A %.2f | V %.2f",
+            (float)(1000 * buffered) / 48000, (float) 1000 * vbuffered / 25);
+
+    bool active;
+    if (upipe_bmd_sink->deckLinkOutput->IsScheduledPlaybackRunning(&active) != S_OK)
+        abort();
+    //assert(active);
 
     video_frame->Release();
 
