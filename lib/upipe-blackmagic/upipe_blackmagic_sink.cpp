@@ -131,8 +131,8 @@ const static uint8_t reverse_tab[256] = {
 class upipe_bmd_sink_frame : public IDeckLinkVideoFrame
 {
 public:
-    upipe_bmd_sink_frame(struct uref *_uref, void *_buffer, long _width, long _height) :
-                         uref(_uref), data(_buffer), width(_width), height(_height) {
+    upipe_bmd_sink_frame(struct uref *_uref, void *_buffer, long _width, long _height, uint64_t _pts) :
+                         uref(_uref), data(_buffer), width(_width), height(_height), pts(_pts) {
         uatomic_store(&refcount, 1);
     }
 
@@ -200,6 +200,9 @@ public:
     virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, LPVOID *ppv) {
         return E_NOINTERFACE;
     }
+
+public:
+    uint64_t pts;
 
 private:
     struct uref *uref;
@@ -1131,7 +1134,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
     }
 
     upipe_bmd_sink_frame *video_frame = new upipe_bmd_sink_frame(uref, (void*)plane,
-                                                                 w, h);
+                                                                 w, h, pts);
     if (!video_frame) {
         uref_free(uref);
         return true;
