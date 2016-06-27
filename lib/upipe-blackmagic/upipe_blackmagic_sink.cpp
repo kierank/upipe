@@ -71,7 +71,7 @@
 
 #include "include/DeckLinkAPI.h"
 
-#define PREROLL_FRAMES 4
+#define PREROLL_FRAMES 3
 
 #define DECKLINK_CHANNELS 16
 
