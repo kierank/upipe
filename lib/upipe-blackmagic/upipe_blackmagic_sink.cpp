@@ -71,6 +71,8 @@
 
 #include "include/DeckLinkAPI.h"
 
+#define PREROLL_FRAMES 4
+
 #define DECKLINK_CHANNELS 16
 
 #define CC_LINE 9
@@ -248,7 +250,7 @@ public:
 
         uint64_t now = uclock_now(uclock);
         uint64_t pts = ((upipe_bmd_sink_frame*)completedFrame)->pts;
-        upipe_notice_va(upipe, "Frame %s (%.2f ms) - delay %.2f ms",
+        upipe_notice_va(upipe, "%p Frame %s (%.2f ms) - delay %.2f ms", completedFrame,
                 res[result], dur_to_time(1000 * (val - prev)), dur_to_time(1000 * (now - pts - UCLOCK_FREQ / 25)));
         prev = val;
     }
@@ -367,6 +369,8 @@ struct upipe_bmd_sink {
 
     /** started flag **/
     int started;
+    uint64_t start_pts;
+    int preroll;
 
     /** vanc/vbi temporary buffer **/
     uint16_t vanc_tmp[2][VANC_WIDTH*2];
@@ -904,7 +908,7 @@ static void start_code(const int32_t *buf, uint8_t channel_idx, unsigned samples
 
         const unsigned frame_size_samples = 9120 /* bytes */ / 5 /* bytes per samples pair */;
 
-        //if (i != 216)
+        if (i != 216)
         printf("[%d] S337 sync at sample %zu/1920 : burst %zu -> %zu\n", channel_idx / 2,
                 i, i + 4, i + 4 + frame_size_samples);
         sync = true;
@@ -1228,17 +1232,22 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         uint64_t now = uclock_now(&upipe_bmd_sink->uclock);
         pts += upipe_bmd_sink_sub->latency;
 
-        if (now < pts) {
-            upipe_verbose_va(upipe, "sleeping %"PRIu64" (%"PRIu64")",
-                             pts - now, pts);
-            upipe_bmd_sink_sub_wait_upump(upipe, pts - now,
-                                          upipe_bmd_sink_sub_write_watcher);
-            return false;
-        } else if (now > pts + UCLOCK_FREQ / 10) {
-            upipe_warn_va(upipe, "late uref dropped (%"PRId64")",
-                          (now - pts) * 1000 / UCLOCK_FREQ);
-            uref_free(uref);
-            return true;
+        uint64_t target = pts;
+        if (1 || upipe_bmd_sink->started) {
+            target += PREROLL_FRAMES * UCLOCK_FREQ / 25; // preroll
+
+            if (now < target) {
+                upipe_dbg_va(upipe, "sleeping %"PRIu64" (%"PRIu64")",
+                        target - now, target);
+                upipe_bmd_sink_sub_wait_upump(upipe, target - now,
+                        upipe_bmd_sink_sub_write_watcher);
+                return false;
+            } else if (now > target + UCLOCK_FREQ / 10) {
+                upipe_warn_va(upipe, "late uref dropped (%"PRId64")",
+                        (now - target) * 1000 / UCLOCK_FREQ);
+                uref_free(uref);
+                return true;
+            }
         }
     }
 
@@ -1248,11 +1257,6 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
     int ttx = upipe_bmd_sink->mode == bmdModePAL || upipe_bmd_sink->mode == bmdModeHD1080i50;
     const uint8_t *pic_data = NULL;
     size_t pic_data_size = 0;
-
-    if(!upipe_bmd_sink->started) {
-        upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(pts, UCLOCK_FREQ, 1.0);
-        upipe_bmd_sink->started = 1;
-    }
 
     const char *v210 = "u10y10v10y10u10y10v10y10u10y10v10y10";
     size_t stride;
@@ -1331,14 +1335,38 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
 
     const unsigned samples = audio_samples_count(upipe_bmd_sink, timeValue, timeScale);
     upipe_bmd_sink_sub_sound_get_samples(&upipe_bmd_sink->upipe, pts, samples);
+    HRESULT result;
 
+    result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
+    if( result != S_OK )
+        upipe_err_va(upipe, "DROPPED FRAME %x", result);
+
+    if (!upipe_bmd_sink->started) {
+        result = upipe_bmd_sink->deckLinkOutput->BeginAudioPreroll();
+        if (result != S_OK)
+            upipe_err_va(upipe, "Begin preroll failed: %lx", result);
+    }
     uint32_t written;
-    HRESULT result = upipe_bmd_sink->deckLinkOutput->ScheduleAudioSamples(
+    result = upipe_bmd_sink->deckLinkOutput->ScheduleAudioSamples(
             upipe_bmd_sink->pic_subpipe.audio_buf, samples, pts,
             UCLOCK_FREQ, &written);
     if( result != S_OK ) {
-        upipe_err_va(upipe, "DROPPED AUDIO");
+        upipe_err_va(upipe, "DROPPED AUDIO: %lx", result);
         written = 0;
+    }
+
+    if (upipe_bmd_sink->start_pts == 0)
+        upipe_bmd_sink->start_pts = pts;
+
+    if (!upipe_bmd_sink->started) {
+        if (--upipe_bmd_sink->preroll == 0) {
+            upipe_notice(upipe, "Starting playback");
+            result = upipe_bmd_sink->deckLinkOutput->EndAudioPreroll();
+            if (result != S_OK)
+                upipe_err_va(upipe, "End preroll failed: %lx", result);
+            upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(upipe_bmd_sink->start_pts, UCLOCK_FREQ, 1.0);
+            upipe_bmd_sink->started = 1;
+        }
     }
 
     uint32_t buffered;
@@ -1351,10 +1379,6 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
     }
     if (written != samples)
         upipe_dbg_va(upipe, "written %u/%u", written, samples);
-
-    result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, UCLOCK_FREQ * timeValue / timeScale, UCLOCK_FREQ);
-    if( result != S_OK )
-        upipe_err_va(upipe, "DROPPED FRAME %x", result);
 
     uint32_t vbuffered;
     upipe_bmd_sink->deckLinkOutput->GetBufferedVideoFrameCount(&vbuffered);
@@ -1736,6 +1760,7 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
     upipe_bmd_sink->offset = 0;
     upipe_bmd_sink->uclock.refcount = upipe->refcount;
     upipe_bmd_sink->uclock.uclock_now = uclock_bmd_sink_now;
+    upipe_bmd_sink->preroll = PREROLL_FRAMES;
 
     upipe_throw_ready(upipe);
     return upipe;
@@ -1758,6 +1783,8 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
         deckLinkOutput->DisableAudioOutput();
         upipe_bmd_sink->displayMode->Release();
         upipe_bmd_sink->started = 0;
+        upipe_bmd_sink->start_pts = 0;
+        upipe_bmd_sink->preroll = PREROLL_FRAMES;
     }
 
     result = deckLinkOutput->GetDisplayModeIterator(&displayModeIterator);
