@@ -1077,6 +1077,8 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         || upipe_bmd_sink_sub == &upipe_bmd_sink->subpic_subpipe)
         return false;
 
+    /* pic subpipe */
+
     uint64_t pts = 0;
     if (likely(ubase_check(uref_clock_get_pts_sys(uref, &pts)))) {
 #if 0   /* workaround for files */
@@ -1103,16 +1105,6 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
             uref_free(uref);
             return true;
         }
-    }
-
-    if (pts <= 0) {
-        uref_free(uref);
-        return true;
-    }
-
-    if (upipe_bmd_sink_sub != &upipe_bmd_sink->pic_subpipe) {
-        uref_free(uref);
-        return true;
     }
 
     int w = upipe_bmd_sink->displayMode->GetWidth();
