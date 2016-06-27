@@ -1202,9 +1202,9 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
 
         uref_clock_get_latency(uref, &upipe_bmd_sink_sub->latency);
         upipe_dbg_va(upipe, "latency %"PRIu64, upipe_bmd_sink_sub->latency);
-        uint64_t octetrate;
-        uref_block_flow_get_octetrate(uref, &octetrate);
-        upipe_bmd_sink_sub->s302m = octetrate == 288000;
+        const char *codec = NULL;
+        uref_attr_get_string(uref, &codec, UDICT_TYPE_STRING, "codec");
+        upipe_bmd_sink_sub->s302m = codec && !strcmp(codec, "s302m");
 
         upipe_bmd_sink_sub_check_upump_mgr(upipe);
 
