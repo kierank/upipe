@@ -1336,8 +1336,10 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
     HRESULT result = upipe_bmd_sink->deckLinkOutput->ScheduleAudioSamples(
             upipe_bmd_sink->pic_subpipe.audio_buf, samples, pts,
             UCLOCK_FREQ, &written);
-    if( result != S_OK )
+    if( result != S_OK ) {
         upipe_err_va(upipe, "DROPPED AUDIO");
+        written = 0;
+    }
 
     uint32_t buffered;
     upipe_bmd_sink->deckLinkOutput->GetBufferedAudioSampleFrameCount(&buffered);
