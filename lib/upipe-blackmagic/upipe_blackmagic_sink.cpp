@@ -866,7 +866,7 @@ static void start_code(const int32_t *buf, uint8_t channel_idx, unsigned samples
     bool zero = true;
 
     for (size_t i = 0; i < 1920; i++) {
-        if (buf[DECKLINK_CHANNELS*i + channel_idx] != 0 || 
+        if (buf[DECKLINK_CHANNELS*i + channel_idx] != 0 ||
                 buf[DECKLINK_CHANNELS*i + channel_idx+1] != 0)
             zero = false;
 
@@ -1074,7 +1074,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         if (0) upipe_dbg_va(upipe, "reading %u samples", missing_samples);
 
         /* read the samples into our final buffer */
-        copy_samples(upipe_bmd_sink->pic_subpipe.audio_buf, 
+        copy_samples(upipe_bmd_sink->pic_subpipe.audio_buf,
                 upipe_bmd_sink_sub->channel_idx, uref,
                 samples_offset, missing_samples);
 
@@ -1615,7 +1615,7 @@ static struct upipe *upipe_bmd_sink_sub_alloc(struct upipe_mgr *mgr,
     if (!ubase_check(uref_attr_get_small_unsigned(flow_def, &channel_idx,
             UDICT_TYPE_SMALL_UNSIGNED, "channel_idx"))) {
         upipe_err(upipe, "Could not read channel_idx");
-	uref_dump(flow_def, uprobe);
+        uref_dump(flow_def, uprobe);
         goto error;
     }
 
