@@ -944,7 +944,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
     uint64_t start_offset = UINT64_MAX;
     uint64_t end_offset = 0;
 
-    upipe_dbg_va(upipe, "\tChannel %hu - video pts %f (%"PRIu64")",
+    if (0) upipe_dbg_va(upipe, "\tChannel %hu - video pts %f (%"PRIu64")",
             upipe_bmd_sink_sub->channel_idx/2, pts_to_time(video_pts), video_pts);
 
     uint64_t old_pts = 0; // debug
@@ -988,6 +988,9 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
         /* likely to happen when starting but not after */
         if (unlikely(time_offset < 0)) {
+            /* audio PTS is earlier than video PTS */
+
+            /* duration of audio to discard */
             uint64_t drop_duration = -time_offset;
 
             /* too late */
@@ -1007,7 +1010,8 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
                 drop_samples = uref_samples;
 
             if (drop_samples) {
-                upipe_dbg_va(upipe, "DROPPING %zu samples for PTS %f / %"PRIu64" ticks (%f)",
+                upipe_dbg_va(upipe, "[%d] DROPPING %zu samples for PTS %f / %"PRIu64" ticks (%f)",
+                        upipe_bmd_sink_sub->channel_idx/2,
                         drop_samples, pts_to_time(pts), drop_duration, dur_to_time(drop_duration));
 
                 /* resize buffer */
@@ -1116,7 +1120,8 @@ drop_uref:
 
     if (end_offset < samples) {
         //assert(upipe_bmd_sink_sub->nb_urefs == 0);
-        upipe_err_va(upipe, "MISSED %"PRIu64" samples, last pts %f (%u urefs buffered)",
+        upipe_err_va(upipe, "[%d] MISSED %"PRIu64" samples, last pts %f (%u urefs buffered)",
+                upipe_bmd_sink_sub->channel_idx/2,
                 samples - end_offset, pts_to_time(last_pts), upipe_bmd_sink_sub->nb_urefs);
         // TODO : fix hole
     }
