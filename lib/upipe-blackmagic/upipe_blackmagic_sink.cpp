@@ -214,6 +214,84 @@ private:
     IDeckLinkVideoFrameAncillary *frame_anc;
 };
 
+static float dur_to_time(uint64_t dur)
+{
+    return (float)dur / UCLOCK_FREQ;
+}
+
+static float pts_to_time(uint64_t pts)
+{
+    static uint64_t first = 0;
+    if (!first)
+        first = pts;
+
+    return dur_to_time(pts - first);
+}
+
+class callback : public IDeckLinkVideoOutputCallback
+{
+public:
+    virtual HRESULT ScheduledFrameCompleted (/* in */ IDeckLinkVideoFrame *completedFrame, /* in */ BMDOutputFrameCompletionResult result) {
+        static const char *res[] = {
+            "completed",
+            "late",
+            "dropped",
+            "flushed",
+        };
+
+        if (result >= 4)
+            abort();
+
+        BMDTimeValue val;
+        if (output->GetFrameCompletionReferenceTimestamp(completedFrame, UCLOCK_FREQ, &val) != S_OK)
+            abort();
+
+        uint64_t now = uclock_now(uclock);
+        uint64_t pts = ((upipe_bmd_sink_frame*)completedFrame)->pts;
+        upipe_notice_va(upipe, "Frame %s (%.2f ms) - delay %.2f ms",
+                res[result], dur_to_time(1000 * (val - prev)), dur_to_time(1000 * (now - pts - UCLOCK_FREQ / 25)));
+        prev = val;
+    }
+
+    virtual HRESULT ScheduledPlaybackHasStopped (void) {
+        printf("%s()\n", __func__);
+    }
+
+    callback (struct upipe *u, IDeckLinkOutput *out, struct uclock *clock) {
+        output = out;
+        upipe = u;
+        uclock = clock;
+        uatomic_store(&refcount, 1);
+        prev = 0;
+    }
+
+    ~callback(void) {
+        uatomic_clean(&refcount);
+    }
+
+    virtual ULONG STDMETHODCALLTYPE AddRef(void) {
+        return uatomic_fetch_add(&refcount, 1) + 1;
+    }
+
+    virtual ULONG STDMETHODCALLTYPE Release(void) {
+        uint32_t new_ref = uatomic_fetch_sub(&refcount, 1) - 1;
+        if (new_ref == 0)
+            delete this;
+        return new_ref;
+    }
+
+    virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, LPVOID *ppv) {
+        return E_NOINTERFACE;
+    }
+
+private:
+    uatomic_uint32_t refcount;
+    BMDTimeValue prev;
+    IDeckLinkOutput *output;
+    struct uclock *uclock;
+    struct upipe *upipe;
+};
+
 /** @hidden */
 static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
                                       struct upump **upump_p);
@@ -794,20 +872,6 @@ static inline uint64_t length_to_samples(const uint64_t length)
 {
     /* rounding down */
     return (length * 48000) / UCLOCK_FREQ;
-}
-
-static float dur_to_time(uint64_t dur)
-{
-    return (float)dur / UCLOCK_FREQ;
-}
-
-static float pts_to_time(uint64_t pts)
-{
-    static uint64_t first = 0;
-    if (!first)
-        first = pts;
-
-    return dur_to_time(pts - first);
 }
 
 /** @internal @This fills the audio samples for one single stereo pair
@@ -1747,6 +1811,12 @@ static int upipe_bmd_sink_open_card(struct upipe *upipe)
         err = UBASE_ERR_EXTERNAL;
         deckLink->Release();
         goto end;
+    }
+
+    result = upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(new callback(
+                &upipe_bmd_sink->upipe, upipe_bmd_sink->deckLinkOutput, &upipe_bmd_sink->uclock));
+    if (result != S_OK) {
+        abort();
     }
 
     upipe_bmd_sink->deckLink = deckLink;
