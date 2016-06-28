@@ -127,6 +127,14 @@ static ssize_t upipe_s337f_sync(struct upipe *upipe, struct uref *uref)
     return -1;
 }
 
+static void upipe_s337f_header(struct upipe *upipe, int32_t *buf, uint32_t *hdr)
+{
+    int bits = (buf[0] == 0x6f872 << 12) ? 20 : 24;
+
+    hdr[0] = buf[2] >> 16;
+    hdr[1] = buf[3] >> (32 - bits);
+}
+
 /** @internal
  *
  * @param upipe description structure of the pipe
@@ -175,14 +183,38 @@ static void upipe_s337f_input(struct upipe *upipe, struct uref *uref, struct upu
         memmove(out, &out[2*sync], s); // discard up to sync word
         memcpy(&out[2*sync], &in[0], 2 * 4 * sync); // complete with next uref
 
+        uint32_t hdr[2]; /* Pc + Pd */
+        upipe_s337f_header(upipe, out, hdr);
+
+        unsigned data_stream_number =  hdr[0] >> 13;
+        unsigned data_type_dependent= (hdr[0] >>  8) & 0x1f;
+        unsigned error_flag         = (hdr[0] >>  7) & 0x1;
+        unsigned data_mode          = (hdr[0] >>  5) & 0x3;
+        unsigned data_type          = (hdr[0] >>  0) & 0x1f;
+
+        if (error_flag)
+            upipe_err(upipe, "error flag set");
+
+        struct uref *flow_def = uref_dup(upipe_s337f->flow_def);
+        if (unlikely(flow_def == NULL)) {
+            upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+        } else {
+            uref_attr_set_small_unsigned(flow_def, data_type,
+                UDICT_TYPE_SMALL_UNSIGNED, "data_type");
+            flow_def = upipe_s337f_store_flow_def_attr(upipe, flow_def);
+            if (flow_def)
+                upipe_s337f_store_flow_def(upipe, flow_def);
+        }
+
+#if 0
+        upipe_notice_va(upipe, "%d %d %d %d %d",
+            data_stream_number, data_type_dependent, error_flag, data_mode, data_type);
+        upipe_notice_va(upipe, "%u bytes", hdr[1] / 8);
+#endif
+
         uref_sound_unmap(uref, 0, -1, 1);
         uref_sound_unmap(output, 0, -1, 1);
     }
-
-    /* TODO 
-     *      parse Pc, set data_type (Dolby E)
-     *      parse Pd, discard guard bands
-     */
 
     /* buffer next uref */
     upipe_s337f->uref = uref;

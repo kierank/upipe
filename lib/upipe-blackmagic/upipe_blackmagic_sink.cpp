@@ -908,7 +908,7 @@ static void start_code(const int32_t *buf, uint8_t channel_idx, unsigned samples
 
         const unsigned frame_size_samples = 9120 /* bytes */ / 5 /* bytes per samples pair */;
 
-        if (i != 216)
+        //if (i != 216)
         printf("[%d] S337 sync at sample %zu/1920 : burst %zu -> %zu\n", channel_idx / 2,
                 i, i + 4, i + 4 + frame_size_samples);
         sync = true;
@@ -1202,9 +1202,15 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
 
         uref_clock_get_latency(uref, &upipe_bmd_sink_sub->latency);
         upipe_dbg_va(upipe, "latency %"PRIu64, upipe_bmd_sink_sub->latency);
+        uint8_t data_type = 0;
+        uref_attr_get_small_unsigned(uref, &data_type, UDICT_TYPE_SMALL_UNSIGNED, "data_type");
+        upipe_bmd_sink_sub->s302m = data_type == 28;
+
+#if 0
         const char *codec = NULL;
         uref_attr_get_string(uref, &codec, UDICT_TYPE_STRING, "codec");
         upipe_bmd_sink_sub->s302m = codec && !strcmp(codec, "s302m");
+#endif
 
         upipe_bmd_sink_sub_check_upump_mgr(upipe);
 
