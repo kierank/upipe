@@ -181,7 +181,7 @@ static void upipe_s337f_input(struct upipe *upipe, struct uref *uref, struct upu
         size_t s = 2 /* stereo */ * 4 /* s32 */ * (size[0] - sync);
 
         memmove(out, &out[2*sync], s); // discard up to sync word
-        memcpy(&out[2*sync], &in[0], 2 * 4 * sync); // complete with next uref
+        memcpy(&out[s/4], &in[0], 2 * 4 * sync); // complete with next uref
 
         uint32_t hdr[2]; /* Pc + Pd */
         upipe_s337f_header(upipe, out, hdr);
