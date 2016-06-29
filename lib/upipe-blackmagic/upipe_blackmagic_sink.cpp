@@ -1196,12 +1196,12 @@ static upipe_bmd_sink_frame *get_video_frame(struct upipe *upipe,
     int ttx = upipe_bmd_sink->mode == bmdModePAL || upipe_bmd_sink->mode == bmdModeHD1080i50;
 
     if (!uref) {
-        ULONG ref = 0;
-        if (upipe_bmd_sink->video_frame) {
-            //ref = upipe_bmd_sink->video_frame->AddRef();
+        if (!upipe_bmd_sink->video_frame)
+            return NULL;
+
             /* increase refcount before outputting this frame */
-            ref = upipe_bmd_sink->video_frame->AddRef();
-        }
+        ULONG ref = 0;
+        ref = upipe_bmd_sink->video_frame->AddRef();
         upipe_dbg_va(upipe, "REUSING FRAME %p : %d", upipe_bmd_sink->video_frame, ref);
         return upipe_bmd_sink->video_frame;
     }
@@ -1295,6 +1295,8 @@ static void schedule_frame(struct upipe *upipe, struct uref *uref, uint64_t pts)
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_sub_mgr(upipe->mgr);
 
     upipe_bmd_sink_frame *video_frame = get_video_frame(&upipe_bmd_sink->upipe, pts, uref);
+    if (!video_frame)
+        return;
 
     result = upipe_bmd_sink->deckLinkOutput->ScheduleVideoFrame(video_frame, pts, upipe_bmd_sink->ticks_per_frame, UCLOCK_FREQ);
     video_frame->Release();
