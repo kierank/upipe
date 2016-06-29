@@ -1529,7 +1529,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         upipe_bmd_sink->pts = pts;
 
         /* let it buffer a bit, for audio to catch up with video pts */
-        upipe_bmd_sink_sub_wait_upump(upipe, UCLOCK_FREQ / 2, upipe_bmd_sink_sub_write_watcher);
+        upipe_bmd_sink_sub_wait_upump(upipe, UCLOCK_FREQ, upipe_bmd_sink_sub_write_watcher);
         return false;
     }
 
