@@ -176,12 +176,12 @@ public:
     }
 
     virtual HRESULT STDMETHODCALLTYPE GetAncillaryData(IDeckLinkVideoFrameAncillary **ancillary) {
+        frame_anc->AddRef();
         *ancillary = frame_anc;
         return S_OK;
     }
 
     virtual HRESULT STDMETHODCALLTYPE SetAncillaryData(IDeckLinkVideoFrameAncillary *ancillary) {
-        ancillary->AddRef();
         frame_anc = ancillary;
         return S_OK;
     }
