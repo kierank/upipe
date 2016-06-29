@@ -968,6 +968,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         if (!ubase_check(upipe_bmd_sink_sub_read_uref_attributes(uref,
             &pts, &drift_rate, &uref_samples))) {
             upipe_err(upipe, "Could not read uref attributes");
+            uref_dump(uref, upipe->uprobe);
             goto drop_uref;
         }
 
