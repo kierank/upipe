@@ -216,7 +216,7 @@ private:
     IDeckLinkVideoFrameAncillary *frame_anc;
 };
 
-static float dur_to_time(uint64_t dur)
+static float dur_to_time(int64_t dur)
 {
     return (float)dur / UCLOCK_FREQ;
 }
