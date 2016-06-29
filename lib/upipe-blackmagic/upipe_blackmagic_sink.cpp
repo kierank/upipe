@@ -1521,7 +1521,8 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         /* First PTS is set to the first picture PTS */
         if (unlikely(!ubase_check(uref_clock_get_pts_sys(uref, &pts)))) {
             upipe_err(upipe, "Could not read pts");
-            abort();
+            uref_free(uref);
+            return true;
         }
         pts += upipe_bmd_sink_sub->latency;
         upipe_bmd_sink->start_pts = pts;
@@ -1990,7 +1991,7 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
     }
 
     if (deckLinkOutput->BeginAudioPreroll() != S_OK)
-        abort();
+        upipe_err(upipe, "Could not begin audio preroll");
 
     upipe_bmd_sink->genlock_status = -1;
 
@@ -2072,9 +2073,8 @@ static int upipe_bmd_sink_open_card(struct upipe *upipe)
 
     upipe_bmd_sink->cb = new callback(upipe_bmd_sink);
     result = upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(upipe_bmd_sink->cb);
-    if (result != S_OK) {
-        abort();
-    }
+    if (result != S_OK)
+        upipe_err(upipe, "Could not set frame completion callback");
 
     upipe_bmd_sink->deckLink = deckLink;
 
