@@ -1926,8 +1926,12 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
     HRESULT result = E_NOINTERFACE;
 
     if (upipe_bmd_sink->displayMode) {
-        upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->pic_subpipe.upipe);
-        upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink->subpic_subpipe.upipe);
+        struct uchain *uchain;
+        ulist_foreach(&upipe_bmd_sink->inputs, uchain) {
+            struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
+                upipe_bmd_sink_sub_from_uchain(uchain);
+            upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink_sub->upipe);
+        }
         if (upipe_bmd_sink->video_frame) {
             upipe_bmd_sink->video_frame->Release();
             upipe_bmd_sink->video_frame = NULL;
