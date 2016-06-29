@@ -2277,6 +2277,7 @@ static void upipe_bmd_sink_free(struct upipe *upipe)
     free(upipe_bmd_sink->pic_subpipe.audio_buf);
 
     if (upipe_bmd_sink->deckLink) {
+        upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(NULL);
         upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
         upipe_bmd_sink->deckLinkOutput->DisableVideoOutput();
         upipe_bmd_sink->deckLinkOutput->DisableAudioOutput();
@@ -2285,9 +2286,6 @@ static void upipe_bmd_sink_free(struct upipe *upipe)
         upipe_bmd_sink->deckLink->Release();
     }
 
-    // FIXME: callback should reference the upipe, so upipe
-    // is freed only when callback is finished working
-    // TODO: notify the callback of its impeding destruction
     if (upipe_bmd_sink->cb)
         upipe_bmd_sink->cb->Release();
 
