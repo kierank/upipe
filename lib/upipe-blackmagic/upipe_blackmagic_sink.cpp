@@ -347,8 +347,11 @@ struct upipe_bmd_sink {
     /** public upipe structure */
     struct upipe upipe;
 
-    /* Frame completion callback */
+    /** Frame completion callback */
     callback *cb;
+
+    /** last frame output */
+    upipe_bmd_sink_frame *video_frame;
 };
 
 UPIPE_HELPER_UPIPE(upipe_bmd_sink, upipe, UPIPE_BMD_SINK_SIGNATURE);
@@ -1024,7 +1027,8 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
             uref_clock_set_pts_sys(uref, pts);
         } else if (unlikely(pts > last_pts)) { /* too far in the future ? */
-            upipe_err_va(upipe, "TOO EARLY (%f > %f) by %fs (%"PRIu64" ticks)",
+            upipe_err_va(upipe, "[%d] TOO EARLY (%f > %f) by %fs (%"PRIu64" ticks)",
+                upipe_bmd_sink_sub->channel_idx/2,
                     pts_to_time(pts), pts_to_time(last_pts),
                     dur_to_time(pts - last_pts), pts - last_pts
                     );
@@ -1189,30 +1193,43 @@ static upipe_bmd_sink_frame *get_video_frame(struct upipe *upipe,
     int h = upipe_bmd_sink->displayMode->GetHeight();
     int sd = upipe_bmd_sink->mode == bmdModePAL || upipe_bmd_sink->mode == bmdModeNTSC;
     int ttx = upipe_bmd_sink->mode == bmdModePAL || upipe_bmd_sink->mode == bmdModeHD1080i50;
-    const uint8_t *pic_data = NULL;
-    size_t pic_data_size = 0;
+
+    if (!uref) {
+        ULONG ref = 0;
+        if (upipe_bmd_sink->video_frame) {
+            //ref = upipe_bmd_sink->video_frame->AddRef();
+            /* increase refcount before outputting this frame */
+            ref = upipe_bmd_sink->video_frame->AddRef();
+        }
+        upipe_dbg_va(upipe, "REUSING FRAME %p : %d", upipe_bmd_sink->video_frame, ref);
+        return upipe_bmd_sink->video_frame;
+    }
 
     const char *v210 = "u10y10v10y10u10y10v10y10u10y10v10y10";
     size_t stride;
     const uint8_t *plane;
     if (unlikely(!ubase_check(uref_pic_plane_size(uref, v210, &stride,
-                                      NULL, NULL, NULL)) ||
-                 !ubase_check(uref_pic_plane_read(uref, v210, 0, 0, -1, -1,
-                                      &plane)))) {
+                        NULL, NULL, NULL)) ||
+                !ubase_check(uref_pic_plane_read(uref, v210, 0, 0, -1, -1,
+                        &plane)))) {
         upipe_err_va(upipe, "Could not read v210 plane");
         return NULL;
     }
-
-    upipe_bmd_sink_frame *video_frame = new upipe_bmd_sink_frame(uref, (void*)plane,
-                                                                 w, h, pts);
+    upipe_bmd_sink_frame *video_frame = new upipe_bmd_sink_frame(uref,
+            (void*)plane, w, h, pts);
     if (!video_frame) {
         uref_free(uref);
         return NULL;
     }
 
+    if (upipe_bmd_sink->video_frame)
+        upipe_bmd_sink->video_frame->Release();
+
     IDeckLinkVideoFrameAncillary *ancillary = NULL;
     upipe_bmd_sink->deckLinkOutput->CreateAncillaryData(video_frame->GetPixelFormat(), &ancillary);
 
+    const uint8_t *pic_data = NULL;
+    size_t pic_data_size = 0;
     uref_pic_get_cea_708(uref, &pic_data, &pic_data_size);
     if( pic_data_size > 0 )
     {
@@ -1264,6 +1281,9 @@ static upipe_bmd_sink_frame *get_video_frame(struct upipe *upipe,
     }
 
     video_frame->SetAncillaryData(ancillary);
+
+    video_frame->AddRef(); // we're gonna buffer this frame
+    upipe_bmd_sink->video_frame = video_frame;
 
     return video_frame;
 }
@@ -1338,7 +1358,7 @@ static void output_cb(struct upipe *upipe)
         if (!uref) {
             // TODO : duplicate previous frame ?
             upipe_err(upipe, "no uref");
-            return;
+            break;
         }
 
         /* read its timestamp */
@@ -1361,18 +1381,20 @@ static void output_cb(struct upipe *upipe)
         }
 
         if (pts + upipe_bmd_sink->ticks_per_frame / 2 < vid_pts) {
-            upipe_err_va(upipe, "Too early by %.2f ms | %"PRIu64"",
+            upipe_err_va(upipe, "pic too early by %.2f ms | %"PRIu64"",
                     dur_to_time(1000 * (vid_pts - pts)),
                     vid_pts - pts
                     );
-            return;
+            uref = NULL;
+            break;
         }
 
         upipe_err_va(upipe, "found uref, PTS diff %.2f", dur_to_time(vid_pts - pts));
         break;
     }
 
-    uref = upipe_bmd_sink_sub_pop_input(upipe);
+    if (uref)
+        uref = upipe_bmd_sink_sub_pop_input(upipe);
 
     schedule_frame(upipe, uref, pts);
 
@@ -1546,7 +1568,7 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
         return;
     }
 
-    print_buffers(upipe_bmd_sink);
+    //print_buffers(upipe_bmd_sink);
 
     if (!upipe_bmd_sink_sub_check_input(upipe) ||
         !upipe_bmd_sink_sub_output(upipe, uref, upump_p)) {
