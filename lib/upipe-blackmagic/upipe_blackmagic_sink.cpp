@@ -1859,7 +1859,7 @@ static uint64_t uclock_bmd_sink_now(struct uclock *uclock)
         upipe_err_va(upipe, "\t\tCouldn't read hardware clock: 0x%08lx", res);
         hardware_time = 0;
     } else if (unlikely(upipe_bmd_sink->ticks_per_frame == 0)) {
-            upipe_bmd_sink->ticks_per_frame = ticks_per_frame;
+        upipe_bmd_sink->ticks_per_frame = ticks_per_frame;
     }
 
     hardware_time += upipe_bmd_sink->offset;
