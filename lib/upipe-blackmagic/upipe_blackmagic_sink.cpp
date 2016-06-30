@@ -903,7 +903,18 @@ static void start_code(const int32_t *buf, uint8_t channel_idx, unsigned samples
 
         const unsigned frame_size_samples = 9120 /* bytes */ / 5 /* bytes per samples pair */;
 
-        //if (i != 216)
+#if 0 /* put silence around sync words to find them easily in VANC dump */
+	for (int j = 0; j < i; j++) {
+		uint32_t *b = (uint32_t*)buf;
+		b[j*DECKLINK_CHANNELS+0] = (1 << 24) -1;
+		b[j*DECKLINK_CHANNELS+1] = (1 << 24) -1;
+	}
+	for (int j = i+8; j < 1920; j++) {
+		uint32_t *b = (uint32_t*)buf;
+		b[j*DECKLINK_CHANNELS+0] = (1 << 24) -1;
+		b[j*DECKLINK_CHANNELS+1] = (1 << 24) -1;
+	}
+#endif
         printf("[%d] S337 sync at sample %zu/1920 : burst %zu -> %zu\n", channel_idx / 2,
                 i, i + 4, i + 4 + frame_size_samples);
         sync = true;
