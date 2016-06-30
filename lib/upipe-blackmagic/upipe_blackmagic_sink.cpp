@@ -943,7 +943,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
     /* timestamp of next video frame */
     const uint64_t last_pts = video_pts + samples * UCLOCK_FREQ / 48000;
 
-    uint64_t start_offset = UINT64_MAX;
+    int64_t start_offset = -1;
     uint64_t end_offset = 0;
 
     if (0) upipe_dbg_va(upipe, "\tChannel %hu - video pts %f (%"PRIu64")",
@@ -1033,7 +1033,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
                     pts_to_time(pts), pts_to_time(last_pts),
                     dur_to_time(pts - last_pts), pts - last_pts
                     );
-            upipe_dbg_va(upipe, "\t\tStart %u End %u Samples %"PRIu64, start_offset, end_offset, samples_offset);
+            upipe_dbg_va(upipe, "\t\tStart %"PRId64" End %u", start_offset, end_offset);
             break;
         }
 
@@ -1109,26 +1109,23 @@ drop_uref:
             break;
     }
 
-    if (start_offset == UINT64_MAX) {
-        //assert(upipe_bmd_sink_sub->nb_urefs == 0);
-        if (upipe_bmd_sink_sub->nb_urefs != 0)
-            upipe_err_va(upipe, "COULD NOT START DESPITE %u buffered urefs", upipe_bmd_sink_sub->nb_urefs);
-        upipe_err_va(upipe, "[%d] NO BUFFERS for vid PTS %f", 
-                upipe_bmd_sink_sub->channel_idx/2, pts_to_time(video_pts));
+    if (start_offset == -1) {
+        upipe_err_va(upipe, "[%d] NO BUFFERS for vid PTS %f (%u urefs)",
+                upipe_bmd_sink_sub->channel_idx/2, pts_to_time(video_pts),
+                upipe_bmd_sink_sub->nb_urefs);
         return;
     }
 
     if (start_offset > 0) {
-        upipe_err_va(upipe, "Start offset %"PRIu64, start_offset);
-        // TODO : fix hole
+        upipe_err_va(upipe, "[%d] Start offset %"PRId64,
+                upipe_bmd_sink_sub->channel_idx/2,
+                start_offset);
     }
 
     if (end_offset < samples) {
-        //assert(upipe_bmd_sink_sub->nb_urefs == 0);
         upipe_err_va(upipe, "[%d] MISSED %"PRIu64" samples, last pts %f (%u urefs buffered)",
                 upipe_bmd_sink_sub->channel_idx/2,
                 samples - end_offset, pts_to_time(last_pts), upipe_bmd_sink_sub->nb_urefs);
-        // TODO : fix hole
     }
 }
 
