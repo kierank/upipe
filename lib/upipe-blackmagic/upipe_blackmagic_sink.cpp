@@ -388,13 +388,14 @@ public:
         if (result > 4) result = 4;
 
         BMDTimeValue val;
-        if (output->GetFrameCompletionReferenceTimestamp(completedFrame, UCLOCK_FREQ, &val) != S_OK)
+        if (upipe_bmd_sink->deckLinkOutput->GetFrameCompletionReferenceTimestamp(completedFrame, UCLOCK_FREQ, &val) != S_OK)
             val = 0;
 
         uint64_t now = uclock_now(&upipe_bmd_sink->uclock);
         uint64_t pts = ((upipe_bmd_sink_frame*)completedFrame)->pts;
         int64_t diff = now - pts - upipe_bmd_sink->ticks_per_frame;
-        upipe_notice_va(upipe, "%p Frame %s (%.2f ms) - delay %.2f ms", completedFrame,
+        upipe_notice_va(&upipe_bmd_sink->upipe,
+                "%p Frame %s (%.2f ms) - delay %.2f ms", completedFrame,
                 res[result], dur_to_time(1000 * (val - prev)), dur_to_time(1000 * diff));
         prev = val;
 
@@ -406,8 +407,6 @@ public:
 
     callback(struct upipe_bmd_sink *upipe_bmd_sink_) {
         upipe_bmd_sink = upipe_bmd_sink_;
-        output = upipe_bmd_sink->deckLinkOutput;
-        upipe = &upipe_bmd_sink->upipe;
         uatomic_store(&refcount, 1);
         prev = 0;
     }
@@ -434,9 +433,7 @@ public:
 private:
     uatomic_uint32_t refcount;
     BMDTimeValue prev;
-    IDeckLinkOutput *output;
     struct upipe_bmd_sink *upipe_bmd_sink;
-    struct upipe *upipe;
 };
 
 static const bool parity_tab[256] =
