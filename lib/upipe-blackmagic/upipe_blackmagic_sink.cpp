@@ -1359,7 +1359,6 @@ static void output_cb(struct upipe *upipe)
         /* peek at first available picture */
         uref = uref_from_uchain(ulist_peek(&upipe_bmd_sink_sub->urefs));
         if (!uref) {
-            // TODO : duplicate previous frame ?
             upipe_err(upipe, "no uref");
             break;
         }
