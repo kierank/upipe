@@ -1007,6 +1007,11 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
                 goto drop_uref;
             }
 
+            if (upipe_bmd_sink_sub->s302m) {
+                /* do not drop first samples of s337 */
+                drop_duration = 0;
+            }
+
             /* drop beginning of uref */
             size_t drop_samples = length_to_samples(drop_duration);
             if (drop_samples > uref_samples)
@@ -1035,6 +1040,12 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
                     );
             upipe_dbg_va(upipe, "\t\tStart %"PRId64" End %u", start_offset, end_offset);
             break;
+        }
+
+        if (upipe_bmd_sink_sub->s302m) {
+            /* do not drop last samples of s337 */
+            time_offset = 0;
+            pts = video_pts;
         }
 
         /* writing position in the outgoing block */
