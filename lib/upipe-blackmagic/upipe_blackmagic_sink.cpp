@@ -269,9 +269,6 @@ struct upipe_bmd_sink_sub {
     /** position in the SDI stream */
     uint8_t channel_idx;
 
-    /** audio buffer to merge tracks */
-    int32_t *audio_buf;
-
     /** public upipe structure */
     struct upipe upipe;
 };
@@ -349,6 +346,12 @@ struct upipe_bmd_sink {
 
     /** Frame completion callback */
     callback *cb;
+
+    /** audio buffer to merge tracks */
+    int32_t *audio_buf;
+
+    /** offset between audio sample 0 and line 21 */
+    uint8_t line21_offset;
 
     /** last frame output */
     upipe_bmd_sink_frame *video_frame;
@@ -924,8 +927,25 @@ static void start_code(const int32_t *buf, uint8_t channel_idx, unsigned samples
         printf("[%d] NO SYNC and frame not all zeros\n", channel_idx/2);
 }
 
-static void copy_samples(int32_t *out, uint8_t idx, struct uref *uref, uint64_t offset, uint64_t samples)
+static void copy_samples(upipe_bmd_sink_sub *upipe_bmd_sink_sub,
+        struct uref *uref, uint64_t offset, uint64_t samples)
 {
+    struct upipe *upipe = &upipe_bmd_sink_sub->upipe;
+    struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+    uint8_t idx = upipe_bmd_sink_sub->channel_idx;
+    int32_t *out = upipe_bmd_sink->audio_buf;
+
+    if (upipe_bmd_sink_sub->s302m) {
+        if (upipe_bmd_sink->line21_offset >= samples) {
+            upipe_err_va(upipe, "offsetting for line21 would overflow audio: "
+                "offset %"PRIu64" + line 21 %hu, %"PRIu64" samples",
+                offset, upipe_bmd_sink->line21_offset, samples);
+        } else {
+            offset  += upipe_bmd_sink->line21_offset;
+            samples -= upipe_bmd_sink->line21_offset;
+        }
+    }
+
     const int32_t *in;
     uref_sound_read_int32_t(uref, 0, samples, &in, 1);
     for (int i = 0; i < samples; i++)
@@ -1097,12 +1117,10 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         if (0) upipe_dbg_va(upipe, "reading %u samples", missing_samples);
 
         /* read the samples into our final buffer */
-        copy_samples(upipe_bmd_sink->pic_subpipe.audio_buf,
-                upipe_bmd_sink_sub->channel_idx, uref,
-                samples_offset, missing_samples);
+        copy_samples( upipe_bmd_sink_sub, uref, samples_offset, missing_samples);
 
         if (upipe_bmd_sink_sub->s302m)
-            start_code(upipe_bmd_sink->pic_subpipe.audio_buf, upipe_bmd_sink_sub->channel_idx,
+            start_code(upipe_bmd_sink->audio_buf, upipe_bmd_sink_sub->channel_idx,
                     samples);
 
         /* The latest in the outgoing block we've written to */
@@ -1156,7 +1174,7 @@ static void upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe,
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
 
     /* Clear buffer */
-    memset(upipe_bmd_sink->pic_subpipe.audio_buf, 0,
+    memset(upipe_bmd_sink->audio_buf, 0,
             samples * DECKLINK_CHANNELS * sizeof(int32_t));
 
     /* interate through input subpipes */
@@ -1327,7 +1345,7 @@ static void schedule_frame(struct upipe *upipe, struct uref *uref, uint64_t pts)
 
     uint32_t written;
     result = upipe_bmd_sink->deckLinkOutput->ScheduleAudioSamples(
-            upipe_bmd_sink->pic_subpipe.audio_buf, samples, pts,
+            upipe_bmd_sink->audio_buf, samples, pts,
             UCLOCK_FREQ, &written);
     if( result != S_OK ) {
         upipe_err_va(upipe, "DROPPED AUDIO: %lx", result);
@@ -1921,7 +1939,7 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
 
     const unsigned max_samples = (uint64_t)48000 * 1001 / 24000;
     const size_t audio_buf_size = max_samples * DECKLINK_CHANNELS * sizeof(int32_t);
-    upipe_bmd_sink->pic_subpipe.audio_buf = (int32_t*)malloc(audio_buf_size);
+    upipe_bmd_sink->audio_buf = (int32_t*)malloc(audio_buf_size);
 
     upipe_bmd_sink->uclock.refcount = upipe->refcount;
     upipe_bmd_sink->uclock.uclock_now = uclock_bmd_sink_now;
@@ -2089,6 +2107,19 @@ static int upipe_bmd_sink_open_card(struct upipe *upipe)
         if (deckLink)
             deckLink->Release();
         goto end;
+    }
+
+    const char *modelName;
+    if (deckLink->GetModelName(&modelName) != S_OK) {
+        upipe_err(upipe, "Could not read card model name");
+        modelName = NULL;
+    } else if (!strcmp(modelName, "DeckLink SDI")) {
+        upipe_bmd_sink->line21_offset = 54;
+    } else if (!strcmp(modelName, "DeckLink SDI 4K")) {
+        upipe_bmd_sink->line21_offset = 33;
+    } else {
+        upipe_warn_va(upipe, "Unknown line 21 offset for model %s", modelName);
+        upipe_bmd_sink->line21_offset = 0;
     }
 
     if (deckLink->QueryInterface(IID_IDeckLinkOutput,
@@ -2324,7 +2355,7 @@ static void upipe_bmd_sink_free(struct upipe *upipe)
 
     upipe_throw_dead(upipe);
 
-    free(upipe_bmd_sink->pic_subpipe.audio_buf);
+    free(upipe_bmd_sink->audio_buf);
 
     if (upipe_bmd_sink->deckLink) {
         upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(NULL);
