@@ -2157,7 +2157,7 @@ static int upipe_bmd_sink_set_option(struct upipe *upipe,
     struct upipe_bmd_sink *upipe_bmd_sink = upipe_bmd_sink_from_upipe(upipe);
     assert(k != NULL);
 
-    if (!strcmp(k, "card-idx"))
+    if (!strcmp(k, "card-index"))
         upipe_bmd_sink->card_idx = atoi(v);
 
     if (!strcmp(k, "mode")) {
