@@ -396,6 +396,9 @@ public:
         if (upipe_bmd_sink->deckLinkOutput->GetFrameCompletionReferenceTimestamp(completedFrame, UCLOCK_FREQ, &val) != S_OK)
             val = 0;
 
+        if (!upipe_bmd_sink->started)
+            return S_OK;
+
         uint64_t now = uclock_now(&upipe_bmd_sink->uclock);
         uint64_t pts = ((upipe_bmd_sink_frame*)completedFrame)->pts;
         int64_t diff = now - pts - upipe_bmd_sink->ticks_per_frame;
@@ -1411,6 +1414,20 @@ static void output_cb(struct upipe *upipe)
             return;
         }
         vid_pts += upipe_bmd_sink_sub->latency;
+
+        uint64_t now = uclock_now(&upipe_bmd_sink->uclock);
+
+        if (now < vid_pts) {
+            upipe_err_va(upipe, "Picture buffering screwed (%.2f < %.2f), rebuffering",
+                    pts_to_time(now), pts_to_time(vid_pts));
+            upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(NULL);
+            upipe_bmd_sink->start_pts = 0;
+            upipe_bmd_sink->pts = 0;
+            upipe_bmd_sink->started = 0;
+            upipe_bmd_sink->preroll = PREROLL_FRAMES;
+            upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(upipe_bmd_sink->cb);
+            return;
+        }
 
         upipe_notice_va(upipe, "\texamining pic %.2f", pts_to_time(vid_pts));
 
