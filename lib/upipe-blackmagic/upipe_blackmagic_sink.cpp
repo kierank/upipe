@@ -996,9 +996,6 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
     int64_t start_offset = -1;
     uint64_t end_offset = 0;
 
-    if (0) upipe_dbg_va(upipe, "\tChannel %hu - video pts %f (%"PRIu64")",
-            upipe_bmd_sink_sub->channel_idx/2, pts_to_time(video_pts), video_pts);
-
     uint64_t old_pts = 0; // debug
 
     /* iterate through subpipe queue */
@@ -1039,12 +1036,6 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
         time_offset = pts - video_pts;
 
-        if (!old_pts)
-            old_pts = pts;
-        if (0) upipe_dbg_va(upipe, "uref pts %f (%"PRIu64", +%"PRIu64") duration %"PRIu64" offset %"PRId64,
-                pts_to_time(pts), pts, pts - old_pts, duration, time_offset);
-        old_pts = pts;
-
         /* likely to happen when starting but not after */
         if (unlikely(time_offset < 0)) {
             /* audio PTS is earlier than video PTS */
@@ -1054,7 +1045,8 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
             /* too late */
             if (unlikely(duration < drop_duration)) {
-                upipe_err_va(upipe, "TOO LATE by %"PRIu64" ticks, dropping %zu samples (%f + %f < %f)",
+                upipe_err_va(upipe, "[%d] TOO LATE by %"PRIu64" ticks, dropping %zu samples (%f + %f < %f)",
+                        upipe_bmd_sink_sub->channel_idx/2,
                         video_pts - pts - duration,
                         uref_samples,
                         pts_to_time(pts), dur_to_time(duration), pts_to_time(video_pts)
