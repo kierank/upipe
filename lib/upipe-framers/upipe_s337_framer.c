@@ -199,6 +199,9 @@ static void upipe_s337f_input(struct upipe *upipe, struct uref *uref, struct upu
         if (unlikely(flow_def == NULL)) {
             upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
         } else {
+            // TODO: ntsc
+            uref_clock_set_latency(flow_def, UCLOCK_FREQ * size[0] * 2 / 48000);
+
             uref_attr_set_small_unsigned(flow_def, data_type,
                 UDICT_TYPE_SMALL_UNSIGNED, "data_type");
             flow_def = upipe_s337f_store_flow_def_attr(upipe, flow_def);
