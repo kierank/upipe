@@ -29,6 +29,7 @@
 #include <upipe/ubase.h>
 #include <upipe/uatomic.h>
 #include <upipe/ulist.h>
+#include <upipe/uqueue.h>
 #include <upipe/uprobe.h>
 #include <upipe/uclock.h>
 #include <upipe/uref.h>
@@ -230,10 +231,6 @@ static float pts_to_time(uint64_t pts)
     return dur_to_time(pts - first);
 }
 
-/** @hidden */
-static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
-                                      struct upump **upump_p);
-
 /** @internal @This is the private context of an output of an bmd_sink sink
  * pipe. */
 struct upipe_bmd_sink_sub {
@@ -241,14 +238,10 @@ struct upipe_bmd_sink_sub {
 
     struct upipe *upipe_bmd_sink;
 
-    /** temporary uref storage */
-    struct uchain urefs;
-    /** nb urefs in storage */
-    unsigned int nb_urefs;
-    /** max urefs in storage */
-    unsigned int max_urefs;
-    /** list of blockers */
-    struct uchain blockers;
+    /** thread-safe urefs queue */
+    struct uqueue uqueue;
+
+    struct uref *uref;
 
     /** structure for double-linked lists */
     struct uchain uchain;
@@ -364,7 +357,6 @@ UPIPE_HELPER_VOID(upipe_bmd_sink);
 UPIPE_HELPER_UPIPE(upipe_bmd_sink_sub, upipe, UPIPE_BMD_SINK_INPUT_SIGNATURE)
 UPIPE_HELPER_UPUMP_MGR(upipe_bmd_sink_sub, upump_mgr);
 UPIPE_HELPER_UPUMP(upipe_bmd_sink_sub, upump, upump_mgr);
-UPIPE_HELPER_INPUT(upipe_bmd_sink_sub, urefs, nb_urefs, max_urefs, blockers, upipe_bmd_sink_sub_output);
 UPIPE_HELPER_FLOW(upipe_bmd_sink_sub, NULL);
 UPIPE_HELPER_SUBPIPE(upipe_bmd_sink, upipe_bmd_sink_sub, input, sub_mgr, inputs, uchain)
 UPIPE_HELPER_UREFCOUNT(upipe_bmd_sink_sub, urefcount, upipe_bmd_sink_sub_free);
@@ -373,6 +365,16 @@ UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, pic_subpipe, pic_subpipe)
 UBASE_FROM_TO(upipe_bmd_sink, upipe_bmd_sink_sub, subpic_subpipe, subpic_subpipe)
 
 UBASE_FROM_TO(upipe_bmd_sink, uclock, uclock, uclock)
+
+static void uqueue_uref_flush(struct uqueue *uqueue)
+{
+    for (;;) {
+        struct uref *uref = uqueue_pop(uqueue, struct uref *);
+        if (!uref)
+            break;
+        uref_free(uref);
+    }
+}
 
 static void output_cb(struct upipe *upipe);
 
@@ -818,7 +820,9 @@ static void upipe_bmd_sink_sub_init(struct upipe *upipe,
     upipe_bmd_sink_sub->upipe_bmd_sink = upipe_bmd_sink_to_upipe(upipe_bmd_sink);
 
     upipe_bmd_sink_sub_init_sub(upipe);
-    upipe_bmd_sink_sub_init_input(upipe);
+    static const uint8_t length = 255;
+    uqueue_init(&upipe_bmd_sink_sub->uqueue, length, malloc(uqueue_sizeof(length)));
+    upipe_bmd_sink_sub->uref = NULL;
     upipe_bmd_sink_sub_init_upump_mgr(upipe);
     upipe_bmd_sink_sub_init_upump(upipe);
     upipe_bmd_sink_sub->sound = !static_pipe;
@@ -833,7 +837,9 @@ static void upipe_bmd_sink_sub_free(struct upipe *upipe)
     upipe_bmd_sink_sub_clean_sub(upipe);
     upipe_bmd_sink_sub_clean_upump(upipe);
     upipe_bmd_sink_sub_clean_upump_mgr(upipe);
-    upipe_bmd_sink_sub_clean_input(upipe);
+    uref_free(upipe_bmd_sink_sub->uref);
+    uqueue_uref_flush(&upipe_bmd_sink_sub->uqueue);
+    uqueue_clean(&upipe_bmd_sink_sub->uqueue);
 
     struct upipe_bmd_sink *upipe_bmd_sink =
         upipe_bmd_sink_from_sub_mgr(upipe->mgr);
@@ -907,16 +913,16 @@ static void start_code(const int32_t *buf, uint8_t channel_idx, unsigned samples
         const unsigned frame_size_samples = 9120 /* bytes */ / 5 /* bytes per samples pair */;
 
 #if 0 /* put silence around sync words to find them easily in VANC dump */
-	for (int j = 0; j < i; j++) {
-		uint32_t *b = (uint32_t*)buf;
-		b[j*DECKLINK_CHANNELS+0] = (1 << 24) -1;
-		b[j*DECKLINK_CHANNELS+1] = (1 << 24) -1;
-	}
-	for (int j = i+8; j < 1920; j++) {
-		uint32_t *b = (uint32_t*)buf;
-		b[j*DECKLINK_CHANNELS+0] = (1 << 24) -1;
-		b[j*DECKLINK_CHANNELS+1] = (1 << 24) -1;
-	}
+        for (int j = 0; j < i; j++) {
+            uint32_t *b = (uint32_t*)buf;
+            b[j*DECKLINK_CHANNELS+0] = (1 << 24) -1;
+            b[j*DECKLINK_CHANNELS+1] = (1 << 24) -1;
+        }
+        for (int j = i+8; j < 1920; j++) {
+            uint32_t *b = (uint32_t*)buf;
+            b[j*DECKLINK_CHANNELS+0] = (1 << 24) -1;
+            b[j*DECKLINK_CHANNELS+1] = (1 << 24) -1;
+        }
 #endif
         printf("[%d] S337 sync at sample %zu/1920 : burst %zu -> %zu\n", channel_idx / 2,
                 i, i + 4, i + 4 + frame_size_samples);
@@ -980,9 +986,15 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
     uint64_t old_pts = 0; // debug
 
     /* iterate through subpipe queue */
-    struct uchain *uchain, *uchain_tmp;
-    ulist_delete_foreach(&upipe_bmd_sink_sub->urefs, uchain, uchain_tmp) {
-        struct uref *uref = uref_from_uchain(uchain);
+    for (;;) {
+        struct uref *uref = upipe_bmd_sink_sub->uref;
+        if (uref)
+            upipe_bmd_sink_sub->uref = NULL;
+        else {
+            uref = uqueue_pop(&upipe_bmd_sink_sub->uqueue, struct uref *);
+            if (!uref)
+                break;
+        }
 
         size_t uref_samples = 0;                /* samples in the uref */
         struct urational drift_rate = { 0, 0 }; /* playing rate */
@@ -1133,13 +1145,12 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
             pts += missing_samples * UCLOCK_FREQ / 48000;
             uref_clock_set_pts_sys(uref, pts);
             uref_sound_resize(uref, missing_samples, -1);
+            upipe_bmd_sink_sub->uref = uref;
             //assert(end_offset == samples);
             break;
         }
 
 drop_uref:
-        ulist_delete(uchain);
-        upipe_bmd_sink_sub->nb_urefs--;
         uref_free(uref);
 
         if (end_offset == samples)
@@ -1147,9 +1158,9 @@ drop_uref:
     }
 
     if (start_offset == -1) {
-        upipe_err_va(upipe, "[%d] NO BUFFERS for vid PTS %f (%u urefs)",
+        upipe_err_va(upipe, "[%d] NO AUDIO for vid PTS %f (%u urefs)",
                 upipe_bmd_sink_sub->channel_idx/2, pts_to_time(video_pts),
-                upipe_bmd_sink_sub->nb_urefs);
+                uqueue_length(&upipe_bmd_sink_sub->uqueue));
         return;
     }
 
@@ -1162,7 +1173,8 @@ drop_uref:
     if (end_offset < samples) {
         upipe_err_va(upipe, "[%d] MISSED %"PRIu64" samples, last pts %f (%u urefs buffered)",
                 upipe_bmd_sink_sub->channel_idx/2,
-                samples - end_offset, pts_to_time(last_pts), upipe_bmd_sink_sub->nb_urefs);
+                samples - end_offset, pts_to_time(last_pts),
+                uqueue_length(&upipe_bmd_sink_sub->uqueue));
     }
 }
 
@@ -1279,13 +1291,13 @@ static upipe_bmd_sink_frame *get_video_frame(struct upipe *upipe,
     }
 
     /* Loop through subpic data */
-    //printf("\n subpic depth %i \n", upipe_bmd_sink_sub->nb_urefs);
-    struct uchain *uchain, *uchain_tmp;
     struct upipe_bmd_sink_sub *subpic_sub = &upipe_bmd_sink->subpic_subpipe;
 
-    ulist_delete_foreach(&subpic_sub->urefs, uchain, uchain_tmp) {
-        //printf("\n VIDEO PTS %"PRIu64" \n", pts );
-        struct uref *uref = uref_from_uchain(uchain);
+    for (;;) {
+        struct uref *uref = uqueue_pop(&subpic_sub->uqueue, struct uref *);
+        if (!uref)
+            break;
+
         uint64_t subpic_pts = 0;
         uref_clock_get_pts_sys(uref, &subpic_pts);
         subpic_pts += subpic_sub->latency;
@@ -1293,8 +1305,6 @@ static upipe_bmd_sink_frame *get_video_frame(struct upipe *upipe,
 
         /* Delete old urefs */
         if (subpic_pts + (UCLOCK_FREQ/25) < pts) {
-            ulist_delete(uchain);
-            subpic_sub->nb_urefs--;
             uref_free(uref);
             continue;
         }
@@ -1308,8 +1318,6 @@ static upipe_bmd_sink_frame *get_video_frame(struct upipe *upipe,
                 upipe_bmd_sink_extract_ttx(upipe, ancillary, buf, size, sd);
                 uref_block_unmap(uref, 0);
             }
-            ulist_delete(uchain);
-            subpic_sub->nb_urefs--;
             uref_free(uref);
             break;
         }
@@ -1384,20 +1392,23 @@ static void output_cb(struct upipe *upipe)
     uint64_t pts = upipe_bmd_sink->pts;
 
     uint64_t now = uclock_now(&upipe_bmd_sink->uclock);
-    upipe_notice_va(upipe, "PTS %.2f - %.2f", pts_to_time(pts), dur_to_time(now - pts));
+    upipe_notice_va(upipe, "PTS %.2f - %.2f - %u pics",
+            pts_to_time(pts),
+            dur_to_time(now - pts),
+            uqueue_length(&upipe_bmd_sink_sub->uqueue));
 
     /* Find a picture */
     struct uref *uref;
-    uint64_t vid_pts = 0;
     for (;;) {
-        /* peek at first available picture */
-        uref = uref_from_uchain(ulist_peek(&upipe_bmd_sink_sub->urefs));
+        /* pop first available picture */
+        uref = uqueue_pop(&upipe_bmd_sink_sub->uqueue, struct uref *);
         if (!uref) {
             upipe_err(upipe, "no uref");
             break;
         }
 
         /* read its timestamp */
+        uint64_t vid_pts = 0;
         if (unlikely(!ubase_check(uref_clock_get_pts_sys(uref, &vid_pts)))) {
             upipe_err(upipe, "Could not read pts");
             return;
@@ -1407,30 +1418,30 @@ static void output_cb(struct upipe *upipe)
         upipe_notice_va(upipe, "\texamining pic %.2f", pts_to_time(vid_pts));
 
         /* frame pts too much in the past */
-        if (pts > vid_pts + UCLOCK_FREQ / 10) {
+        if (pts > vid_pts /*+ UCLOCK_FREQ / 10*/) {
             upipe_warn_va(upipe, "late uref dropped (%.2f)",
                     dur_to_time(pts - vid_pts));
             /* look at next picture */
-            uref = upipe_bmd_sink_sub_pop_input(upipe);
             uref_free(uref);
             continue;
         }
 
         if (pts + upipe_bmd_sink->ticks_per_frame / 2 < vid_pts) {
-            upipe_err_va(upipe, "pic too early by %.2f ms | %"PRIu64"",
+            upipe_err_va(upipe, "pic %.2f too early by %.2f ms | %"PRIu64"",
+                    pts_to_time(vid_pts),
                     dur_to_time(1000 * (vid_pts - pts)),
                     vid_pts - pts
                     );
+            uref_free(uref);
             uref = NULL;
             break;
         }
 
-        upipe_err_va(upipe, "found uref, PTS diff %.2f", dur_to_time(vid_pts - pts));
+        upipe_err_va(upipe, "found uref %.2f, PTS diff %.2f",
+                pts_to_time(vid_pts),
+                dur_to_time(vid_pts - pts));
         break;
     }
-
-    if (uref)
-        uref = upipe_bmd_sink_sub_pop_input(upipe);
 
     schedule_frame(upipe, uref, pts);
 
@@ -1450,79 +1461,12 @@ static void output_cb(struct upipe *upipe)
     upipe_bmd_sink->pts += upipe_bmd_sink->ticks_per_frame;
 }
 
-static void upipe_bmd_sink_sub_write_watcher(struct upump *upump)
-{
-    struct upipe *upipe = upump_get_opaque(upump, struct upipe *);
-    upipe_bmd_sink_sub_set_upump(upipe, NULL);
-    upipe_bmd_sink_sub_output_input(upipe);
-    upipe_bmd_sink_sub_unblock_input(upipe);
-}
-
-static uint64_t get_last_pts(upipe_bmd_sink_sub *upipe_bmd_sink_sub)
-{
-    struct uchain *uchain = upipe_bmd_sink_sub->urefs.prev;
-    if (uchain == &upipe_bmd_sink_sub->urefs)
-        return 0;
-
-    struct uref *uref = uref_from_uchain(uchain);
-    if (!uref)
-        return 0;
-
-    uint64_t pts;
-    if (unlikely(!ubase_check(uref_clock_get_pts_sys(uref, &pts))))
-        return 0;
-//  pts += upipe_bmd_sink_sub->latency;
-
-    return pts;
-}
-
-static uint64_t get_first_pts(upipe_bmd_sink_sub *upipe_bmd_sink_sub)
-{
-    struct uref *uref = uref_from_uchain(ulist_peek(&upipe_bmd_sink_sub->urefs));
-    if (!uref)
-        return 0;
-
-    uint64_t pts;
-    if (unlikely(!ubase_check(uref_clock_get_pts_sys(uref, &pts))))
-        return 0;
-//  pts += upipe_bmd_sink_sub->latency;
-
-    return pts;
-}
-
-static void print_buffers(upipe_bmd_sink *upipe_bmd_sink)
-{
-    struct upipe *upipe = &upipe_bmd_sink->upipe;
-
-    upipe_notice_va(upipe, "\tbuffers");
-    struct uchain *uchain;
-    ulist_foreach(&upipe_bmd_sink->inputs, uchain) {
-        struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
-            upipe_bmd_sink_sub_from_uchain(uchain);
-
-        char t = 'A';
-        if (upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe)
-            t = 'V';
-        else if (upipe_bmd_sink_sub == &upipe_bmd_sink->subpic_subpipe)
-            t = 'S';
-
-        uint64_t pts = get_first_pts(upipe_bmd_sink_sub);
-        if (!pts)
-            continue;
-
-        uint64_t last = get_last_pts(upipe_bmd_sink_sub);
-        upipe_notice_va(upipe, "%c %2f - %2f", t, pts_to_time(pts), pts_to_time(last));
-    }
-}
-
 /** @internal @This handles input uref.
  *
  * @param upipe description structure of the pipe
  * @param uref uref structure
- * @param upump_p reference to upump structure
  */
-static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
-                                      struct upump **upump_p)
+static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
         upipe_bmd_sink_from_sub_mgr(upipe->mgr);
@@ -1564,20 +1508,37 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref,
         upipe_bmd_sink->start_pts = pts;
         upipe_bmd_sink->pts = pts;
 
-        /* let it buffer a bit, for audio to catch up with video pts */
-        upipe_bmd_sink_sub_wait_upump(upipe, UCLOCK_FREQ, upipe_bmd_sink_sub_write_watcher);
+        return false;
+    }
+
+    uint64_t now = uclock_now(&upipe_bmd_sink->uclock);
+
+    if (now < upipe_bmd_sink->start_pts) {
+        upipe_notice_va(upipe, "%.2f < %.2f, buffering",
+            pts_to_time(now), pts_to_time(upipe_bmd_sink->start_pts));
         return false;
     }
 
     /* next PTS */
     upipe_bmd_sink->pts += upipe_bmd_sink->ticks_per_frame;
 
+    /* We're done buffering and now prerolling,
+     * push the uref we just got into the fifo and
+     * get the first one we buffered */
+    if (!uqueue_push(&upipe_bmd_sink_sub->uqueue, uref)) {
+        upipe_err_va(upipe, "Buffer is full");
+        uref_free(uref);
+    }
+    uref = uqueue_pop(&upipe_bmd_sink_sub->uqueue, struct uref *);
+    if (!uref) {
+        upipe_err_va(upipe, "Buffer is empty");
+    }
+
     upipe_notice_va(upipe, "PREROLLING %.2f", pts_to_time(pts));
     schedule_frame(upipe, uref, pts);
 
     if (--upipe_bmd_sink->preroll == 0) {
         upipe_notice(upipe, "Starting playback");
-        //exit(0);
         if (upipe_bmd_sink->deckLinkOutput->EndAudioPreroll() != S_OK)
             upipe_err_va(upipe, "End preroll failed");
         upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(upipe_bmd_sink->start_pts, UCLOCK_FREQ, 1.0);
@@ -1598,6 +1559,8 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
         upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+    struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
+        upipe_bmd_sink_sub_from_upipe(upipe);
 
     if (!upipe_bmd_sink->deckLink) {
         upipe_err_va(upipe, "DeckLink card not ready");
@@ -1605,16 +1568,11 @@ static void upipe_bmd_sink_sub_input(struct upipe *upipe, struct uref *uref,
         return;
     }
 
-    //print_buffers(upipe_bmd_sink);
-
-    if (!upipe_bmd_sink_sub_check_input(upipe) ||
-        !upipe_bmd_sink_sub_output(upipe, uref, upump_p)) {
-        upipe_bmd_sink_sub_hold_input(upipe, uref);
-        //struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
-        //    upipe_bmd_sink_sub_from_upipe(upipe);
-        //if (!upipe_bmd_sink_sub->sound)
-        //    upipe_bmd_sink_sub_block_input(upipe, upump_p);
-    }
+    if (!upipe_bmd_sink_sub_output(upipe, uref))
+        if (!uqueue_push(&upipe_bmd_sink_sub->uqueue, uref)) {
+            upipe_err(upipe, "Couldn't queue uref");
+            uref_free(uref);
+        }
 }
 
 uint32_t upipe_bmd_mode_from_flow_def(struct upipe *upipe, struct uref *flow_def)
@@ -1963,7 +1921,9 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
         ulist_foreach(&upipe_bmd_sink->inputs, uchain) {
             struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
                 upipe_bmd_sink_sub_from_uchain(uchain);
-            upipe_bmd_sink_sub_flush_input(&upipe_bmd_sink_sub->upipe);
+            uref_free(upipe_bmd_sink_sub->uref);
+            upipe_bmd_sink_sub->uref = NULL;
+            uqueue_uref_flush(&upipe_bmd_sink_sub->uqueue);
         }
         if (upipe_bmd_sink->video_frame) {
             upipe_bmd_sink->video_frame->Release();
