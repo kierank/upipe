@@ -146,6 +146,13 @@ static void upipe_s337f_input(struct upipe *upipe, struct uref *uref, struct upu
     struct upipe_s337f *upipe_s337f = upipe_s337f_from_upipe(upipe);
 
     ssize_t sync = upipe_s337f_sync(upipe, uref);
+    if (sync == -1) {
+        upipe_err(upipe, "Sync lost");
+        uref_free(uref);
+        uref_free(upipe_s337f->uref);
+        upipe_s337f->uref = NULL;
+        return;
+    }
 
     if (sync != upipe_s337f->sync) {
         upipe_warn_va(upipe, "Sync word at offset %zu", sync);
