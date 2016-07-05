@@ -292,8 +292,6 @@ struct upipe_bmd_sink {
     /** video frame index (modulo 5) */
     uint8_t frame_idx;
 
-    /** started flag **/
-    int started;
     uint64_t start_pts;
     int preroll;
     uint64_t pts;
@@ -396,7 +394,7 @@ public:
         if (upipe_bmd_sink->deckLinkOutput->GetFrameCompletionReferenceTimestamp(completedFrame, UCLOCK_FREQ, &val) != S_OK)
             val = 0;
 
-        if (!upipe_bmd_sink->started)
+        if (upipe_bmd_sink->preroll)
             return S_OK;
 
         uint64_t now = uclock_now(&upipe_bmd_sink->uclock);
@@ -1371,7 +1369,6 @@ static void schedule_frame(struct upipe *upipe, struct uref *uref, uint64_t pts)
     if (buffered == 0) {
         /* TODO: get notified as soon as audio buffers empty */
         upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
-        upipe_bmd_sink->started = 0;
     }
 #endif
 
@@ -1423,7 +1420,6 @@ static void output_cb(struct upipe *upipe)
             upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(NULL);
             upipe_bmd_sink->start_pts = 0;
             upipe_bmd_sink->pts = 0;
-            upipe_bmd_sink->started = 0;
             upipe_bmd_sink->preroll = PREROLL_FRAMES;
             upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(upipe_bmd_sink->cb);
             return;
@@ -1556,7 +1552,6 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref)
         if (upipe_bmd_sink->deckLinkOutput->EndAudioPreroll() != S_OK)
             upipe_err_va(upipe, "End preroll failed");
         upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(upipe_bmd_sink->start_pts, UCLOCK_FREQ, 1.0);
-        upipe_bmd_sink->started = 1;
     }
 
     return true;
@@ -1949,7 +1944,6 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
         upipe_bmd_sink->displayMode->Release();
     }
 
-    upipe_bmd_sink->started = 0;
     upipe_bmd_sink->start_pts = 0;
     upipe_bmd_sink->pts = 0;
     upipe_bmd_sink->preroll = PREROLL_FRAMES;
