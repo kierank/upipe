@@ -1418,11 +1418,9 @@ static void output_cb(struct upipe *upipe)
         if (now < vid_pts) {
             upipe_err_va(upipe, "Picture buffering screwed (%.2f < %.2f), rebuffering",
                     pts_to_time(now), pts_to_time(vid_pts));
-            upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(NULL);
             upipe_bmd_sink->start_pts = 0;
             upipe_bmd_sink->pts = 0;
             uatomic_store(&upipe_bmd_sink->preroll, PREROLL_FRAMES);
-            upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(upipe_bmd_sink->cb);
             return;
         }
 
