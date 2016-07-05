@@ -2100,9 +2100,6 @@ static int upipe_bmd_sink_open_card(struct upipe *upipe)
     }
 
     upipe_bmd_sink->cb = new callback(upipe_bmd_sink);
-    result = upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(upipe_bmd_sink->cb);
-    if (result != S_OK)
-        upipe_err(upipe, "Could not set frame completion callback");
 
     upipe_bmd_sink->deckLink = deckLink;
 
