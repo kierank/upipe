@@ -293,7 +293,7 @@ struct upipe_bmd_sink {
     uint8_t frame_idx;
 
     uint64_t start_pts;
-    int preroll;
+    uatomic_uint32_t preroll;
     uint64_t pts;
 
     /** vanc/vbi temporary buffer **/
@@ -394,7 +394,7 @@ public:
         if (upipe_bmd_sink->deckLinkOutput->GetFrameCompletionReferenceTimestamp(completedFrame, UCLOCK_FREQ, &val) != S_OK)
             val = 0;
 
-        if (upipe_bmd_sink->preroll)
+        if (uatomic_load(&upipe_bmd_sink->preroll))
             return S_OK;
 
         uint64_t now = uclock_now(&upipe_bmd_sink->uclock);
@@ -1420,7 +1420,7 @@ static void output_cb(struct upipe *upipe)
             upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(NULL);
             upipe_bmd_sink->start_pts = 0;
             upipe_bmd_sink->pts = 0;
-            upipe_bmd_sink->preroll = PREROLL_FRAMES;
+            uatomic_store(&upipe_bmd_sink->preroll, PREROLL_FRAMES);
             upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(upipe_bmd_sink->cb);
             return;
         }
@@ -1503,7 +1503,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref)
         return false;
 
     /* preroll is done, buffer and let the callback do the rest */
-    if (!upipe_bmd_sink->preroll)
+    if (!uatomic_load(&upipe_bmd_sink->preroll))
         return false;
 
     uint64_t pts = upipe_bmd_sink->pts;
@@ -1547,7 +1547,7 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref)
     upipe_notice_va(upipe, "PREROLLING %.2f", pts_to_time(pts));
     schedule_frame(upipe, uref, pts);
 
-    if (--upipe_bmd_sink->preroll == 0) {
+    if (uatomic_fetch_sub(&upipe_bmd_sink->preroll, 1) == 1) {
         upipe_notice(upipe, "Starting playback");
         if (upipe_bmd_sink->deckLinkOutput->EndAudioPreroll() != S_OK)
             upipe_err_va(upipe, "End preroll failed");
@@ -1946,7 +1946,7 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
 
     upipe_bmd_sink->start_pts = 0;
     upipe_bmd_sink->pts = 0;
-    upipe_bmd_sink->preroll = PREROLL_FRAMES;
+    uatomic_store(&upipe_bmd_sink->preroll, PREROLL_FRAMES);
 
     result = deckLinkOutput->GetDisplayModeIterator(&displayModeIterator);
     if (result != S_OK){
