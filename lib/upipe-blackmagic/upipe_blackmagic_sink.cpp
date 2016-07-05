@@ -1421,6 +1421,9 @@ static void output_cb(struct upipe *upipe)
             upipe_bmd_sink->start_pts = 0;
             upipe_bmd_sink->pts = 0;
             uatomic_store(&upipe_bmd_sink->preroll, PREROLL_FRAMES);
+            upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
+            if (upipe_bmd_sink->deckLinkOutput->BeginAudioPreroll() != S_OK)
+                upipe_err(upipe, "Could not begin audio preroll");
             return;
         }
 
