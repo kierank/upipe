@@ -379,8 +379,12 @@ static void output_cb(struct upipe *upipe);
 class callback : public IDeckLinkVideoOutputCallback
 {
 public:
-    virtual HRESULT ScheduledFrameCompleted (/* in */ IDeckLinkVideoFrame *completedFrame, /* in */ BMDOutputFrameCompletionResult result) {
-        static const char *res[] = {
+    virtual HRESULT ScheduledFrameCompleted (IDeckLinkVideoFrame *frame, BMDOutputFrameCompletionResult result) {
+        if (uatomic_load(&upipe_bmd_sink->preroll))
+            return S_OK;
+
+#if 0
+        static const char *Result_str[] = {
             "completed",
             "late",
             "dropped",
@@ -388,22 +392,19 @@ public:
             "?",
         };
 
-        if (result > 4) result = 4;
-
         BMDTimeValue val;
-        if (upipe_bmd_sink->deckLinkOutput->GetFrameCompletionReferenceTimestamp(completedFrame, UCLOCK_FREQ, &val) != S_OK)
+        if (upipe_bmd_sink->deckLinkOutput->GetFrameCompletionReferenceTimestamp(frame, UCLOCK_FREQ, &val) != S_OK)
             val = 0;
 
-        if (uatomic_load(&upipe_bmd_sink->preroll))
-            return S_OK;
-
         uint64_t now = uclock_now(&upipe_bmd_sink->uclock);
-        uint64_t pts = ((upipe_bmd_sink_frame*)completedFrame)->pts;
+        uint64_t pts = ((upipe_bmd_sink_frame*)frame)->pts;
         int64_t diff = now - pts - upipe_bmd_sink->ticks_per_frame;
+
         upipe_notice_va(&upipe_bmd_sink->upipe,
-                "%p Frame %s (%.2f ms) - delay %.2f ms", completedFrame,
-                res[result], dur_to_time(1000 * (val - prev)), dur_to_time(1000 * diff));
+                "%p Frame %s (%.2f ms) - delay %.2f ms", frame,
+                Result_str[(result > 4) ? 4 : result], dur_to_time(1000 * (val - prev)), dur_to_time(1000 * diff));
         prev = val;
+#endif
 
         /* next frame */
         output_cb(&upipe_bmd_sink->pic_subpipe.upipe);
