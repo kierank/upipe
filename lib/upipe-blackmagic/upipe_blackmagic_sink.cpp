@@ -1967,7 +1967,6 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
         upipe_bmd_sink->displayMode->Release();
     }
 
-    upipe_bmd_sink->start_pts = 0;
     upipe_bmd_sink->pts = 0;
     uatomic_store(&upipe_bmd_sink->preroll, PREROLL_FRAMES);
 
