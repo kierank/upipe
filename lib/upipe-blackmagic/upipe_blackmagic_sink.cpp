@@ -1442,14 +1442,15 @@ static void output_cb(struct upipe *upipe)
         if (now < vid_pts) {
             upipe_err_va(upipe, "Picture buffering screwed (%.2f < %.2f), rebuffering",
                     pts_to_time(now), pts_to_time(vid_pts));
-            upipe_bmd_sink->start_pts = 0;
-            upipe_bmd_sink->pts = 0;
-            uatomic_store(&upipe_bmd_sink->preroll, PREROLL_FRAMES);
-            uref_free(upipe_bmd_sink_sub->uref);
-            upipe_bmd_sink_sub->uref = NULL;
+
+            uref_free(uref);
             upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
             if (upipe_bmd_sink->deckLinkOutput->BeginAudioPreroll() != S_OK)
                 upipe_err(upipe, "Could not begin audio preroll");
+
+            upipe_bmd_sink->pts = 0;
+            uqueue_uref_flush(&upipe_bmd_sink_sub->uqueue);
+            uatomic_store(&upipe_bmd_sink->preroll, PREROLL_FRAMES);
             return;
         }
 
