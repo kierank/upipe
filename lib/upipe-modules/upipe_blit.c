@@ -29,6 +29,8 @@
 #include <upipe/ulist.h>
 #include <upipe/uprobe.h>
 #include <upipe/uref.h>
+#include <upipe/uref_clock.h>
+#include <upipe/uclock.h>
 #include <upipe/ubuf.h>
 #include <upipe/uref_pic_flow.h>
 #include <upipe/uref_pic.h>
@@ -99,6 +101,8 @@ struct upipe_blit_sub {
     /** structure for double-linked lists */
     struct uchain uchain;
 
+    /** alpha blending method */
+    uint8_t alpha_threshold;
     /** offset from the left border */
     uint64_t loffset;
     /** offset from the right border */
@@ -110,6 +114,10 @@ struct upipe_blit_sub {
 
     /** last received ubuf */
     struct ubuf *ubuf;
+    /** pts */
+    uint64_t date_prog;
+    /** end date */
+    uint64_t end_date;
 
     /** horizontal size */
     uint64_t hsize;
@@ -154,12 +162,107 @@ static struct upipe *upipe_blit_sub_alloc(struct upipe_mgr *mgr,
     upipe_blit_sub_init_urefcount(upipe);
     upipe_blit_sub_init_sub(upipe);
     sub->loffset = sub->roffset = sub->toffset = sub->boffset = 0;
+    sub->alpha_threshold = 0; /* ignore alpha */
     sub->ubuf = NULL;
+    sub->date_prog = UINT64_MAX;
+    sub->end_date = UINT64_MAX;
     sub->hsize = sub->vsize = sub->hposition = sub->vposition = UINT64_MAX;
     ulist_init(&sub->flow_format_requests);
 
     upipe_throw_ready(upipe);
     return upipe;
+}
+
+/** TODO: merge into ubuf_pic_blit? what do we do if we're blitting onto
+ * an alpha pic, do we merge the 2 alpha channels?
+ */
+static int upipe_blit_alpha(struct uref *uref, struct ubuf *src,
+         int dest_hoffset, int dest_voffset,
+         int src_hoffset, int src_voffset,
+         int extract_hsize, int extract_vsize, const uint8_t *alpha,
+         size_t alpha_stride)
+{
+    struct ubuf *dest = uref->ubuf;
+
+    uint8_t src_macropixel;
+    UBASE_RETURN(ubuf_pic_size(src, NULL, NULL, &src_macropixel))
+    uint8_t dest_macropixel;
+    UBASE_RETURN(ubuf_pic_size(dest, NULL, NULL, &dest_macropixel))
+    if (unlikely(dest_macropixel != src_macropixel))
+        return UBASE_ERR_INVALID;
+
+    const char *chroma = NULL;
+    while (ubase_check(ubuf_pic_plane_iterate(dest, &chroma)) &&
+           chroma != NULL) {
+        size_t src_stride;
+        uint8_t src_hsub, src_vsub, src_macropixel_size;
+        UBASE_RETURN(ubuf_pic_plane_size(src, chroma, &src_stride,
+                    &src_hsub, &src_vsub, &src_macropixel_size))
+
+        size_t dest_stride;
+        uint8_t dest_hsub, dest_vsub, dest_macropixel_size;
+        UBASE_RETURN(ubuf_pic_plane_size(dest, chroma,
+                    &dest_stride, &dest_hsub, &dest_vsub,
+                    &dest_macropixel_size))
+
+        if (unlikely(src_hsub != dest_hsub || src_vsub != dest_vsub ||
+                     src_macropixel_size != dest_macropixel_size))
+            return UBASE_ERR_INVALID;
+
+        uint8_t *dest_buffer;
+        const uint8_t *src_buffer;
+        UBASE_RETURN(ubuf_pic_plane_write(dest, chroma,
+                    dest_hoffset, dest_voffset,
+                    extract_hsize, extract_vsize, &dest_buffer))
+        int err = ubuf_pic_plane_read(src, chroma, src_hoffset, src_voffset,
+                                      extract_hsize, extract_vsize,
+                                      &src_buffer);
+        if (unlikely(!ubase_check(err))) {
+            ubuf_pic_plane_unmap(dest, chroma,
+                                 dest_hoffset, dest_voffset,
+                                 extract_hsize, extract_vsize);
+            return err;
+        }
+
+        int plane_hsize = extract_hsize / src_hsub / src_macropixel *
+                          src_macropixel_size;
+        int plane_vsize = extract_vsize / src_vsub;
+
+        for (int i = 0; i < plane_vsize; i++) {
+            for (int j = 0; j < plane_hsize; j += 16) {
+                const uint8_t *a = &alpha[alpha_stride * (i * src_vsub) + j * src_hsub];
+                if (a[0x0] > 20) dest_buffer[j+0x0] = src_buffer[j+0x0];
+                if (a[0x1] > 20) dest_buffer[j+0x1] = src_buffer[j+0x1];
+                if (a[0x2] > 20) dest_buffer[j+0x2] = src_buffer[j+0x2];
+                if (a[0x3] > 20) dest_buffer[j+0x3] = src_buffer[j+0x3];
+                if (a[0x4] > 20) dest_buffer[j+0x4] = src_buffer[j+0x4];
+                if (a[0x5] > 20) dest_buffer[j+0x5] = src_buffer[j+0x5];
+                if (a[0x6] > 20) dest_buffer[j+0x6] = src_buffer[j+0x6];
+                if (a[0x7] > 20) dest_buffer[j+0x7] = src_buffer[j+0x7];
+                if (a[0x8] > 20) dest_buffer[j+0x8] = src_buffer[j+0x8];
+                if (a[0x9] > 20) dest_buffer[j+0x9] = src_buffer[j+0x9];
+                if (a[0xa] > 20) dest_buffer[j+0xa] = src_buffer[j+0xa];
+                if (a[0xb] > 20) dest_buffer[j+0xb] = src_buffer[j+0xb];
+                if (a[0xc] > 20) dest_buffer[j+0xc] = src_buffer[j+0xc];
+                if (a[0xd] > 20) dest_buffer[j+0xd] = src_buffer[j+0xd];
+                if (a[0xe] > 20) dest_buffer[j+0xe] = src_buffer[j+0xe];
+                if (a[0xf] > 20) dest_buffer[j+0xf] = src_buffer[j+0xf];
+            }
+
+            dest_buffer += dest_stride;
+            src_buffer += src_stride;
+        }
+
+        err = ubuf_pic_plane_unmap(dest, chroma,
+                                   dest_hoffset, dest_voffset,
+                                   extract_hsize, extract_vsize);
+        UBASE_RETURN(ubuf_pic_plane_unmap(src, chroma,
+                                          src_hoffset, src_voffset,
+                                          extract_hsize, extract_vsize))
+        UBASE_RETURN(err)
+    }
+
+    return UBASE_ERR_NONE;
 }
 
 /** @internal @This blits the subpicture into the input uref.
@@ -173,14 +276,34 @@ static void upipe_blit_sub_work(struct upipe *upipe, struct uref *uref)
     if (unlikely(sub->ubuf == NULL))
         return;
 
+    int type;
+    uint64_t date;
+	uref_clock_get_date_prog(uref, &date, &type);
+    if (type == UREF_DATE_NONE)
+        date = UINT64_MAX;
+
+    if (sub->date_prog != UINT64_MAX && sub->date_prog > date)
+        return;
+
     int err = uref_pic_blit(uref, sub->ubuf, sub->hposition, sub->vposition,
-                            0, 0, sub->hsize, sub->vsize);
+                            0, 0, sub->hsize, sub->vsize, sub->alpha_threshold);
     if (unlikely(!ubase_check(err))) {
         upipe_warn(upipe, "unable to blit picture");
         upipe_throw_error(upipe, err);
     }
+
+    if (sub->end_date == UINT64_MAX)
+        return;
+
+    /* subtitle not yet elapsed */
+    if (date <= sub->end_date)
+        return;
+
+    upipe_verbose(upipe, "Subtitle duration elapsed");
+
     ubuf_free(sub->ubuf);
     sub->ubuf = NULL;
+    sub->date_prog = UINT64_MAX;
 }
 
 /** @internal @This receives data.
@@ -210,14 +333,30 @@ static void upipe_blit_sub_input(struct upipe *upipe, struct uref *uref,
                                             &macropixel)) ||
                  hsize != sub->hsize || vsize != sub->vsize ||
                  macropixel != upipe_blit->macropixel)) {
-        upipe_warn(upipe, "dropping incompatible subpicture");
+        upipe_warn_va(upipe, "dropping incompatible subpicture: %d != %d, %d != %d, %d != %d",
+            hsize, sub->hsize, vsize, sub->vsize, macropixel, upipe_blit->macropixel);
         upipe_throw_error(upipe, UBASE_ERR_INVALID);
+        exit(1);
         uref_free(uref);
         return;
     }
 
     ubuf_free(sub->ubuf);
     sub->ubuf = uref_detach_ubuf(uref);
+
+    int type;
+    uint64_t date, duration;
+    if (!ubase_check(uref_clock_get_duration(uref, &duration)))
+        duration = 0;
+	uref_clock_get_date_prog(uref, &sub->date_prog, &type);
+    upipe_verbose_va(upipe, "\t\tDURATION %"PRIu64" PROG TYPE %d = %"PRIx64, duration, type, sub->date_prog);
+    if (type == UREF_DATE_NONE) {
+        sub->date_prog = UINT64_MAX;
+        sub->end_date = UINT64_MAX;
+    } else {
+        sub->end_date = sub->date_prog + duration;
+    }
+
     uref_free(uref);
 }
 
@@ -326,8 +465,16 @@ static int upipe_blit_sub_provide_flow_format(struct upipe *upipe)
 
         uref_pic_flow_set_hsize(uref, sub->hsize);
         uref_pic_flow_set_vsize(uref, sub->vsize);
+
+        bool alpha = ubase_check(uref_pic_flow_check_chroma(
+                uref, 1, 1, 1, "a8"));
+
         uref_pic_flow_clear_format(uref);
         uref_pic_flow_copy_format(uref, upipe_blit->flow_def);
+
+        if (alpha)
+            uref_pic_flow_add_plane(uref, 1, 1, 1, "a8");
+
         uref_pic_flow_delete_sar(uref);
         uref_pic_flow_delete_overscan(uref);
         uref_pic_flow_delete_dar(uref);
@@ -416,6 +563,20 @@ static int upipe_blit_sub_set_flow_def(struct upipe *upipe,
     return UBASE_ERR_NONE;
 }
 
+/** @internal @This sets the method for alpha blending for this subpipe.
+ *
+ * @param upipe description structure of the pipe
+ * @param threshold method for alpha blending (@see ubuf_pic_blit)
+ * @return an error code
+ */
+static int _upipe_blit_sub_set_alpha_threshold(struct upipe *upipe,
+        uint8_t threshold)
+{
+    struct upipe_blit_sub *sub = upipe_blit_sub_from_upipe(upipe);
+    sub->alpha_threshold = threshold;
+    return UBASE_ERR_NONE;
+}
+
 /** @internal @This gets the offsets (from the respective borders of the frame)
  * of the rectangle onto which the input of the subpipe will be blitted.
  *
@@ -501,6 +662,11 @@ static int upipe_blit_sub_control(struct upipe *upipe,
             return upipe_blit_sub_get_super(upipe, p);
         }
 
+        case UPIPE_BLIT_SUB_SET_ALPHA_THRESHOLD: {
+            UBASE_SIGNATURE_CHECK(args, UPIPE_BLIT_SUB_SIGNATURE);
+            uint8_t threshold = va_arg(args, unsigned);
+            return _upipe_blit_sub_set_alpha_threshold(upipe, threshold);
+        }
         case UPIPE_BLIT_SUB_GET_RECT: {
             UBASE_SIGNATURE_CHECK(args, UPIPE_BLIT_SUB_SIGNATURE);
             uint64_t *loffset_p = va_arg(args, uint64_t *);

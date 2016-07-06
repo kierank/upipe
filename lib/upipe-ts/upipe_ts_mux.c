@@ -64,6 +64,7 @@
 #include <upipe/upipe_helper_bin_input.h>
 #include <upipe/upipe_helper_subpipe.h>
 #include <upipe-framers/uref_h264_flow.h>
+#include <upipe-framers/uref_h265_flow.h>
 #include <upipe-framers/uref_mpga_flow.h>
 #include <upipe-framers/uref_mpgv_flow.h>
 #include <upipe-ts/uref_ts_flow.h>
@@ -124,6 +125,8 @@
 #define MAX_DELAY UCLOCK_FREQ
 /** max retention time for ISO/IEC 14496 streams (ISO/IEC 13818-1 2.4.2.6) */
 #define MAX_DELAY_14496 (UCLOCK_FREQ * 10)
+/** max retention time for HEVC streams (FIXME) */
+#define MAX_DELAY_HEVC (UCLOCK_FREQ * 10)
 /** max retention time for still pictures streams (ISO/IEC 13818-1 2.4.2.6) */
 #define MAX_DELAY_STILL (UCLOCK_FREQ * 60)
 /** max retention time for teletext (ETSI EN 300 472 5.) */
@@ -308,6 +311,8 @@ struct upipe_ts_mux {
     uint64_t total_octetrate;
     /** calculated required octetrate including overheads, PMTs and PAT */
     uint64_t required_octetrate;
+    /** true if @ref upipe_ts_mux_update is running */
+    bool octetrate_in_progress;
     /** interval between packets (rounded up, not to be used anywhere
      * critical */
     uint64_t interval;
@@ -1062,6 +1067,8 @@ static int upipe_ts_mux_input_set_flow_def(struct upipe *upipe,
             max_delay = MAX_DELAY_14496;
         } else if (!ubase_ncmp(def, "block.h264.")) {
             max_delay = MAX_DELAY_14496;
+        } else if (!ubase_ncmp(def, "block.hevc.")) {
+            max_delay = MAX_DELAY_HEVC;
         }
         UBASE_FATAL(upipe, uref_ts_flow_set_pes_id(flow_def_dup,
                                                 PES_STREAM_ID_VIDEO_MPEG));
@@ -1306,6 +1313,8 @@ static int upipe_ts_mux_provide_flow_format(struct upipe *upipe,
     if (likely(ubase_check(uref_flow_get_def(flow_format, &def)))) {
         if (!ubase_ncmp(def, "block.h264."))
             uref_h264_flow_set_annexb(flow_format);
+        else if (!ubase_ncmp(def, "block.hevc."))
+            uref_h265_flow_set_annexb(flow_format);
         else if (!ubase_ncmp(def, "block.aac."))
             uref_mpga_flow_set_adts(flow_format);
         else if (!ubase_ncmp(def, "block.mpeg1video.") ||
@@ -2297,6 +2306,7 @@ static struct upipe *upipe_ts_mux_alloc(struct upipe_mgr *mgr,
     upipe_ts_mux->padding_octetrate = 0;
     upipe_ts_mux->total_octetrate = 0;
     upipe_ts_mux->required_octetrate = 0;
+    upipe_ts_mux->octetrate_in_progress = false;
     upipe_ts_mux->interval = 0;
 
     ulist_init(&upipe_ts_mux->psi_pids);
@@ -2961,6 +2971,10 @@ static void upipe_ts_mux_notice(struct upipe *upipe)
 static void upipe_ts_mux_update(struct upipe *upipe)
 {
     struct upipe_ts_mux *mux = upipe_ts_mux_from_upipe(upipe);
+    if (mux->octetrate_in_progress)
+        return;
+    mux->octetrate_in_progress = true;
+
     uint64_t required_octetrate = mux->padding_octetrate;
     struct uchain *uchain;
     ulist_foreach (&mux->psi_pids, uchain) {
@@ -2988,10 +3002,7 @@ static void upipe_ts_mux_update(struct upipe *upipe)
     if (!total_octetrate)
         total_octetrate = required_octetrate;
 
-    /* Only go down if required octetrate is inferior by at least 5% to avoid
-     * bouncing. */
-    if (total_octetrate > mux->total_octetrate ||
-        total_octetrate < mux->total_octetrate - mux->total_octetrate / 20) {
+    if (total_octetrate != mux->total_octetrate) {
         mux->total_octetrate = total_octetrate;
         upipe_ts_mux_build_flow_def(upipe);
         upipe_ts_mux_set_upump(upipe, NULL);
@@ -3054,6 +3065,7 @@ static void upipe_ts_mux_update(struct upipe *upipe)
             }
         }
     }
+    mux->octetrate_in_progress = false;
 }
 
 /** @internal @This builds the output flow definition.

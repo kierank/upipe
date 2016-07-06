@@ -46,8 +46,6 @@ enum upipe_bmd_sink_command {
 
     /** returns the pic subpipe (struct upipe **) */
     UPIPE_BMD_SINK_GET_PIC_SUB,
-    /** returns the sound subpipe (struct upipe **) */
-    UPIPE_BMD_SINK_GET_SOUND_SUB,
     /** returns the subpic subpipe (struct upipe **) */
     UPIPE_BMD_SINK_GET_SUBPIC_SUB,
 
@@ -79,20 +77,6 @@ static inline int upipe_bmd_sink_get_pic_sub(struct upipe *upipe,
                                                struct upipe **upipe_p)
 {
     return upipe_control(upipe, UPIPE_BMD_SINK_GET_PIC_SUB,
-                          UPIPE_BMD_SINK_SIGNATURE, upipe_p);
-}
-
-/** @This returns the sound subpipe. The refcount is not incremented so you
- * have to use it if you want to keep the pointer.
- *
- * @param upipe description structure of the super pipe
- * @param upipe_p filled in with a pointer to the sound subpipe
- * @return an error code
- */
-static inline int upipe_bmd_sink_get_sound_sub(struct upipe *upipe,
-                                                 struct upipe **upipe_p)
-{
-    return upipe_control(upipe, UPIPE_BMD_SINK_GET_SOUND_SUB,
                           UPIPE_BMD_SINK_SIGNATURE, upipe_p);
 }
 
@@ -167,20 +151,19 @@ static inline int upipe_bmd_sink_set_genlock_offset(struct upipe *upipe,
  * @param mgr management structure for bmd sink type
  * @param uprobe structure used to raise events for the super pipe
  * @param uprobe_pic structure used to raise events for the pic subpipe
- * @param uprobe_sound structure used to raise events for the sound subpipe
  * @param uprobe_subpic structure used to raise events for the subpic subpipe
  * @return pointer to allocated pipe, or NULL in case of failure
  */
 static inline struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
                                                     struct uprobe *uprobe,
                                                     struct uprobe *uprobe_pic,
-                                                    struct uprobe *uprobe_sound,
                                                     struct uprobe *uprobe_subpic)
 {
     return upipe_alloc(mgr, uprobe, UPIPE_BMD_SINK_SIGNATURE,
-                        uprobe_pic, uprobe_sound, uprobe_subpic);
+                        uprobe_pic, uprobe_subpic);
 }
 
+uint32_t upipe_bmd_mode_from_flow_def(struct upipe *upipe, struct uref *flow_def);
 
 #ifdef __cplusplus
 }
