@@ -1279,7 +1279,10 @@ static upipe_bmd_sink_frame *get_video_frame(struct upipe *upipe,
     const uint8_t *pic_data = NULL;
     size_t pic_data_size = 0;
     uref_pic_get_cea_708(uref, &pic_data, &pic_data_size);
-    if( pic_data_size > 0 )
+    int ntsc = upipe_bmd_sink->mode == bmdModeNTSC ||
+               upipe_bmd_sink->mode == bmdModeHD1080i5994;
+    
+    if( ntsc && pic_data_size > 0 )
     {
         void *vanc;
         ancillary->GetBufferForVerticalBlankingLine(CC_LINE, &vanc);
