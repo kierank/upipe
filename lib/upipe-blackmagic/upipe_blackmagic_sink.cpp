@@ -1938,15 +1938,6 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
     HRESULT result = E_NOINTERFACE;
 
     if (upipe_bmd_sink->displayMode) {
-        struct upipe *sub = NULL;
-        while (ubase_check(upipe_bmd_sink_iterate_sub(upipe, &sub)) && sub) {
-            struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
-                upipe_bmd_sink_sub_from_upipe(sub);
-
-            uref_free(upipe_bmd_sink_sub->uref);
-            upipe_bmd_sink_sub->uref = NULL;
-            uqueue_uref_flush(&upipe_bmd_sink_sub->uqueue);
-        }
         if (upipe_bmd_sink->video_frame) {
             upipe_bmd_sink->video_frame->Release();
             upipe_bmd_sink->video_frame = NULL;
