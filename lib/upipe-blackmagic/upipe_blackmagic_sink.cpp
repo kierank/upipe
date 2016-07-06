@@ -70,6 +70,8 @@
 #include <libavutil/intreadwrite.h>
 #include <libzvbi.h>
 
+#include <pthread.h>
+
 #include "include/DeckLinkAPI.h"
 
 #define PREROLL_FRAMES 3
@@ -282,6 +284,9 @@ struct upipe_bmd_sink {
 
     /** list of input subpipes */
     struct uchain inputs;
+
+    /** lock the list of subpipes */
+    pthread_mutex_t lock;
 
     /** card index **/
     int card_idx;
@@ -821,7 +826,9 @@ static void upipe_bmd_sink_sub_init(struct upipe *upipe,
     struct upipe_bmd_sink_sub *upipe_bmd_sink_sub = upipe_bmd_sink_sub_from_upipe(upipe);
     upipe_bmd_sink_sub->upipe_bmd_sink = upipe_bmd_sink_to_upipe(upipe_bmd_sink);
 
+    pthread_mutex_lock(&upipe_bmd_sink->lock);
     upipe_bmd_sink_sub_init_sub(upipe);
+
     static const uint8_t length = 255;
     uqueue_init(&upipe_bmd_sink_sub->uqueue, length, malloc(uqueue_sizeof(length)));
     upipe_bmd_sink_sub->uref = NULL;
@@ -830,21 +837,27 @@ static void upipe_bmd_sink_sub_init(struct upipe *upipe,
     upipe_bmd_sink_sub->sound = !static_pipe;
 
     upipe_throw_ready(upipe);
+    pthread_mutex_unlock(&upipe_bmd_sink->lock);
 }
 
 static void upipe_bmd_sink_sub_free(struct upipe *upipe)
 {
     struct upipe_bmd_sink_sub *upipe_bmd_sink_sub = upipe_bmd_sink_sub_from_upipe(upipe);
+    struct upipe_bmd_sink *upipe_bmd_sink =
+        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+
+    pthread_mutex_lock(&upipe_bmd_sink->lock);
     upipe_throw_dead(upipe);
+
     upipe_bmd_sink_sub_clean_sub(upipe);
+    pthread_mutex_unlock(&upipe_bmd_sink->lock);
+
     upipe_bmd_sink_sub_clean_upump(upipe);
     upipe_bmd_sink_sub_clean_upump_mgr(upipe);
     uref_free(upipe_bmd_sink_sub->uref);
     uqueue_uref_flush(&upipe_bmd_sink_sub->uqueue);
     uqueue_clean(&upipe_bmd_sink_sub->uqueue);
 
-    struct upipe_bmd_sink *upipe_bmd_sink =
-        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
     if (upipe_bmd_sink_sub == &upipe_bmd_sink->subpic_subpipe ||
         upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe) {
         upipe_clean(upipe);
@@ -1191,6 +1204,8 @@ static void upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe,
 
     /* interate through input subpipes */
     struct upipe *sub = NULL;
+
+    pthread_mutex_lock(&upipe_bmd_sink->lock);
     while (ubase_check(upipe_bmd_sink_iterate_sub(upipe, &sub)) && sub) {
         struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
             upipe_bmd_sink_sub_from_upipe(sub);
@@ -1198,6 +1213,7 @@ static void upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe,
         if (upipe_bmd_sink_sub->sound)
             upipe_bmd_sink_sub_sound_get_samples_channel(upipe, video_pts, samples, upipe_bmd_sink_sub);
     }
+    pthread_mutex_unlock(&upipe_bmd_sink->lock);
 }
 
 static inline unsigned audio_samples_count(struct upipe_bmd_sink *upipe_bmd_sink)
@@ -1910,6 +1926,8 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
     upipe_bmd_sink_init_sub_mgr(upipe);
     upipe_bmd_sink_init_urefcount(upipe);
 
+    pthread_mutex_init(&upipe_bmd_sink->lock, NULL);
+
     /* Initalise subpipes */
     upipe_bmd_sink_sub_init(upipe_bmd_sink_sub_to_upipe(upipe_bmd_sink_to_pic_subpipe(upipe_bmd_sink)),
                             &upipe_bmd_sink->sub_mgr, uprobe_pic, true);
@@ -2335,6 +2353,8 @@ static void upipe_bmd_sink_free(struct upipe *upipe)
         upipe_bmd_sink->displayMode->Release();
         upipe_bmd_sink->deckLink->Release();
     }
+
+    pthread_mutex_destroy(&upipe_bmd_sink->lock);
 
     if (upipe_bmd_sink->cb)
         upipe_bmd_sink->cb->Release();
