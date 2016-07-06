@@ -1401,7 +1401,10 @@ static void output_cb(struct upipe *upipe)
     struct uref *uref;
     for (;;) {
         /* pop first available picture */
-        uref = uqueue_pop(&upipe_bmd_sink_sub->uqueue, struct uref *);
+        uref = upipe_bmd_sink_sub->uref;
+        upipe_bmd_sink_sub->uref = NULL;
+        if (!uref)
+            uref = uqueue_pop(&upipe_bmd_sink_sub->uqueue, struct uref *);
         if (!uref) {
             upipe_err(upipe, "no uref");
             break;
@@ -1423,6 +1426,8 @@ static void output_cb(struct upipe *upipe)
             upipe_bmd_sink->start_pts = 0;
             upipe_bmd_sink->pts = 0;
             uatomic_store(&upipe_bmd_sink->preroll, PREROLL_FRAMES);
+            uref_free(upipe_bmd_sink_sub->uref);
+            upipe_bmd_sink_sub->uref = NULL;
             upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
             if (upipe_bmd_sink->deckLinkOutput->BeginAudioPreroll() != S_OK)
                 upipe_err(upipe, "Could not begin audio preroll");
@@ -1432,7 +1437,7 @@ static void output_cb(struct upipe *upipe)
         upipe_notice_va(upipe, "\texamining pic %.2f", pts_to_time(vid_pts));
 
         /* frame pts too much in the past */
-        if (pts > vid_pts /*+ UCLOCK_FREQ / 10*/) {
+        if (pts > vid_pts + upipe_bmd_sink->ticks_per_frame / 2) {
             upipe_warn_va(upipe, "late uref dropped (%.2f)",
                     dur_to_time(pts - vid_pts));
             /* look at next picture */
@@ -1446,7 +1451,8 @@ static void output_cb(struct upipe *upipe)
                     dur_to_time(1000 * (vid_pts - pts)),
                     vid_pts - pts
                     );
-            uref_free(uref);
+
+            upipe_bmd_sink_sub->uref = uref;
             uref = NULL;
             break;
         }
