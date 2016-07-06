@@ -1190,10 +1190,10 @@ static void upipe_bmd_sink_sub_sound_get_samples(struct upipe *upipe,
             samples * DECKLINK_CHANNELS * sizeof(int32_t));
 
     /* interate through input subpipes */
-    struct uchain *uchain;
-    ulist_foreach(&upipe_bmd_sink->inputs, uchain) {
+    struct upipe *sub = NULL;
+    while (ubase_check(upipe_bmd_sink_iterate_sub(upipe, &sub)) && sub) {
         struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
-            upipe_bmd_sink_sub_from_uchain(uchain);
+            upipe_bmd_sink_sub_from_upipe(sub);
 
         if (upipe_bmd_sink_sub->sound)
             upipe_bmd_sink_sub_sound_get_samples_channel(upipe, video_pts, samples, upipe_bmd_sink_sub);
@@ -1938,10 +1938,11 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
     HRESULT result = E_NOINTERFACE;
 
     if (upipe_bmd_sink->displayMode) {
-        struct uchain *uchain;
-        ulist_foreach(&upipe_bmd_sink->inputs, uchain) {
+        struct upipe *sub = NULL;
+        while (ubase_check(upipe_bmd_sink_iterate_sub(upipe, &sub)) && sub) {
             struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
-                upipe_bmd_sink_sub_from_uchain(uchain);
+                upipe_bmd_sink_sub_from_upipe(sub);
+
             uref_free(upipe_bmd_sink_sub->uref);
             upipe_bmd_sink_sub->uref = NULL;
             uqueue_uref_flush(&upipe_bmd_sink_sub->uqueue);
