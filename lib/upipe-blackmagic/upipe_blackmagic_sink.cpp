@@ -1431,6 +1431,7 @@ static void output_cb(struct upipe *upipe)
         /* read its timestamp */
         uint64_t vid_pts = 0;
         if (unlikely(!ubase_check(uref_clock_get_pts_sys(uref, &vid_pts)))) {
+            uref_free(uref);
             upipe_err(upipe, "Could not read pts");
             return;
         }
