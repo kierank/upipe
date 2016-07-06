@@ -1437,7 +1437,7 @@ static void output_cb(struct upipe *upipe)
             return;
         }
 
-        upipe_notice_va(upipe, "\texamining pic %.2f", pts_to_time(vid_pts));
+        upipe_verbose_va(upipe, "\texamining pic %.2f", pts_to_time(vid_pts));
 
         /* frame pts too much in the past */
         if (pts > vid_pts + upipe_bmd_sink->ticks_per_frame / 2) {
@@ -1460,7 +1460,7 @@ static void output_cb(struct upipe *upipe)
             break;
         }
 
-        upipe_err_va(upipe, "found uref %.2f, PTS diff %.2f",
+        upipe_dbg_va(upipe, "found uref %.2f, PTS diff %.2f",
                 pts_to_time(vid_pts),
                 dur_to_time(vid_pts - pts));
         break;
