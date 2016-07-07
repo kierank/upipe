@@ -242,6 +242,7 @@ struct upipe_bmd_sink_sub {
 
     /** thread-safe urefs queue */
     struct uqueue uqueue;
+    void *uqueue_extra;
 
     struct uref *uref;
 
@@ -830,7 +831,9 @@ static void upipe_bmd_sink_sub_init(struct upipe *upipe,
     upipe_bmd_sink_sub_init_sub(upipe);
 
     static const uint8_t length = 255;
-    uqueue_init(&upipe_bmd_sink_sub->uqueue, length, malloc(uqueue_sizeof(length)));
+    upipe_bmd_sink_sub->uqueue_extra = malloc(uqueue_sizeof(length));
+    assert(upipe_bmd_sink_sub->uqueue_extra);
+    uqueue_init(&upipe_bmd_sink_sub->uqueue, length, upipe_bmd_sink_sub->uqueue_extra);
     upipe_bmd_sink_sub->uref = NULL;
     upipe_bmd_sink_sub_init_upump_mgr(upipe);
     upipe_bmd_sink_sub_init_upump(upipe);
@@ -857,6 +860,7 @@ static void upipe_bmd_sink_sub_free(struct upipe *upipe)
     uref_free(upipe_bmd_sink_sub->uref);
     uqueue_uref_flush(&upipe_bmd_sink_sub->uqueue);
     uqueue_clean(&upipe_bmd_sink_sub->uqueue);
+    free(upipe_bmd_sink_sub->uqueue_extra);
 
     if (upipe_bmd_sink_sub == &upipe_bmd_sink->subpic_subpipe ||
         upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe) {
