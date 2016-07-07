@@ -2355,6 +2355,8 @@ static void upipe_bmd_sink_free(struct upipe *upipe)
         upipe_bmd_sink->deckLinkOutput->Release();
         upipe_bmd_sink->displayMode->Release();
         upipe_bmd_sink->deckLink->Release();
+        if (upipe_bmd_sink->video_frame)
+            upipe_bmd_sink->video_frame->Release();
     }
 
     pthread_mutex_destroy(&upipe_bmd_sink->lock);
