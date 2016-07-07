@@ -2113,6 +2113,8 @@ static int upipe_bmd_sink_open_card(struct upipe *upipe)
         upipe_bmd_sink->line21_offset = 0;
     }
 
+    free((void*)modelName);
+
     if (deckLink->QueryInterface(IID_IDeckLinkOutput,
                                  (void**)&upipe_bmd_sink->deckLinkOutput) != S_OK) {
         upipe_err_va(upipe, "decklink card has no output");
