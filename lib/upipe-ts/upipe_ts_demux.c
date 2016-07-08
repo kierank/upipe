@@ -881,7 +881,7 @@ static int upipe_ts_demux_output_plumber(struct upipe *upipe,
                     UPROBE_LOG_VERBOSE, "s302f"));
         if (unlikely(output == NULL))
             return UBASE_ERR_ALLOC;
-        upipe_ts_demux_output_store_last_inner(upipe, output);
+        upipe_ts_demux_output_store_bin_output(upipe, output);
         return UBASE_ERR_NONE;
     }
 
