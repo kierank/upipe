@@ -1128,9 +1128,23 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
             upipe_err_va(upipe, "[%d] Mismatching offsets: %"PRIu64" != %u",
                     upipe_bmd_sink_sub->channel_idx/2,
                     samples_offset, end_offset);
+
             /* */
-            if (samples_offset == end_offset - 1)
+            if (samples_offset == end_offset - 1) {
+                // dropping the sample currently at end_offset - 1
+                upipe_dbg(upipe, "Overlapping sample");
                 samples_offset = end_offset;
+            }
+
+            if (samples_offset == end_offset + 1 && end_offset) {
+                upipe_dbg(upipe, "Sample hole, duplicating sample");
+                uint8_t idx = upipe_bmd_sink_sub->channel_idx;
+                size_t off = DECKLINK_CHANNELS * end_offset + idx;
+                int32_t *out = upipe_bmd_sink->audio_buf;
+
+                for (int i = 0; i < 2; i++)
+                    out[off + i] = out[off + i - DECKLINK_CHANNELS];
+            }
         }
 
         /* The earliest in the outgoing block we've written to */
