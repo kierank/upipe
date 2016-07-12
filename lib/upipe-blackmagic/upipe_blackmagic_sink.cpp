@@ -289,6 +289,9 @@ struct upipe_bmd_sink {
     /** lock the list of subpipes */
     pthread_mutex_t lock;
 
+    /** makes sure the sink is alive while in callback */
+    pthread_mutex_t cb_lock;
+
     /** card index **/
     int card_idx;
 
@@ -413,7 +416,9 @@ public:
 #endif
 
         /* next frame */
+        pthread_mutex_lock(&upipe_bmd_sink->cb_lock);
         output_cb(&upipe_bmd_sink->pic_subpipe.upipe);
+        pthread_mutex_unlock(&upipe_bmd_sink->cb_lock);
     }
 
     virtual HRESULT ScheduledPlaybackHasStopped (void) {}
@@ -848,6 +853,18 @@ static void upipe_bmd_sink_sub_free(struct upipe *upipe)
     struct upipe_bmd_sink_sub *upipe_bmd_sink_sub = upipe_bmd_sink_sub_from_upipe(upipe);
     struct upipe_bmd_sink *upipe_bmd_sink =
         upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+
+    if (upipe_bmd_sink_sub == &upipe_bmd_sink->pic_subpipe && upipe_bmd_sink->deckLink) {
+        pthread_mutex_lock(&upipe_bmd_sink->cb_lock);
+        upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(NULL);
+        upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
+        upipe_bmd_sink->deckLinkOutput->DisableVideoOutput();
+        upipe_bmd_sink->deckLinkOutput->DisableAudioOutput();
+        if (upipe_bmd_sink->video_frame)
+            upipe_bmd_sink->video_frame->Release();
+
+        pthread_mutex_unlock(&upipe_bmd_sink->cb_lock);
+    }
 
     pthread_mutex_lock(&upipe_bmd_sink->lock);
     upipe_throw_dead(upipe);
@@ -1925,6 +1942,7 @@ static struct upipe *upipe_bmd_sink_alloc(struct upipe_mgr *mgr,
     upipe_bmd_sink_init_urefcount(upipe);
 
     pthread_mutex_init(&upipe_bmd_sink->lock, NULL);
+    pthread_mutex_init(&upipe_bmd_sink->cb_lock, NULL);
 
     /* Initalise subpipes */
     upipe_bmd_sink_sub_init(upipe_bmd_sink_sub_to_upipe(upipe_bmd_sink_to_pic_subpipe(upipe_bmd_sink)),
@@ -2344,18 +2362,13 @@ static void upipe_bmd_sink_free(struct upipe *upipe)
     free(upipe_bmd_sink->audio_buf);
 
     if (upipe_bmd_sink->deckLink) {
-        upipe_bmd_sink->deckLinkOutput->SetScheduledFrameCompletionCallback(NULL);
-        upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
-        upipe_bmd_sink->deckLinkOutput->DisableVideoOutput();
-        upipe_bmd_sink->deckLinkOutput->DisableAudioOutput();
         upipe_bmd_sink->deckLinkOutput->Release();
         upipe_bmd_sink->displayMode->Release();
         upipe_bmd_sink->deckLink->Release();
-        if (upipe_bmd_sink->video_frame)
-            upipe_bmd_sink->video_frame->Release();
     }
 
     pthread_mutex_destroy(&upipe_bmd_sink->lock);
+    pthread_mutex_destroy(&upipe_bmd_sink->cb_lock);
 
     if (upipe_bmd_sink->cb)
         upipe_bmd_sink->cb->Release();
