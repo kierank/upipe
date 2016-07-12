@@ -1010,10 +1010,11 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
     /* timestamp of next video frame */
     const uint64_t last_pts = video_pts + samples * UCLOCK_FREQ / 48000;
 
+    /* first sample that has not been written to yet */
     int64_t start_offset = -1;
-    uint64_t end_offset = 0;
 
-    uint64_t old_pts = 0; // debug
+    /* last sample that has been written to */
+    uint64_t end_offset = 0;
 
     /* iterate through subpipe queue */
     for (;;) {
@@ -1184,6 +1185,7 @@ drop_uref:
             break;
     }
 
+    /* We didn't even start writing audio */
     if (start_offset == -1) {
         upipe_err_va(upipe, "[%d] NO AUDIO for vid PTS %f (%u urefs)",
                 upipe_bmd_sink_sub->channel_idx/2, pts_to_time(video_pts),
@@ -1191,12 +1193,13 @@ drop_uref:
         return;
     }
 
+    /* We didn't write the first sample */
     if (start_offset > 0) {
-        upipe_err_va(upipe, "[%d] Start offset %"PRId64,
-                upipe_bmd_sink_sub->channel_idx/2,
-                start_offset);
+        upipe_err_va(upipe, "[%d] MISSED %"PRId64" start samples",
+                upipe_bmd_sink_sub->channel_idx/2, start_offset);
     }
 
+    /* We didn't write the last sample */
     if (end_offset < samples) {
         upipe_err_va(upipe, "[%d] MISSED %"PRIu64" samples, last pts %f (%u urefs buffered)",
                 upipe_bmd_sink_sub->channel_idx/2,
