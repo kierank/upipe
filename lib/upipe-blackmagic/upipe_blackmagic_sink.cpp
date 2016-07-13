@@ -1166,7 +1166,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         /* read the samples into our final buffer */
         copy_samples( upipe_bmd_sink_sub, uref, samples_offset, missing_samples);
 
-        if (upipe_bmd_sink_sub->s302m)
+        if (0 && upipe_bmd_sink_sub->s302m)
             start_code(upipe_bmd_sink->audio_buf, upipe_bmd_sink_sub->channel_idx,
                     samples);
 
@@ -1496,7 +1496,7 @@ static void output_cb(struct upipe *upipe)
             break;
         }
 
-        upipe_dbg_va(upipe, "found uref %.2f, PTS diff %.2f",
+        if (0) upipe_dbg_va(upipe, "found uref %.2f, PTS diff %.2f",
                 pts_to_time(vid_pts),
                 dur_to_time(vid_pts - pts));
         break;
