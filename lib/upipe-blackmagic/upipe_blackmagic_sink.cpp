@@ -1102,7 +1102,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
                     dur_to_time(pts - last_pts), pts - last_pts
                     );
             upipe_dbg_va(upipe, "\t\tStart %"PRId64" End %u", start_offset, end_offset);
-            uref_free(uref);
+            upipe_bmd_sink_sub->uref = uref;
             break;
         }
 
