@@ -1143,8 +1143,8 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
                     n = end_offset;
 
                 size_t off = DECKLINK_CHANNELS * end_offset + idx;
-                memcpy(&out[DECKLINK_CHANNELS * (end_offset - n) + idx],
-                        &out[DECKLINK_CHANNELS * end_offset + idx],
+                memcpy(&out[DECKLINK_CHANNELS * end_offset + idx],
+                        &out[DECKLINK_CHANNELS * (end_offset - n) + idx],
                         2 * 4 * n);
             } else {
                 upipe_dbg_va(upipe, "Overlap from %zu to %zu, not doing anything",
