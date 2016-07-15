@@ -1123,12 +1123,6 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         }
 
         if (samples_offset != end_offset) {
-            /* silently fix off by-one/two */
-            if (llabs((int64_t) samples_offset - end_offset) < 6)
-                samples_offset = end_offset;
-        }
-
-        if (samples_offset != end_offset) {
             upipe_err_va(upipe, "[%d] Mismatching offsets: %"PRIu64" != %u",
                     upipe_bmd_sink_sub->channel_idx/2,
                     samples_offset, end_offset);
