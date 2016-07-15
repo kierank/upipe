@@ -144,27 +144,32 @@ static void upipe_s337f_header(struct upipe *upipe, int32_t *buf, uint32_t *hdr)
 static void upipe_s337f_input(struct upipe *upipe, struct uref *uref, struct upump **upump_p)
 {
     struct upipe_s337f *upipe_s337f = upipe_s337f_from_upipe(upipe);
+    struct uref *output = upipe_s337f->uref;
 
     ssize_t sync = upipe_s337f_sync(upipe, uref);
+
     if (sync == -1) {
-        upipe_err(upipe, "Sync lost");
-        uref_free(uref);
-        uref_free(upipe_s337f->uref);
-        upipe_s337f->uref = NULL;
-        return;
+        if (output) {
+            upipe_err(upipe, "Sync lost");
+            uref_free(output);
+            upipe_s337f->uref = NULL;
+        }
+        output = uref;
+        goto out;
+    } else if (!output) {
+        upipe_notice(upipe, "Found synchro");
     }
 
     if (sync != upipe_s337f->sync) {
         upipe_warn_va(upipe, "Sync word at offset %zu", sync);
         upipe_s337f->sync = sync;
-        if (upipe_s337f->uref) {
+        if (output) {
             upipe_err_va(upipe, "Dropping buffered uref");
-            uref_free(upipe_s337f->uref);
+            uref_free(output);
             upipe_s337f->uref = NULL;
+            output = NULL;
         }
     }
-
-    struct uref *output = upipe_s337f->uref;
 
     if (output) {
         size_t size[2];
@@ -229,6 +234,7 @@ static void upipe_s337f_input(struct upipe *upipe, struct uref *uref, struct upu
     /* buffer next uref */
     upipe_s337f->uref = uref;
 
+out:
     if (!upipe_s337f->flow_def)
         upipe_s337f_store_flow_def(upipe, uref_dup(upipe_s337f->flow_def_input));
 

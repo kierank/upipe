@@ -1350,9 +1350,6 @@ static int upipe_avcdec_set_flow_def(struct upipe *upipe, struct uref *flow_def)
                  (codec = avcodec_find_decoder(codec_id)) == NULL))
         return UBASE_ERR_INVALID;
 
-
-    uref_attr_set_string(flow_def, codec->name, UDICT_TYPE_STRING, "codec");
-
     struct upipe_avcdec *upipe_avcdec = upipe_avcdec_from_upipe(upipe);
 
     uint8_t *extradata_alloc = NULL;
