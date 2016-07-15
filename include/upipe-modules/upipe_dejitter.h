@@ -1,9 +1,7 @@
-/*****************************************************************************
- * upipe_av.h: application interface for common function for libav wrappers
- *****************************************************************************
- * Copyright (C) 2012 OpenHeadend S.A.R.L.
+/*
+ * Copyright (C) 2016 OpenHeadend S.A.R.L.
  *
- * Authors: Christophe Massiot <massiot@via.ecp.fr>
+ * Authors: Christophe Massiot
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -23,34 +21,35 @@
  * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- *****************************************************************************/
+ */
 
-#ifndef _UPIPE_AV_UPIPE_AV_H_
+/** @file
+ * @short Upipe module calling dejtter on timestamps
+ *
+ * This module is used in conjunction with @ref upipe_nodemux. It is supposed
+ * to be inserted in the pipeline after the DTS/PTS prog have been calculated,
+ * for instance after the framer (upipe_nodemux on the contrary should be
+ * before the framer). It considers each frame as a clock reference, and
+ * throws events to fix the sys timestamps, normally caught by
+ * @ref uprobe_dejitter.
+ */
+
+#ifndef _UPIPE_MODULES_UPIPE_DEJITTER_H_
 /** @hidden */
-#define _UPIPE_AV_UPIPE_AV_H_
+#define _UPIPE_MODULES_UPIPE_DEJITTER_H_
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include <stdbool.h>
+#include <upipe/upipe.h>
 
-/** @hidden */
-struct uprobe;
+#define UPIPE_DEJITTER_SIGNATURE UBASE_FOURCC('d','j','t','r')
 
-/** @This initializes non-reentrant parts of avcodec and avformat. Call it
- * before allocating managers from this library.
+/** @This returns the management structure for all dejitter pipes.
  *
- * @param init_avcodec_only if set to true, avformat source and sink may not
- * be used (saves memory)
- * @param uprobe uprobe to print libav messages
- * @return false in case of error
+ * @return pointer to manager
  */
-bool upipe_av_init(bool init_avcodec_only, struct uprobe *uprobe);
-
-/** @This cleans up memory allocated by @ref upipe_av_init. Call it when all
- * avformat- and avcodec-related managers have been freed.
- */
-void upipe_av_clean(void);
+struct upipe_mgr *upipe_dejitter_mgr_alloc(void);
 
 #ifdef __cplusplus
 }
