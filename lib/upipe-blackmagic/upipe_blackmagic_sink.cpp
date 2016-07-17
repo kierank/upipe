@@ -1123,12 +1123,6 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         }
 
         if (samples_offset != end_offset) {
-            /* silently fix off by-one/two */
-            if (llabs((int64_t) samples_offset - end_offset) < 6)
-                samples_offset = end_offset;
-        }
-
-        if (samples_offset != end_offset) {
             upipe_err_va(upipe, "[%d] Mismatching offsets: %"PRIu64" != %u",
                     upipe_bmd_sink_sub->channel_idx/2,
                     samples_offset, end_offset);
@@ -1143,8 +1137,8 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
                     n = end_offset;
 
                 size_t off = DECKLINK_CHANNELS * end_offset + idx;
-                memcpy(&out[DECKLINK_CHANNELS * (end_offset - n) + idx],
-                        &out[DECKLINK_CHANNELS * end_offset + idx],
+                memcpy(&out[DECKLINK_CHANNELS * end_offset + idx],
+                        &out[DECKLINK_CHANNELS * (end_offset - n) + idx],
                         2 * 4 * n);
             } else {
                 upipe_dbg_va(upipe, "Overlap from %zu to %zu, not doing anything",

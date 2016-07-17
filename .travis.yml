@@ -1,6 +1,6 @@
 sudo: required
 dist: trusty
-osx_image: xcode7.2
+osx_image: xcode7.3
 language: c
 
 env:
@@ -13,30 +13,32 @@ matrix:
   include:
 
     - os: linux
-      compiler: gcc-5
+      compiler: gcc-6
       env:
-        - GCC_VERSION=5
+        - GCC_VERSION=6
         - APT_REPOS="ppa:ubuntu-toolchain-r/test ppa:mc3man/testing6"
         - APT_PACKAGES="gcc-$GCC_VERSION g++-$GCC_VERSION $APT_PACKAGES_COMMON"
         - HOST_CC=gcc-$GCC_VERSION
         - HOST_CXX=g++-$GCC_VERSION
+        - CXXFLAGS="-Wno-error=literal-suffix"
 
     - os: linux
       compiler: gcc-m32
       env:
-        - GCC_VERSION=5
+        - GCC_VERSION=6
         - APT_REPOS="ppa:ubuntu-toolchain-r/test ppa:mc3man/testing6"
         - APT_PACKAGES="gcc-$GCC_VERSION-multilib g++-$GCC_VERSION-multilib $(echo $APT_PACKAGES_COMMON | sed 's/\(\S*\)/\1:i386/g') libgl1-mesa-dev:i386 libglu1-mesa-dev:i386 libc6-dbg:i386"
         - HOST_CC="gcc-$GCC_VERSION -m32"
         - HOST_CXX="g++-$GCC_VERSION -m32"
         - CFLAGS="-msse2 -mfpmath=sse"
+        - CXXFLAGS="-Wno-error=literal-suffix"
         - LIBAMT_PLATFORM="PLATFORM32=1"
         - PKG_CONFIG_LIBDIR="/usr/lib/i386-linux-gnu/pkgconfig"
 
     - os: linux
-      compiler: clang-3.7
+      compiler: clang-3.8
       env:
-        - CLANG_VERSION=3.7
+        - CLANG_VERSION=3.8
         - APT_REPOS="ppa:ubuntu-toolchain-r/test ppa:mc3man/testing6"
         - APT_PACKAGES="clang-$CLANG_VERSION $APT_PACKAGES_COMMON"
         - HOST_CC=clang-$CLANG_VERSION
@@ -49,9 +51,6 @@ matrix:
         - HOST_CC=clang
         - HOST_CXX=clang++
         - CFLAGS="-Wno-error=unused-function -Wno-error=unused-command-line-argument"
-
-  allow_failures:
-    - compiler: clang-3.7
 
 before_install:
   - if type apt-get 2>/dev/null; then
@@ -81,8 +80,6 @@ before_install:
       brew install libev;
       brew install yasm;
       brew install x264;
-      wget -O /usr/local/Library/Formula/ffmpeg.rb
-        "https://raw.githubusercontent.com/Homebrew/homebrew-core/7c988bdb8ffb9d2ffcce7606a43e360d98e4982c/Formula/ffmpeg.rb";
       brew install ffmpeg;
     fi
 
@@ -121,7 +118,7 @@ script: CONFIGURE_FLAGS="--disable-silent-rules
           CXX=\"$HOST_CXX\"
           CPPFLAGS=\"-I$PWD/nacl_sdk/pepper_49/include\"
           CFLAGS=\"-Werror -Wno-error=deprecated-declarations -O2 -g $CFLAGS\"
-          CXXFLAGS=\"-Werror -O2 -g\"" &&
+          CXXFLAGS=\"-Werror -O2 -g $CXXFLAGS\"" &&
         eval ./configure $CONFIGURE_FLAGS &&
         make distcheck
           DISTCHECK_CONFIGURE_FLAGS="$CONFIGURE_FLAGS"
