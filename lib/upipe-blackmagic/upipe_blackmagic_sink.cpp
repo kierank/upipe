@@ -1,7 +1,8 @@
 /*
- * Copyright (C) 2014 Open Broadcast Systems Ltd.
+ * Copyright (C) 2014-2016 Open Broadcast Systems Ltd.
  *
  * Authors: Kieran Kunhya
+ *          Rafaël Carré
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
