@@ -117,6 +117,8 @@ enum ubuf_command {
     UBUF_RESIZE_PICTURE,
     /** resize picture ubuf (int, int, int, int) */
     UBUF_RESIZE_SOUND,
+    /** extend block ubuf (int) */
+    UBUF_EXTEND_BLOCK,
 
     /*
      * Other standard commands
