@@ -70,6 +70,8 @@
 #include <libavutil/intreadwrite.h>
 #include <libzvbi.h>
 
+#include <speex/speex_resampler.h>
+
 #include <pthread.h>
 
 #include "include/DeckLinkAPI.h"
@@ -259,6 +261,12 @@ struct upipe_bmd_sink_sub {
 
     /** whether this is an audio pipe */
     bool sound;
+
+    /** speex resampler */
+    SpeexResamplerState *speex;
+
+    /** current input drift rate */
+    struct urational drift_rate;
 
     bool s302m;
 
@@ -843,6 +851,8 @@ static void upipe_bmd_sink_sub_init(struct upipe *upipe,
     upipe_bmd_sink_sub_init_upump_mgr(upipe);
     upipe_bmd_sink_sub_init_upump(upipe);
     upipe_bmd_sink_sub->sound = !static_pipe;
+    upipe_bmd_sink_sub->speex = NULL;
+    upipe_bmd_sink_sub->drift_rate = (struct urational) { 0, 0 };
 
     upipe_throw_ready(upipe);
     pthread_mutex_unlock(&upipe_bmd_sink->lock);
@@ -885,21 +895,18 @@ static void upipe_bmd_sink_sub_free(struct upipe *upipe)
         return;
     }
 
+    if (upipe_bmd_sink_sub->speex)
+        speex_resampler_destroy(upipe_bmd_sink_sub->speex);
+
     upipe_bmd_sink_sub_clean_urefcount(upipe);
     upipe_bmd_sink_sub_free_flow(upipe);
 }
 
 static int upipe_bmd_sink_sub_read_uref_attributes(struct uref *uref,
-    uint64_t *pts, struct urational *drift_rate, size_t *size)
+    uint64_t *pts, size_t *size)
 {
     UBASE_RETURN(uref_clock_get_pts_sys(uref, pts));
-    UBASE_RETURN(uref_clock_get_rate(uref, drift_rate));
     UBASE_RETURN(uref_sound_size(uref, size, NULL /* sample_size */));
-
-    if (drift_rate->num == 0 || drift_rate->den == 0) {
-        drift_rate->num = 1;
-        drift_rate->den = 1;
-    }
 
     return UBASE_ERR_NONE;
 }
@@ -1028,13 +1035,12 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         }
 
         size_t uref_samples = 0;                /* samples in the uref */
-        struct urational drift_rate = { 0, 0 }; /* playing rate */
         uint64_t duration;                      /* uref real duration */
         uint64_t pts = UINT64_MAX;              /* presentation timestamp */
 
         /* read uref attributes */
         if (!ubase_check(upipe_bmd_sink_sub_read_uref_attributes(uref,
-            &pts, &drift_rate, &uref_samples))) {
+            &pts, &uref_samples))) {
             upipe_err(upipe, "Could not read uref attributes");
             uref_dump(uref, upipe->uprobe);
             uref_free(uref);
@@ -1044,8 +1050,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         pts += upipe_bmd_sink_sub->latency;
 
         /* samples / sample rate = duration */
-        /* multiply uref duration by its playing rate to get its real duration */
-        duration = uref_samples * drift_rate.num * UCLOCK_FREQ / 48000 / drift_rate.den;
+        duration = uref_samples * UCLOCK_FREQ / 48000;
 
         /* delay between uref start and video frame */
         int64_t time_offset = pts - video_pts;
@@ -1115,35 +1120,20 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
         /* samples already written / writing position in the outgoing block */
         uint64_t samples_offset = length_to_samples(time_offset);
 
+        /* FIXME */
+        if (samples_offset != end_offset) {
+            upipe_err_va(upipe, "[%d] Mismatching offsets: SAMPLES %"PRIu64" != %u END",
+                    upipe_bmd_sink_sub->channel_idx/2,
+                    samples_offset, end_offset);
+            /* ignore those errors for now */
+            samples_offset = end_offset;
+        }
+
         /* we can't write past the end of the buffer */
         if (samples_offset >= samples) {
             upipe_err_va(upipe, "FIXING offset: %"PRIu64" > %u",
                 samples_offset, samples - 1);
             samples_offset = samples - 1;
-        }
-
-        if (samples_offset != end_offset) {
-            upipe_err_va(upipe, "[%d] Mismatching offsets: %"PRIu64" != %u",
-                    upipe_bmd_sink_sub->channel_idx/2,
-                    samples_offset, end_offset);
-
-            if (samples_offset > end_offset) {
-                upipe_dbg_va(upipe, "Sample hole from %zu to %zu",
-                    end_offset, samples_offset);
-                uint8_t idx = upipe_bmd_sink_sub->channel_idx;
-                int32_t *out = upipe_bmd_sink->audio_buf;
-                size_t n = samples_offset - end_offset;
-                if (n > end_offset)
-                    n = end_offset;
-
-                size_t off = DECKLINK_CHANNELS * end_offset + idx;
-                memcpy(&out[DECKLINK_CHANNELS * end_offset + idx],
-                        &out[DECKLINK_CHANNELS * (end_offset - n) + idx],
-                        2 * 4 * n);
-            } else {
-                upipe_dbg_va(upipe, "Overlap from %zu to %zu, not doing anything",
-                    samples_offset, end_offset);
-            }
         }
 
         /* The earliest in the outgoing block we've written to */
@@ -1158,7 +1148,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
             missing_samples = uref_samples;
 
         /* read the samples into our final buffer */
-        copy_samples( upipe_bmd_sink_sub, uref, samples_offset, missing_samples);
+        copy_samples(upipe_bmd_sink_sub, uref, samples_offset, missing_samples);
 
         if (0 && upipe_bmd_sink_sub->s302m)
             start_code(upipe_bmd_sink->audio_buf, upipe_bmd_sink_sub->channel_idx,
@@ -1408,7 +1398,7 @@ static void schedule_frame(struct upipe *upipe, struct uref *uref, uint64_t pts)
 
     uint32_t vbuffered;
     upipe_bmd_sink->deckLinkOutput->GetBufferedVideoFrameCount(&vbuffered);
-    upipe_dbg_va(upipe, "A %.2f | V %.2f",
+    if (0) upipe_dbg_va(upipe, "A %.2f | V %.2f",
             (float)(1000 * buffered) / 48000, (float) 1000 * vbuffered / 25);
 }
 
@@ -1423,7 +1413,7 @@ static void output_cb(struct upipe *upipe)
     uint64_t pts = upipe_bmd_sink->pts;
 
     uint64_t now = uclock_now(&upipe_bmd_sink->uclock);
-    upipe_notice_va(upipe, "PTS %.2f - %.2f - %u pics",
+    if (0) upipe_notice_va(upipe, "PTS %.2f - %.2f - %u pics",
             pts_to_time(pts),
             dur_to_time(now - pts),
             uqueue_length(&upipe_bmd_sink_sub->uqueue));
@@ -1514,6 +1504,88 @@ static void output_cb(struct upipe *upipe)
     upipe_bmd_sink->pts += upipe_bmd_sink->ticks_per_frame;
 }
 
+/** @internal */
+static void resample_audio(struct upipe *upipe, struct uref *uref)
+{
+    struct upipe_bmd_sink *upipe_bmd_sink =
+        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+    struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
+        upipe_bmd_sink_sub_from_upipe(upipe);
+
+    struct urational drift_rate;
+    if (!ubase_check(uref_clock_get_rate(uref, &drift_rate)))
+        drift_rate = (struct urational){ 1, 1 };
+
+    /* reinitialize resampler when drift rate changes */
+    if (urational_cmp(&drift_rate, &upipe_bmd_sink_sub->drift_rate)) {
+        upipe_bmd_sink_sub->drift_rate = drift_rate;
+        if (upipe_bmd_sink_sub->speex)
+            speex_resampler_destroy(upipe_bmd_sink_sub->speex);
+        int err;
+        spx_uint32_t ratio_num = drift_rate.den;
+        spx_uint32_t ratio_den = drift_rate.num;
+        spx_uint32_t in_rate = 48000 * ratio_num / ratio_den;
+        spx_uint32_t out_rate = 48000;
+        upipe_bmd_sink_sub->speex = speex_resampler_init_frac(2, /* stereo */
+                ratio_num, ratio_den,
+                in_rate, out_rate,
+                SPEEX_RESAMPLER_QUALITY_MAX, &err);
+
+        upipe_notice_va(upipe, "\t\t\tREINIT resampler(%u, %u, %u, %u)",
+                ratio_num, ratio_den,
+                in_rate, out_rate);
+
+        assert(upipe_bmd_sink_sub->speex && !err);
+    }
+
+    /** FIXME FIXME FIXME
+     *
+     * We should be resampling in another pipe,
+     * and do that prior to s16 -> s32 conversion
+     *
+     */
+
+    size_t size;
+    if (!ubase_check(uref_sound_size(uref, &size, NULL /* sample_size */)))
+        return;
+
+    assert(size <= 1920); // FIXME, too low for 24 fps
+
+    /* shouldn't be called from different threads */
+    static int16_t in_buf[1920*2];
+    static int16_t out_buf[1930*2]; // 1930 = 1920 + a bit
+
+    /* s32 -> s16, undoing what swresample did.. */
+    const int32_t *in;
+    uref_sound_read_int32_t(uref, 0, size, &in, 1);
+    for (int i = 0; i < 2 * size; i++)
+        in_buf[i] = in[i] >> 16;
+    uref_sound_unmap(uref, 0, size, 1);
+
+    spx_uint32_t in_len = size;     /* input size */
+    spx_uint32_t out_len = 1930;    /* available output size */
+
+    int ret = speex_resampler_process_interleaved_int(upipe_bmd_sink_sub->speex,
+            in_buf, &in_len, out_buf, &out_len);
+    assert(ret == 0);
+
+    if (in_len < out_len) {
+        /* realloc because we need a bigger ubuf */
+        struct ubuf *ubuf = ubuf_sound_alloc(uref->ubuf->mgr, out_len);
+        assert(ubuf);
+        uref_attach_ubuf(uref, ubuf);
+    } else if (in_len > out_len) {
+        /* shrink ubuf */
+        ubase_assert(uref_sound_resize(uref, 0, out_len));
+    }
+
+    int32_t *out;
+    uref_sound_write_int32_t(uref, 0, out_len, &out, 1);
+    for (int i = 0; i < 2 * out_len; i++)
+        out[i] = out_buf[i] << 16;
+    uref_sound_unmap(uref, 0, out_len, 1);
+}
+
 /** @internal @This handles input uref.
  *
  * @param upipe description structure of the pipe
@@ -1540,6 +1612,10 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref)
         uref_free(uref);
         return true;
     }
+
+    /* this makes sure the input and output clocks do not drift apart */
+    if (upipe_bmd_sink_sub->sound)
+        resample_audio(upipe, uref);
 
     /* output is controlled by the pic subpipe */
     if (upipe_bmd_sink_sub != &upipe_bmd_sink->pic_subpipe)

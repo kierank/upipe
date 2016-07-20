@@ -21,7 +21,7 @@ libupipe_blackmagic_la_CXXFLAGS = -Wno-missing-declarations
 libupipe_blackmagic_la_LIBADD = $(top_builddir)/lib/upipe/libupipe.la -ldl
 if HAVE_ZVBI
 libupipe_blackmagic_la_CPPFLAGS += $(ZVBI_CFLAGS)
-libupipe_blackmagic_la_LIBADD += $(ZVBI_LIBS)
+libupipe_blackmagic_la_LIBADD += $(ZVBI_LIBS) -lspeexdsp
 endif
 
 pkgconfigdir = $(libdir)/pkgconfig
