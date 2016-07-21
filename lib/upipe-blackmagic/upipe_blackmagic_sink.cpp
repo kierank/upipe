@@ -1101,8 +1101,6 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
             pts = video_pts;
             time_offset = 0;
             uref_samples -= drop_samples;
-
-            uref_clock_set_pts_sys(uref, pts);
         } else if (unlikely(pts > last_pts)) { /* too far in the future ? */
             upipe_err_va(upipe, "[%d] TOO EARLY (%f > %f) by %fs (%"PRIu64" ticks)",
                 upipe_bmd_sink_sub->channel_idx/2,
