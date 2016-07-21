@@ -70,8 +70,6 @@
 #include <libavutil/intreadwrite.h>
 #include <libzvbi.h>
 
-#include <speex/speex_resampler.h>
-
 #include <pthread.h>
 
 #include "include/DeckLinkAPI.h"
@@ -261,12 +259,6 @@ struct upipe_bmd_sink_sub {
 
     /** whether this is an audio pipe */
     bool sound;
-
-    /** speex resampler */
-    SpeexResamplerState *speex;
-
-    /** current input drift rate */
-    struct urational drift_rate;
 
     bool s302m;
 
@@ -851,12 +843,6 @@ static void upipe_bmd_sink_sub_init(struct upipe *upipe,
     upipe_bmd_sink_sub_init_upump_mgr(upipe);
     upipe_bmd_sink_sub_init_upump(upipe);
     upipe_bmd_sink_sub->sound = !static_pipe;
-    upipe_bmd_sink_sub->speex = NULL;
-    int err;
-    upipe_bmd_sink_sub->speex = speex_resampler_init(2, /* stereo */
-                48000, 48000, SPEEX_RESAMPLER_QUALITY_MAX, &err);
-    assert(upipe_bmd_sink_sub->speex && !err);
-    upipe_bmd_sink_sub->drift_rate = (struct urational) { 0, 0 };
 
     upipe_throw_ready(upipe);
     pthread_mutex_unlock(&upipe_bmd_sink->lock);
@@ -898,9 +884,6 @@ static void upipe_bmd_sink_sub_free(struct upipe *upipe)
         upipe_clean(upipe);
         return;
     }
-
-    if (upipe_bmd_sink_sub->speex)
-        speex_resampler_destroy(upipe_bmd_sink_sub->speex);
 
     upipe_bmd_sink_sub_clean_urefcount(upipe);
     upipe_bmd_sink_sub_free_flow(upipe);
@@ -1512,81 +1495,6 @@ static void output_cb(struct upipe *upipe)
     upipe_bmd_sink->pts += upipe_bmd_sink->ticks_per_frame;
 }
 
-/** @internal */
-static void resample_audio(struct upipe *upipe, struct uref *uref)
-{
-    struct upipe_bmd_sink *upipe_bmd_sink =
-        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
-    struct upipe_bmd_sink_sub *upipe_bmd_sink_sub =
-        upipe_bmd_sink_sub_from_upipe(upipe);
-
-    struct urational drift_rate;
-    if (!ubase_check(uref_clock_get_rate(uref, &drift_rate)))
-        drift_rate = (struct urational){ 1, 1 };
-
-    /* reinitialize resampler when drift rate changes */
-    if (urational_cmp(&drift_rate, &upipe_bmd_sink_sub->drift_rate)) {
-        upipe_bmd_sink_sub->drift_rate = drift_rate;
-        spx_uint32_t ratio_num = drift_rate.den;
-        spx_uint32_t ratio_den = drift_rate.num;
-        spx_uint32_t in_rate = 48000 * ratio_num / ratio_den;
-        spx_uint32_t out_rate = 48000;
-        int ret = speex_resampler_set_rate_frac(upipe_bmd_sink_sub->speex,
-                ratio_num, ratio_den, in_rate, out_rate);
-        assert(!ret);
-        upipe_notice_va(upipe, "\t\t\tREINIT resampler(%u, %u, %u, %u)",
-                ratio_num, ratio_den,
-                in_rate, out_rate);
-    }
-
-    /** FIXME FIXME FIXME
-     *
-     * We should be resampling in another pipe,
-     * and do that prior to s16 -> s32 conversion
-     *
-     */
-
-    size_t size;
-    if (!ubase_check(uref_sound_size(uref, &size, NULL /* sample_size */)))
-        return;
-
-    assert(size <= 1920); // FIXME, too low for 24 fps
-
-    /* shouldn't be called from different threads */
-    static int16_t in_buf[1920*2];
-    static int16_t out_buf[1930*2]; // 1930 = 1920 + a bit
-
-    /* s32 -> s16, undoing what swresample did.. */
-    const int32_t *in;
-    uref_sound_read_int32_t(uref, 0, size, &in, 1);
-    for (int i = 0; i < 2 * size; i++)
-        in_buf[i] = in[i] >> 16;
-    uref_sound_unmap(uref, 0, size, 1);
-
-    spx_uint32_t in_len = size;     /* input size */
-    spx_uint32_t out_len = 1930;    /* available output size */
-
-    int ret = speex_resampler_process_interleaved_int(upipe_bmd_sink_sub->speex,
-            in_buf, &in_len, out_buf, &out_len);
-    assert(ret == 0);
-
-    if (in_len < out_len) {
-        /* realloc because we need a bigger ubuf */
-        struct ubuf *ubuf = ubuf_sound_alloc(uref->ubuf->mgr, out_len);
-        assert(ubuf);
-        uref_attach_ubuf(uref, ubuf);
-    } else if (in_len > out_len) {
-        /* shrink ubuf */
-        ubase_assert(uref_sound_resize(uref, 0, out_len));
-    }
-
-    int32_t *out;
-    uref_sound_write_int32_t(uref, 0, out_len, &out, 1);
-    for (int i = 0; i < 2 * out_len; i++)
-        out[i] = out_buf[i] << 16;
-    uref_sound_unmap(uref, 0, out_len, 1);
-}
-
 /** @internal @This handles input uref.
  *
  * @param upipe description structure of the pipe
@@ -1613,10 +1521,6 @@ static bool upipe_bmd_sink_sub_output(struct upipe *upipe, struct uref *uref)
         uref_free(uref);
         return true;
     }
-
-    /* this makes sure the input and output clocks do not drift apart */
-    if (upipe_bmd_sink_sub->sound)
-        resample_audio(upipe, uref);
 
     /* output is controlled by the pic subpipe */
     if (upipe_bmd_sink_sub != &upipe_bmd_sink->pic_subpipe)
