@@ -1100,7 +1100,6 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
             pts = video_pts;
             time_offset = 0;
-            duration -= drop_duration;
             uref_samples -= drop_samples;
 
             uref_clock_set_pts_sys(uref, pts);
