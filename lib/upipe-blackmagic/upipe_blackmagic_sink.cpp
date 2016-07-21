@@ -1021,6 +1021,9 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
     /* timestamp of next video frame */
     const uint64_t last_pts = video_pts + samples * UCLOCK_FREQ / 48000;
 
+    /* maximum drift allowed */
+    static const unsigned int max_sample_drift = 10;
+
     /* first sample that has not been written to yet */
     uint64_t start_offset = UINT64_MAX;
 
@@ -1067,7 +1070,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
             uint64_t drop_duration = -time_offset;
 
             /* too late */
-            if (unlikely(duration < drop_duration)) {
+            if (unlikely(duration < drop_duration && uref_samples > max_sample_drift)) {
                 upipe_err_va(upipe, "[%d] TOO LATE by %"PRIu64" ticks, dropping %zu samples (%f + %f < %f)",
                         upipe_bmd_sink_sub->channel_idx/2,
                         video_pts - pts - duration,
@@ -1086,6 +1089,9 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
             /* drop beginning of uref */
             size_t drop_samples = length_to_samples(drop_duration);
+            if (drop_samples <= max_sample_drift)
+                drop_samples = 0;
+
             if (drop_samples) {
                 if (drop_samples > uref_samples)
                     drop_samples = uref_samples;
@@ -1101,7 +1107,7 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
             pts = video_pts;
             time_offset = 0;
             uref_samples -= drop_samples;
-        } else if (unlikely(pts > last_pts)) { /* too far in the future ? */
+        } else if (unlikely(pts - max_sample_drift * UCLOCK_FREQ / 48000 > last_pts)) { /* too far in the future ? */
             upipe_err_va(upipe, "[%d] TOO EARLY (%f > %f) by %fs (%"PRIu64" ticks)",
                 upipe_bmd_sink_sub->channel_idx/2,
                     pts_to_time(pts), pts_to_time(last_pts),
@@ -1123,11 +1129,12 @@ static void upipe_bmd_sink_sub_sound_get_samples_channel(struct upipe *upipe,
 
         /* FIXME */
         if (samples_offset != end_offset) {
-            upipe_err_va(upipe, "[%d] Mismatching offsets: SAMPLES %"PRIu64" != %u END",
+            if (llabs((int64_t)samples_offset - (int64_t)end_offset <= max_sample_drift))
+                samples_offset = end_offset;
+            else
+                upipe_err_va(upipe, "[%d] Mismatching offsets: SAMPLES %"PRIu64" != %u END",
                     upipe_bmd_sink_sub->channel_idx/2,
                     samples_offset, end_offset);
-            /* ignore those errors for now */
-            samples_offset = end_offset;
         }
 
         /* we can't write past the end of the buffer */
