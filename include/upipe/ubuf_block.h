@@ -479,6 +479,49 @@ static inline int ubuf_block_resize(struct ubuf *ubuf, int offset, int new_size)
     return UBASE_ERR_NONE;
 }
 
+/** @This extends a block ubuf, if possible. This will only work if
+ * the relevant low-level buffers are not shared with other ubuf and
+ * the block manager allows to grow the buffer (ie. prepend/append have been
+ * correctly specified at allocation, or reallocation is allowed)
+ *
+ * Should this fail, @ref ubuf_block_merge may be used to achieve the same
+ * goal with an extra buffer copy.
+ *
+ * @param ubuf pointer to ubuf
+ * @param prepend number of octets to prepend
+ * @param append number of octets to append
+ * @return false in case of error, or if the ubuf is shared, or if the operation
+ * is not possible
+ */
+static inline bool ubuf_block_extend(struct ubuf *ubuf, int prepend, int append)
+{
+    assert(prepend >= 0);
+    assert(append >= 0);
+    if (ubuf->mgr->signature != UBUF_ALLOC_BLOCK ||
+            !ubase_check(ubuf_control(ubuf, UBUF_SINGLE)))
+        return false;
+
+    struct ubuf_block *block = ubuf_block_from_ubuf(ubuf);
+    if (prepend > block->offset)
+        return false;
+    if (append) {
+        int offset = block->total_size - 1;
+        struct ubuf *last_ubuf = offset != -1 ?
+                                 ubuf_block_get(ubuf, &offset, NULL) : ubuf;
+        struct ubuf_block *last_block = ubuf_block_from_ubuf(last_ubuf);
+        if (unlikely(!ubase_check(ubuf_control(last_ubuf, UBUF_EXTEND_BLOCK,
+                                   last_block->offset + last_block->size +
+                                   append))))
+            return false;
+        last_block->size += append;
+    }
+    block->offset -= prepend;
+    block->size += prepend;
+    block->total_size += prepend + append;
+    block->cached_offset += prepend;
+    return true;
+}
+
 /** @This duplicates part of a ubuf.
  *
  * @param ubuf pointer to ubuf

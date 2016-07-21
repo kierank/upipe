@@ -68,6 +68,10 @@ struct ubuf_block_mem_mgr {
     /** refcount management structure */
     struct urefcount urefcount;
 
+    /** extra space added before */
+    size_t prepend;
+    /** extra space added after */
+    size_t append;
     /** alignment */
     size_t align;
     /** alignment offset */
@@ -124,7 +128,8 @@ static struct ubuf *ubuf_block_mem_alloc(struct ubuf_mgr *mgr,
         return NULL;
     }
 
-    size_t buffer_size = size + block_mem_mgr->align;
+    size_t buffer_size = size + block_mem_mgr->prepend +
+                         block_mem_mgr->append + block_mem_mgr->align;
     if (unlikely(!umem_alloc(block_mem_mgr->umem_mgr, &block_mem->shared->umem,
                              buffer_size))) {
         ubuf_block_mem_shared_free_pool(mgr, block_mem->shared);
@@ -132,7 +137,7 @@ static struct ubuf *ubuf_block_mem_alloc(struct ubuf_mgr *mgr,
         return NULL;
     }
 
-    size_t offset = block_mem_mgr->align;
+    size_t offset = block_mem_mgr->prepend + block_mem_mgr->align;
     if (block_mem_mgr->align)
         offset -= ((uintptr_t)ubuf_mem_shared_buffer(block_mem->shared) +
                   offset + block_mem_mgr->align_offset) % block_mem_mgr->align;
@@ -216,6 +221,38 @@ static int ubuf_block_mem_splice(struct ubuf *ubuf, struct ubuf **new_ubuf_p,
     return UBASE_ERR_NONE;
 }
 
+/** @This reallocated the shared buffer.
+ *
+ * @param ubuf pointer to ubuf
+ * @param size new size of the buffer
+ */
+static inline bool ubuf_block_mem_realloc(struct ubuf *ubuf, size_t size)
+{
+    struct ubuf_block_mem *block_mem = ubuf_block_mem_from_ubuf(ubuf);
+    bool ret = umem_realloc(&block_mem->shared->umem, size);
+    if (likely(ret))
+        block_mem->ubuf_block.buffer = ubuf_mem_shared_buffer(block_mem->shared);
+    return ret;
+}
+
+/** @internal @This extends a block_mem ubuf.
+ *
+ * @param ubuf pointer to ubuf
+ * @param new_size required size of the buffer
+ * @return false in case of error, or if the ubuf is shared, or if the operation
+ * is not possible
+ */
+static bool ubuf_block_mem_extend(struct ubuf *ubuf, int new_size)
+{
+    if (!ubuf_block_mem_single(ubuf))
+        return false;
+    if (unlikely(!ubuf_block_mem_realloc(ubuf, new_size)))
+        return false;
+    struct ubuf_block_mem *block_mem = ubuf_block_mem_from_ubuf(ubuf);
+    ubuf_block_common_set_buffer(ubuf, ubuf_mem_shared_buffer(block_mem->shared));
+    return true;
+}
+
 /** @This handles control commands.
  *
  * @param ubuf pointer to ubuf
@@ -232,6 +269,11 @@ static int ubuf_block_mem_control(struct ubuf *ubuf, int command, va_list args)
         }
         case UBUF_SINGLE:
             return ubuf_block_mem_single(ubuf);
+
+        case UBUF_EXTEND_BLOCK: {
+            int new_size = va_arg(args, int);
+            return ubuf_block_mem_extend(ubuf, new_size);
+        }
 
         case UBUF_SPLICE_BLOCK: {
             struct ubuf **new_ubuf_p = va_arg(args, struct ubuf **);
@@ -391,6 +433,9 @@ struct ubuf_mgr *ubuf_block_mem_mgr_alloc(uint16_t ubuf_pool_depth,
     block_mem_mgr->umem_mgr = umem_mgr;
     umem_mgr_use(umem_mgr);
 
+    /* TODO: configurable */
+    block_mem_mgr->prepend = 64;
+    block_mem_mgr->append = 64;
     block_mem_mgr->align = align > 0 ? align : UBUF_DEFAULT_ALIGN;
     block_mem_mgr->align_offset = align_offset;
 
