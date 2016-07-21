@@ -852,6 +852,10 @@ static void upipe_bmd_sink_sub_init(struct upipe *upipe,
     upipe_bmd_sink_sub_init_upump(upipe);
     upipe_bmd_sink_sub->sound = !static_pipe;
     upipe_bmd_sink_sub->speex = NULL;
+    int err;
+    upipe_bmd_sink_sub->speex = speex_resampler_init(2, /* stereo */
+                48000, 48000, SPEEX_RESAMPLER_QUALITY_MAX, &err);
+    assert(upipe_bmd_sink_sub->speex && !err);
     upipe_bmd_sink_sub->drift_rate = (struct urational) { 0, 0 };
 
     upipe_throw_ready(upipe);
@@ -1519,23 +1523,16 @@ static void resample_audio(struct upipe *upipe, struct uref *uref)
     /* reinitialize resampler when drift rate changes */
     if (urational_cmp(&drift_rate, &upipe_bmd_sink_sub->drift_rate)) {
         upipe_bmd_sink_sub->drift_rate = drift_rate;
-        if (upipe_bmd_sink_sub->speex)
-            speex_resampler_destroy(upipe_bmd_sink_sub->speex);
-        int err;
         spx_uint32_t ratio_num = drift_rate.den;
         spx_uint32_t ratio_den = drift_rate.num;
         spx_uint32_t in_rate = 48000 * ratio_num / ratio_den;
         spx_uint32_t out_rate = 48000;
-        upipe_bmd_sink_sub->speex = speex_resampler_init_frac(2, /* stereo */
-                ratio_num, ratio_den,
-                in_rate, out_rate,
-                SPEEX_RESAMPLER_QUALITY_MAX, &err);
-
+        int ret = speex_resampler_set_rate_frac(upipe_bmd_sink_sub->speex,
+                ratio_num, ratio_den, in_rate, out_rate);
+        assert(!ret);
         upipe_notice_va(upipe, "\t\t\tREINIT resampler(%u, %u, %u, %u)",
                 ratio_num, ratio_den,
                 in_rate, out_rate);
-
-        assert(upipe_bmd_sink_sub->speex && !err);
     }
 
     /** FIXME FIXME FIXME
