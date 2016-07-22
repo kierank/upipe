@@ -360,6 +360,12 @@ static struct upipe *upipe_speexdsp_alloc(struct upipe_mgr *mgr,
     if (unlikely(upipe == NULL))
         return NULL;
 
+    struct upipe_speexdsp *upipe_speexdsp =
+        upipe_speexdsp_from_upipe(upipe);
+
+    upipe_speexdsp->ctx = NULL;
+    upipe_speexdsp->drift_rate = (struct urational){ 0, 0 };
+
     upipe_speexdsp_init_urefcount(upipe);
     upipe_speexdsp_init_ubuf_mgr(upipe);
     upipe_speexdsp_init_output(upipe);
