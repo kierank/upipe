@@ -104,25 +104,37 @@ static struct upipe *upipe_s337f_alloc(struct upipe_mgr *mgr,
 
 /** @internal @This finds the position of the s337m sync word in the frame
  */
-static ssize_t upipe_s337f_sync(struct upipe *upipe, struct uref *uref)
+static ssize_t upipe_s337f_sync(struct upipe *upipe, struct uref *uref, uint8_t bits)
 {
     struct upipe_s337f *upipe_s337f = upipe_s337f_from_upipe(upipe);
 
     size_t size = 0;
     uref_sound_size(uref, &size, NULL);
 
-    // TODO 16-bits
-    const int32_t *in;
-    uref_sound_read_int32_t(uref, 0, -1, &in, 1);
+    if (bits == 32) {
+        const int32_t *in;
+        uref_sound_read_int32_t(uref, 0, -1, &in, 1);
 
-    for (size_t i = 0; i < size; i++)
-        if ((in[2*i+0] == (0x6f872 << 12) && in[2*i+1] == (0x54e1f << 12)) ||
-           ((in[2*i+0] == (0x96f872 << 8) && in[2*i+1] == (0xa54e1f << 8)))) {
-            uref_sound_unmap(uref, 0, -1, 1);
-            return i;
-        }
+        for (size_t i = 0; i < size; i++)
+            if ((in[2*i+0] == (0x6f872 << 12) && in[2*i+1] == (0x54e1f << 12)) ||
+                    ((in[2*i+0] == (0x96f872 << 8) && in[2*i+1] == (0xa54e1f << 8)))) {
+                uref_sound_unmap(uref, 0, -1, 1);
+                return i;
+            }
 
-    uref_sound_unmap(uref, 0, -1, 1);
+        uref_sound_unmap(uref, 0, -1, 1);
+    } else if (bits == 16) {
+        const int16_t *in;
+        uref_sound_read_int16_t(uref, 0, -1, &in, 1);
+
+        for (size_t i = 0; i < size; i++) // TODO: find sample
+            if ((in[2*i+0] == (int16_t)0xf872 && in[2*i+1] == 0x4e1f)) {
+                uref_sound_unmap(uref, 0, -1, 1);
+                return i;
+            }
+
+        uref_sound_unmap(uref, 0, -1, 1);
+    }
 
     return -1;
 }
@@ -146,7 +158,29 @@ static void upipe_s337f_input(struct upipe *upipe, struct uref *uref, struct upu
     struct upipe_s337f *upipe_s337f = upipe_s337f_from_upipe(upipe);
     struct uref *output = upipe_s337f->uref;
 
-    ssize_t sync = upipe_s337f_sync(upipe, uref);
+    if (unlikely(!upipe_s337f->flow_def_input)) {
+        uref_free(uref);
+        return;
+    }
+
+    const char *def;
+    if (unlikely(!ubase_check(uref_flow_get_def(upipe_s337f->flow_def_input, &def)))) {
+        uref_free(uref);
+        return;
+    }
+
+    uint8_t bits = 0;
+    if (!ubase_ncmp(def, "sound.s32."))
+        bits = 32;
+    else if (!ubase_ncmp(def, "sound.s16."))
+        bits = 16;
+    else {
+        uref_free(uref);
+        upipe_err_va(upipe, "Unhandled format %s", def);
+        return;
+    }
+
+    ssize_t sync = upipe_s337f_sync(upipe, uref, bits);
 
     if (sync == -1) {
         if (output) {
@@ -158,6 +192,13 @@ static void upipe_s337f_input(struct upipe *upipe, struct uref *uref, struct upu
         goto out;
     } else if (!output) {
         upipe_notice(upipe, "Found synchro");
+    }
+
+    // TODO
+    if (bits == 16) {
+        uref_free(uref);
+        upipe_notice(upipe, "16-bits SMPTE 337 not handled yet");
+        return;
     }
 
     if (sync != upipe_s337f->sync) {
@@ -255,7 +296,7 @@ static int upipe_s337f_set_flow_def(struct upipe *upipe, struct uref *flow_def)
 
     const char *def;
     if (unlikely(!ubase_check(uref_flow_get_def(flow_def, &def)) ||
-                 (ubase_ncmp(def, "sound.s32.")))) // TODO : s16
+             (ubase_ncmp(def, "sound.s32.") && ubase_ncmp(def, "sound.s16."))))
         return UBASE_ERR_INVALID;
 
     uint8_t planes = 0;
