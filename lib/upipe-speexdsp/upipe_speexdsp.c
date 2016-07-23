@@ -58,9 +58,6 @@
 
 #include <speex/speex_resampler.h>
 
-/** typical frame size for latency calculation */
-#define FRAME_SIZE 1152
-
 /** @hidden */
 static bool upipe_speexdsp_handle(struct upipe *upipe, struct uref *uref,
                              struct upump **upump_p);
