@@ -101,7 +101,7 @@ struct upipe_speexdsp {
     /** speexdsp context */
     SpeexResamplerState *ctx;
 
-	/** current drift rate */
+    /** current drift rate */
     struct urational drift_rate;
 
     /** public upipe structure */
@@ -149,16 +149,16 @@ static void resample_audio(struct upipe *upipe, struct uref *uref)
     if (!ubase_check(uref_sound_size(uref, &size, NULL /* sample_size */)))
         return;
 
-	struct ubuf *ubuf = ubuf_sound_alloc(uref->ubuf->mgr, size + 10);
-	assert(ubuf);
+    struct ubuf *ubuf = ubuf_sound_alloc(uref->ubuf->mgr, size + 10);
+    assert(ubuf);
 
     const float *in;
     uref_sound_read_float(uref, 0, size, &in, 1);
 
-	float *out;
+    float *out;
     ubuf_sound_write_float(ubuf, 0, size + 10, &out, 1);
 
-    spx_uint32_t in_len = size;     	/* input size */
+    spx_uint32_t in_len = size;         /* input size */
     spx_uint32_t out_len = size + 10;   /* available output size */
 
     int ret = speex_resampler_process_interleaved_float(upipe_speexdsp->ctx,
@@ -169,7 +169,7 @@ static void resample_audio(struct upipe *upipe, struct uref *uref)
 
     uref_sound_unmap(uref, 0, size, 1);
     ubuf_sound_unmap(ubuf, 0, out_len, 1);
-	uref_attach_ubuf(uref, ubuf);
+    uref_attach_ubuf(uref, ubuf);
 }
 
 /** @internal @This handles data.
@@ -185,7 +185,7 @@ static bool upipe_speexdsp_handle(struct upipe *upipe, struct uref *uref,
     struct upipe_speexdsp *upipe_speexdsp = upipe_speexdsp_from_upipe(upipe);
     const char *def;
 
-	resample_audio(upipe, uref);
+    resample_audio(upipe, uref);
 
     upipe_speexdsp_output(upipe, uref, upump_p);
     return true;
