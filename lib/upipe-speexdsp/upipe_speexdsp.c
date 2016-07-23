@@ -1,7 +1,7 @@
 /*
- * Copyright (C) 2013-2014 OpenHeadend S.A.R.L.
+ * Copyright (C) 2016 Open Broadcast Systems Ltd
  *
- * Authors: Benjamin Cohen
+ * Authors: Rafaël Carré
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
