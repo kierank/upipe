@@ -153,10 +153,10 @@ static void resample_audio(struct upipe *upipe, struct uref *uref)
     assert(ubuf);
 
     const float *in;
-    uref_sound_read_float(uref, 0, size, &in, 1);
+    uref_sound_read_float(uref, 0, -1, &in, 1);
 
     float *out;
-    ubuf_sound_write_float(ubuf, 0, size + 10, &out, 1);
+    ubuf_sound_write_float(ubuf, 0, -1, &out, 1);
 
     spx_uint32_t in_len = size;         /* input size */
     spx_uint32_t out_len = size + 10;   /* available output size */
@@ -165,10 +165,10 @@ static void resample_audio(struct upipe *upipe, struct uref *uref)
             in, &in_len, out, &out_len);
     assert(ret == 0);
 
-    ubuf_sound_resize(ubuf, 0, out_len);
+    uref_sound_unmap(uref, 0, -1, 1);
+    ubuf_sound_unmap(ubuf, 0, -1, 1);
 
-    uref_sound_unmap(uref, 0, size, 1);
-    ubuf_sound_unmap(ubuf, 0, out_len, 1);
+    ubuf_sound_resize(ubuf, 0, out_len);
     uref_attach_ubuf(uref, ubuf);
 }
 
