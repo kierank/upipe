@@ -1,7 +1,7 @@
 /*
- * Copyright (C) 2013-2014 OpenHeadend S.A.R.L.
+ * Copyright (C) 2016 Open Broadcast Systems Ltd
  *
- * Authors: Benjamin Cohen
+ * Authors: Rafaël Carré
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -58,9 +58,6 @@
 
 #include <speex/speex_resampler.h>
 
-/** typical frame size for latency calculation */
-#define FRAME_SIZE 1152
-
 /** @hidden */
 static bool upipe_speexdsp_handle(struct upipe *upipe, struct uref *uref,
                              struct upump **upump_p);
@@ -104,7 +101,7 @@ struct upipe_speexdsp {
     /** speexdsp context */
     SpeexResamplerState *ctx;
 
-	/** current drift rate */
+    /** current drift rate */
     struct urational drift_rate;
 
     /** public upipe structure */
@@ -152,27 +149,27 @@ static void resample_audio(struct upipe *upipe, struct uref *uref)
     if (!ubase_check(uref_sound_size(uref, &size, NULL /* sample_size */)))
         return;
 
-	struct ubuf *ubuf = ubuf_sound_alloc(uref->ubuf->mgr, size + 10);
-	assert(ubuf);
+    struct ubuf *ubuf = ubuf_sound_alloc(uref->ubuf->mgr, size + 10);
+    assert(ubuf);
 
     const float *in;
-    uref_sound_read_float(uref, 0, size, &in, 1);
+    uref_sound_read_float(uref, 0, -1, &in, 1);
 
-	float *out;
-    ubuf_sound_write_float(ubuf, 0, size + 10, &out, 1);
+    float *out;
+    ubuf_sound_write_float(ubuf, 0, -1, &out, 1);
 
-    spx_uint32_t in_len = size;     	/* input size */
+    spx_uint32_t in_len = size;         /* input size */
     spx_uint32_t out_len = size + 10;   /* available output size */
 
     int ret = speex_resampler_process_interleaved_float(upipe_speexdsp->ctx,
             in, &in_len, out, &out_len);
     assert(ret == 0);
 
-    ubuf_sound_resize(ubuf, 0, out_len);
+    uref_sound_unmap(uref, 0, -1, 1);
+    ubuf_sound_unmap(ubuf, 0, -1, 1);
 
-    uref_sound_unmap(uref, 0, size, 1);
-    ubuf_sound_unmap(ubuf, 0, out_len, 1);
-	uref_attach_ubuf(uref, ubuf);
+    ubuf_sound_resize(ubuf, 0, out_len);
+    uref_attach_ubuf(uref, ubuf);
 }
 
 /** @internal @This handles data.
@@ -188,7 +185,7 @@ static bool upipe_speexdsp_handle(struct upipe *upipe, struct uref *uref,
     struct upipe_speexdsp *upipe_speexdsp = upipe_speexdsp_from_upipe(upipe);
     const char *def;
 
-	resample_audio(upipe, uref);
+    resample_audio(upipe, uref);
 
     upipe_speexdsp_output(upipe, uref, upump_p);
     return true;
