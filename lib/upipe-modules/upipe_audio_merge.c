@@ -414,81 +414,84 @@ static void upipe_audio_merge_cb(struct upump *upump)
 {
     struct upipe *upipe = upump_get_opaque(upump, struct upipe *);
     struct upipe_audio_merge *upipe_audio_merge = upipe_audio_merge_from_upipe(upipe);
+
     uint64_t now = uclock_now(upipe_audio_merge->uclock);
     struct uchain *uchain, *uchain2, *uchain_tmp;
-    struct uref *uref, *output_uref = NULL;
-    uint64_t pts_sys = 1234, lowest_pts_sys = UINT64_MAX;
-    int found = 0, i, j;
-    uint64_t samples = 0, in_samples = 0;
-    struct ubuf *ubuf;
-    int32_t *in_data, *out_data;
+    uint64_t lowest_pts_sys = UINT64_MAX;
+    uint64_t samples = 0;
 
     /* interate through input subpipes */
+    // release old urefs, get lowest pts_sys
     ulist_foreach (&upipe_audio_merge->inputs, uchain) {
         struct upipe_audio_merge_sub *upipe_audio_merge_sub =
             upipe_audio_merge_sub_from_uchain(uchain);
 
         ulist_delete_foreach(&upipe_audio_merge_sub->uref_queue, uchain2, uchain_tmp) {
-            uref = uref_from_uchain(uchain2);
+            struct uref *uref = uref_from_uchain(uchain2);
+            uint64_t pts_sys = 0;
             uref_clock_get_pts_sys(uref, &pts_sys);
-            uref_sound_flow_get_samples(uref, &samples);
+            uref_sound_size(uref, &samples, NULL);
 
             if (pts_sys + 2700000 <= now || samples > MAX_SAMPLES) {
                 ulist_delete(uchain2);
+                continue;
             }
-            else if (pts_sys + upipe_audio_merge_sub->latency <= now) {
-                found = 1;
+
+            if (pts_sys + upipe_audio_merge_sub->latency <= now) {
                 if (pts_sys < lowest_pts_sys )
                     lowest_pts_sys = pts_sys;
                 break;
             }
-            else {
-                break;
+
+            return;
+        }
+    }
+
+    struct uref *output_uref = uref_alloc_control(upipe_audio_merge->uref_mgr);
+    struct ubuf *ubuf = ubuf_sound_alloc(upipe_audio_merge->ubuf_mgr, samples);
+    int32_t *out_data;
+    int ret = ubuf_sound_write_int32_t(ubuf, 0, -1, &out_data, 1);
+    memset(out_data, 0, sizeof(int32_t) * samples * 16); 
+
+    ulist_foreach (&upipe_audio_merge->inputs, uchain) {
+        struct upipe_audio_merge_sub *upipe_audio_merge_sub =
+            upipe_audio_merge_sub_from_uchain(uchain);
+
+        ulist_delete_foreach(&upipe_audio_merge_sub->uref_queue, uchain2, uchain_tmp) {
+            struct uref *uref = uref_from_uchain(uchain2);
+            uint64_t pts_sys = 0;
+            uref_clock_get_pts_sys(uref, &pts_sys);
+            uint64_t in_samples = 0;
+            uref_sound_size(uref, &in_samples, NULL);
+            if( in_samples != samples ) {
+                upipe_err_va(upipe, "bad frame size: %"PRIu64" != %"PRIu64, in_samples, samples);
+                ulist_delete(uchain2);
+                uref_free(uref);
+                continue;
+            }
+
+            if( pts_sys == lowest_pts_sys || lowest_pts_sys + 100 > pts_sys ) {
+                const int32_t *in_data;
+                uref_sound_read_int32_t(uref, 0, -1, &in_data, 1);
+
+                uint8_t channel_idx = upipe_audio_merge_sub->channel_index;
+                for (int i = 0; i < samples; i++) {
+                    for( int j = 0; j < 2; j++ ) // FIXME
+                        out_data[16*i + channel_idx+j] = in_data[2*i+j];
+                }
+                uref_sound_unmap(uref, 0, -1, 1);
+
+                ulist_delete(uchain2);
+                uref_free(uref);
             }
         }
     }
 
-    if (found) {
-        output_uref = uref_alloc_control(upipe_audio_merge->uref_mgr);
-        ubuf = ubuf_sound_alloc(upipe_audio_merge->ubuf_mgr, samples);
-        int ret = ubuf_sound_write_int32_t(ubuf, 0, -1, &out_data, 1);
-        memset(out_data, 0, sizeof(int32_t) * samples * 16); 
-
-        ulist_foreach (&upipe_audio_merge->inputs, uchain) {
-            struct upipe_audio_merge_sub *upipe_audio_merge_sub =
-                upipe_audio_merge_sub_from_uchain(uchain);
-
-            ulist_delete_foreach(&upipe_audio_merge_sub->uref_queue, uchain2, uchain_tmp) {
-                uref = uref_from_uchain(uchain2);
-                pts_sys = 0;
-                uref_clock_get_pts_sys(uref, &pts_sys);
-                uref_sound_flow_get_samples(uref, &in_samples);
-                if( in_samples > samples ) {
-                    ulist_delete(uchain2);
-                    uref_free(uref);
-                }
-                else if( pts_sys == lowest_pts_sys || lowest_pts_sys + 100 > pts_sys ) {
-                    uref_sound_read_int32_t(uref, 0, -1, &in_data, 1);
-
-                    uint8_t channel_idx = upipe_audio_merge_sub->channel_index;
-                    for (i = 0; i < samples; i++) {
-                        for( j = 0; j < 2; j++ ) // FIXME
-                            out_data[16*i + channel_idx+j] = in_data[2*i+j];
-                    }
-                    uref_sound_unmap(uref, 0, -1, 1);
-
-                    ulist_delete(uchain2);
-                    uref_free(uref);
-                }
-            }
-        }
-
-        ubuf_sound_unmap(ubuf, 0, -1, 1);
-        uref_sound_flow_set_samples(output_uref, samples);
-        uref_clock_set_pts_sys(output_uref, lowest_pts_sys);
-        uref_attach_ubuf(output_uref, ubuf);
-        upipe_audio_merge_output(upipe, output_uref, &upump);
-    }
+    ubuf_sound_unmap(ubuf, 0, -1, 1);
+    uref_sound_flow_set_samples(output_uref, samples);
+    uref_clock_set_pts_sys(output_uref, lowest_pts_sys);
+    uref_attach_ubuf(output_uref, ubuf);
+    upipe_audio_merge_output(upipe, output_uref, &upump);
 }
 
 /** @internal @This allocates an audio_merge pipe.
