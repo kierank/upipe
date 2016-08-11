@@ -758,6 +758,11 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
     }
     else {
         const uint8_t *fec_header = uref_block_peek(uref, 0, SMPTE_2022_FEC_HEADER_SIZE, fec_buffer);
+        if (!fec_header) {
+            upipe_warn(upipe, "Invalid FEC header");
+            uref_free(uref);
+            return;
+        }
         uint8_t d = smpte_fec_check_d(fec_header);
         uint8_t offset = smpte_fec_get_offset(fec_header);
         uint8_t na = smpte_fec_get_na(fec_header);
