@@ -42,6 +42,8 @@
 #include <assert.h>
 
 #define UPIPE_FEC_JITTER UCLOCK_FREQ/25
+#define MAX_COLS 100
+#define MAX_ROWS 100
 
 /** @hidden */
 static int upipe_rtp_fec_check(struct upipe *upipe, struct uref *flow_format);
@@ -312,7 +314,7 @@ static void upipe_rtp_fec_correct_packets(struct upipe_rtp_fec *upipe_rtp_fec,
     struct uchain *uchain, *uchain_tmp;
     const uint8_t *peek;
     uint64_t seqnum = 0;
-    bool found_seqnum[50] = {0};
+    bool found_seqnum[MAX_COLS] = {0};
     uint8_t payload_buf[188*7];
 
     /* Build a list of expected packets */
@@ -408,7 +410,7 @@ static int upipe_rtp_fec_apply_col_fec(struct upipe_rtp_fec *upipe_rtp_fec)
 {
     uint64_t snbase_low, ts_rec;
     uint16_t length_rec;
-    uint16_t seqnum_list[50];
+    uint16_t seqnum_list[MAX_COLS];
 
     while (1) {
         struct uchain *fec_uchain = ulist_peek(&upipe_rtp_fec->col_queue);
@@ -455,7 +457,7 @@ static int upipe_rtp_fec_apply_row_fec(struct upipe_rtp_fec *upipe_rtp_fec,
 {
     uint64_t snbase_low, ts_rec;
     uint16_t length_rec;
-    uint16_t seqnum_list[50];
+    uint16_t seqnum_list[MAX_ROWS];
 
     /* get rid of old row FEC packets */
     clear_fec_list(&upipe_rtp_fec->row_queue, cur_row_fec_snbase);
@@ -775,14 +777,13 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
                 return;
             }
 
-            if(!offset || !na) {
+            if(!offset || !na || offset <= MAX_COLS || na <= MAX_ROWS) {
                 upipe_warn(upipe, "Invalid row/column in FEC packet, ignoring");
                 uref_free(uref);
                 return;
             }
             
-            if (upipe_rtp_fec->cols != offset && upipe_rtp_fec->cols <= 50 &&
-                upipe_rtp_fec->rows <= 50) {
+            if (upipe_rtp_fec->cols != offset) {
                 upipe_rtp_fec->cols = offset;
                 upipe_rtp_fec->rows = na;
 
