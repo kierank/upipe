@@ -777,7 +777,7 @@ static void upipe_rtp_fec_sub_input(struct upipe *upipe, struct uref *uref,
                 return;
             }
 
-            if(!offset || !na || offset <= MAX_COLS || na <= MAX_ROWS) {
+            if(!offset || !na || offset > MAX_COLS || na > MAX_ROWS) {
                 upipe_warn(upipe, "Invalid row/column in FEC packet, ignoring");
                 uref_free(uref);
                 return;
