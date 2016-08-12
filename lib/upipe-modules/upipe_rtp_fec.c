@@ -175,7 +175,7 @@ static void upipe_rtp_fec_sub_init(struct upipe *upipe,
     upipe_throw_ready(upipe);
 }
 
-static void upipe_rtp_fec_xor_c(uint8_t *dst, const uint8_t *src, size_t len)
+static void upipe_rtp_fec_xor_c(uint8_t *dst, const uint8_t *src, int len)
 {
     for (int i = 0; i < len; i++)
         dst[i] ^= src[i];
@@ -312,10 +312,9 @@ static void upipe_rtp_fec_correct_packets(struct upipe_rtp_fec *upipe_rtp_fec,
                                           int items)
 {
     struct uchain *uchain, *uchain_tmp;
-    const uint8_t *peek;
+    const uint8_t *src;
     uint64_t seqnum = 0;
     bool found_seqnum[MAX_COLS] = {0};
-    uint8_t payload_buf[188*7];
 
     /* Build a list of expected packets */
     int processed = 0;
@@ -376,15 +375,14 @@ static void upipe_rtp_fec_correct_packets(struct upipe_rtp_fec *upipe_rtp_fec,
         processed = 0;
         ulist_foreach (&upipe_rtp_fec->main_queue, uchain) {
             struct uref *uref = uref_from_uchain(uchain);
-            size_t size = 0;
+            int size = 0;
             uref_rtp_get_seqnum(uref, &seqnum);
 
             for (int i = 0; i < items; i++) {
                 if (seqnum_list[i] == seqnum) {
-                    uref_block_size(uref, &size);
-                    peek = uref_block_peek(uref, 0, -1, payload_buf);
-                    upipe_rtp_fec_xor_c(dst, peek, size);
-                    uref_block_peek_unmap(uref, 0, payload_buf, peek);
+                    uref_block_read(uref, 0, &size, &src);
+                    upipe_rtp_fec_xor_c(dst, src, size);
+                    uref_block_unmap(uref, 0);
                     break;
                 }
             }
