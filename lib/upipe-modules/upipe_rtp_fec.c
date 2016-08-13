@@ -375,11 +375,11 @@ static void upipe_rtp_fec_correct_packets(struct upipe_rtp_fec *upipe_rtp_fec,
         processed = 0;
         ulist_foreach (&upipe_rtp_fec->main_queue, uchain) {
             struct uref *uref = uref_from_uchain(uchain);
-            int size = 0;
             uref_rtp_get_seqnum(uref, &seqnum);
 
             for (int i = 0; i < items; i++) {
                 if (seqnum_list[i] == seqnum) {
+                    int size = -1;
                     uref_block_read(uref, 0, &size, &src);
                     upipe_rtp_fec_xor_c(dst, src, size);
                     uref_block_unmap(uref, 0);
