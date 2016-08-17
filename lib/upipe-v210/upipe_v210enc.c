@@ -100,6 +100,9 @@ struct upipe_v210enc {
     /** 10-bit line packing function **/
     upipe_v210enc_pack_line_10 pack_line_10;
 
+    int sample_factor_8;
+    int sample_factor_10;
+
     /** input chroma map */
     const char *input_chroma_map[UPIPE_V210_MAX_PLANES+1];
     /** output chroma map */
@@ -282,15 +285,19 @@ static bool upipe_v210enc_handle(struct upipe *upipe, struct uref *uref,
         const uint16_t *y = (const uint16_t *)input_planes[0];
         const uint16_t *u = (const uint16_t *)input_planes[1];
         const uint16_t *v = (const uint16_t *)input_planes[2];
+
+        const int sample_size = 6 * s->sample_factor_10;
+        const int sample_w    = input_hsize / sample_size;
+        
         for (h = 0; h < input_vsize; h++) {
             uint32_t val = 0;
-            w = (input_hsize / 6) * 6;
+            w = sample_w * sample_size;
             upipe_v210enc->pack_line_10(y, u, v, dst, w);
 
             y += w;
             u += w >> 1;
             v += w >> 1;
-            dst += (w / 6) * 16;
+            dst += sample_w  * 16 * upipe_v210enc->sample_factor_10;
             if (w < input_hsize - 1) {
                 WRITE_PIXELS(u, y, v);
 
@@ -321,15 +328,19 @@ static bool upipe_v210enc_handle(struct upipe *upipe, struct uref *uref,
         const uint8_t *y = input_planes[0];
         const uint8_t *u = input_planes[1];
         const uint8_t *v = input_planes[2];
+
+        const int sample_size = 12 * s->sample_factor_8;
+        const int sample_w    = input_hsize / sample_size;
+        
         for (h = 0; h < input_vsize; h++) {
             uint32_t val = 0;
-            w = (input_hsize / 12) * 12;
+            w = sample_w * sample_size;
             upipe_v210enc->pack_line_8(y, u, v, dst, w);
 
             y += w;
             u += w >> 1;
             v += w >> 1;
-            dst += (w / 12) * 32;
+            dst += sample_w * 32 * s->sample_factor_8;
 
             for (; w < input_hsize - 5; w += 6) {
                 WRITE_PIXELS8(u, y, v);
