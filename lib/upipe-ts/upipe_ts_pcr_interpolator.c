@@ -145,11 +145,13 @@ static void upipe_ts_pcr_interpolator_input(struct upipe *upipe, struct uref *ur
         uint64_t delta = pcr_prog - upipe_ts_pcr_interpolator->last_pcr;
         upipe_ts_pcr_interpolator->last_pcr = pcr_prog;
 
-        upipe_verbose_va(upipe,
-                "pcr_prog %"PRId64" offset %"PRId64" stored offset %"PRIu64" bitrate %"PRId64" bps",
-                pcr_prog, delta,
-                upipe_ts_pcr_interpolator->pcr_delta,
-                INT64_C(27000000) * upipe_ts_pcr_interpolator->packets * 188 * 8 / delta);
+        if (delta) {
+            upipe_verbose_va(upipe,
+                    "pcr_prog %"PRId64" offset %"PRId64" stored offset %"PRIu64" bitrate %"PRId64" bps",
+                    pcr_prog, delta,
+                    upipe_ts_pcr_interpolator->pcr_delta,
+                    INT64_C(27000000) * upipe_ts_pcr_interpolator->packets * 188 * 8 / delta);
+        }
 
         if (upipe_ts_pcr_interpolator->pcr_delta)
             upipe_ts_pcr_interpolator->pcr_packets = upipe_ts_pcr_interpolator->packets;
