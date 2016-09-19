@@ -1312,6 +1312,11 @@ static upipe_bmd_sink_frame *get_video_frame(struct upipe *upipe,
         if (!uref)
             break;
 
+        if (!ttx) {
+            uref_free(uref);
+            continue;
+        }
+
         uint64_t subpic_pts = 0;
         uref_clock_get_pts_sys(uref, &subpic_pts);
         subpic_pts += subpic_sub->latency;
