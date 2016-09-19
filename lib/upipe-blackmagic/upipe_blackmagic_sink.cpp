@@ -1329,17 +1329,15 @@ static upipe_bmd_sink_frame *get_video_frame(struct upipe *upipe,
         }
 
         /* Choose the closest subpic in the past */
-        if (ttx && pts - (UCLOCK_FREQ/25) < subpic_pts) {
-            //printf("\n CHOSEN SUBPIC %"PRIu64" \n", subpic_pts);
-            const uint8_t *buf;
-            int size = -1;
-            if (ubase_check(uref_block_read(uref, 0, &size, &buf))) {
-                upipe_bmd_sink_extract_ttx(&subpic_sub->upipe, ancillary, buf, size, sd);
-                uref_block_unmap(uref, 0);
-            }
-            uref_free(uref);
-            break;
+        //printf("\n CHOSEN SUBPIC %"PRIu64" \n", subpic_pts);
+        const uint8_t *buf;
+        int size = -1;
+        if (ubase_check(uref_block_read(uref, 0, &size, &buf))) {
+            upipe_bmd_sink_extract_ttx(&subpic_sub->upipe, ancillary, buf, size, sd);
+            uref_block_unmap(uref, 0);
         }
+        uref_free(uref);
+        break;
     }
 
     video_frame->SetAncillaryData(ancillary);
