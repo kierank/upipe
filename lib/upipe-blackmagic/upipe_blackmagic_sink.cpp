@@ -1329,7 +1329,7 @@ static upipe_bmd_sink_frame *get_video_frame(struct upipe *upipe,
             const uint8_t *buf;
             int size = -1;
             if (ubase_check(uref_block_read(uref, 0, &size, &buf))) {
-                upipe_bmd_sink_extract_ttx(upipe, ancillary, buf, size, sd);
+                upipe_bmd_sink_extract_ttx(&subpic_sub->upipe, ancillary, buf, size, sd);
                 uref_block_unmap(uref, 0);
             }
             uref_free(uref);
