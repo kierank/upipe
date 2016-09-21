@@ -1,7 +1,8 @@
 /*
- * Copyright (C) 2014 Open Broadcast Systems Ltd.
+ * Copyright (C) 2014-2016 Open Broadcast Systems Ltd.
  *
  * Authors: Kieran Kunhya
+ *          Rafaël Carré
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -1307,33 +1308,48 @@ static upipe_bmd_sink_frame *get_video_frame(struct upipe *upipe,
     struct upipe_bmd_sink_sub *subpic_sub = &upipe_bmd_sink->subpic_subpipe;
 
     for (;;) {
-        struct uref *uref = uqueue_pop(&subpic_sub->uqueue, struct uref *);
-        if (!uref)
-            break;
+        /* buffered uref if any */
+        struct uref *subpic = subpic_sub->uref;
+        if (subpic)
+            subpic_sub->uref = NULL;
+        else { /* thread-safe queue */
+            subpic = uqueue_pop(&subpic_sub->uqueue, struct uref *);
+            if (!subpic)
+                break;
+        }
+
+        if (!ttx) {
+            uref_free(subpic);
+            continue;
+        }
 
         uint64_t subpic_pts = 0;
-        uref_clock_get_pts_sys(uref, &subpic_pts);
+        uref_clock_get_pts_sys(subpic, &subpic_pts);
         subpic_pts += subpic_sub->latency;
         //printf("\n SUBPIC PTS %"PRIu64" \n", subpic_pts );
 
         /* Delete old urefs */
         if (subpic_pts + (UCLOCK_FREQ/25) < pts) {
-            uref_free(uref);
+            uref_free(subpic);
             continue;
         }
 
-        /* Choose the closest subpic in the past */
-        if (ttx && pts - (UCLOCK_FREQ/25) < subpic_pts) {
-            //printf("\n CHOSEN SUBPIC %"PRIu64" \n", subpic_pts);
-            const uint8_t *buf;
-            int size = -1;
-            if (ubase_check(uref_block_read(uref, 0, &size, &buf))) {
-                upipe_bmd_sink_extract_ttx(upipe, ancillary, buf, size, sd);
-                uref_block_unmap(uref, 0);
-            }
-            uref_free(uref);
+        /* Buffer if needed */
+        if (subpic_pts - (UCLOCK_FREQ/25) > pts) {
+            subpic_sub->uref = subpic;
             break;
         }
+
+        /* Choose the closest subpic in the past */
+        //printf("\n CHOSEN SUBPIC %"PRIu64" \n", subpic_pts);
+        const uint8_t *buf;
+        int size = -1;
+        if (ubase_check(uref_block_read(subpic, 0, &size, &buf))) {
+            upipe_bmd_sink_extract_ttx(&subpic_sub->upipe, ancillary, buf, size, sd);
+            uref_block_unmap(subpic, 0);
+        }
+        uref_free(subpic);
+        break;
     }
 
     video_frame->SetAncillaryData(ancillary);
