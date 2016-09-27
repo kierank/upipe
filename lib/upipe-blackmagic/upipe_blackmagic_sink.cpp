@@ -336,6 +336,9 @@ struct upipe_bmd_sink {
     /** genlock status */
     int genlock_status;
 
+    /** time at which we got genlock */
+    uint64_t genlock_transition_time;
+
     /** clock offset to ensure it is increasing */
     uint64_t offset;
 
@@ -1455,6 +1458,7 @@ static void output_cb(struct upipe *upipe)
 
             uref_free(uref);
             upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
+            upipe_bmd_sink->genlock_transition_time = 0;
             if (upipe_bmd_sink->deckLinkOutput->BeginAudioPreroll() != S_OK)
                 upipe_err(upipe, "Could not begin audio preroll");
 
@@ -1495,15 +1499,23 @@ static void output_cb(struct upipe *upipe)
 
     schedule_frame(upipe, uref, pts);
 
-    /* Restart playback on genlock transition */
+    /* Restart playback 4s after genlock transition */
+    if (upipe_bmd_sink->genlock_transition_time) {
+        uint64_t now = uclock_now(&upipe_bmd_sink->uclock);
+        if (now > upipe_bmd_sink->genlock_transition_time + 4 * UCLOCK_FREQ) {
+            upipe_warn(upipe, "restarting playback after genlock synchronization");
+            upipe_bmd_sink->genlock_transition_time = 0;
+            upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
+            upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(pts, UCLOCK_FREQ, 1.0);
+        }
+    }
 
     int genlock_status = upipe_bmd_sink->genlock_status;
     upipe_bmd_sink_get_genlock_status(&upipe_bmd_sink->upipe, &upipe_bmd_sink->genlock_status);
     if (genlock_status == UPIPE_BMD_SINK_GENLOCK_UNLOCKED) {
         if (upipe_bmd_sink->genlock_status == UPIPE_BMD_SINK_GENLOCK_LOCKED) {
-            upipe_warn(upipe, "genlock synchronized, restarting");
-            upipe_bmd_sink->deckLinkOutput->StopScheduledPlayback(0, NULL, 0);
-            upipe_bmd_sink->deckLinkOutput->StartScheduledPlayback(pts, UCLOCK_FREQ, 1.0);
+            upipe_warn(upipe, "genlock synchronized");
+            upipe_bmd_sink->genlock_transition_time = uclock_now(&upipe_bmd_sink->uclock);
         }
     }
 
@@ -2041,6 +2053,7 @@ static int upipe_bmd_open_vid(struct upipe *upipe)
         upipe_err(upipe, "Could not begin audio preroll");
 
     upipe_bmd_sink->genlock_status = -1;
+    upipe_bmd_sink->genlock_transition_time = 0;
 
     if (upipe_bmd_sink->mode == bmdModePAL) {
         upipe_bmd_sink->sp.scanning         = 625; /* PAL */
