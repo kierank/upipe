@@ -1486,6 +1486,12 @@ static void output_cb(struct upipe *upipe)
                     vid_pts - pts
                     );
 
+            if (vid_pts - pts > 10 * UCLOCK_FREQ) {
+                upipe_err_va(upipe, "dropping uref");
+                uref_free(uref);
+                uref = NULL;
+                continue;
+            }
             upipe_bmd_sink_sub->uref = uref;
             uref = NULL;
             break;
