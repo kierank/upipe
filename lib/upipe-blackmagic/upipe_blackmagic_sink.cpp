@@ -497,7 +497,7 @@ static void upipe_bmd_sink_start_anc(struct upipe *upipe, uint16_t *dst,
                                      int field, uint16_t did, uint16_t sdid)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
-        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+        upipe_bmd_sink_from_upipe(upipe);
 
     /* reset dc */
     upipe_bmd_sink->dc[field] = 0;
@@ -518,7 +518,7 @@ static void upipe_bmd_sink_start_anc(struct upipe *upipe, uint16_t *dst,
 static void upipe_bmd_sink_write_cdp_header(struct upipe *upipe, uint16_t *dst)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
-        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+        upipe_bmd_sink_from_upipe(upipe);
 
     /** XXX: Support crazy 25fps captions? **/
     uint8_t fps = upipe_bmd_sink->mode == bmdModeNTSC ||
@@ -539,7 +539,7 @@ static void upipe_bmd_sink_write_ccdata_section(struct upipe *upipe, uint16_t *d
                                                 const uint8_t *src, size_t src_size)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
-        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+        upipe_bmd_sink_from_upipe(upipe);
     size_t i;
 
     dst[0] = 0x72;
@@ -555,7 +555,7 @@ static void upipe_bmd_sink_write_ccdata_section(struct upipe *upipe, uint16_t *d
 static void upipe_bmd_sink_write_cdp_footer(struct upipe *upipe, uint16_t *dst)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
-        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+        upipe_bmd_sink_from_upipe(upipe);
     uint8_t checksum = 0, cnt = 0;
     int i;
 
@@ -586,7 +586,7 @@ static void upipe_bmd_sink_write_cdp(struct upipe *upipe, const uint8_t *src,
 static void upipe_bmd_sink_calc_parity_checksum(struct upipe *upipe, int f2)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
-        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+        upipe_bmd_sink_from_upipe(upipe);
     uint16_t i;
     uint16_t dc = *upipe_bmd_sink->dc[f2];
     uint16_t checksum = 0;
@@ -610,7 +610,7 @@ static void upipe_bmd_sink_calc_parity_checksum(struct upipe *upipe, int f2)
 static void upipe_bmd_sink_encode_v210(struct upipe *upipe, uint32_t *dst, int field, int vbi)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
-        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+        upipe_bmd_sink_from_upipe(upipe);
     int width = upipe_bmd_sink->displayMode->GetWidth();
     int w;
     uint32_t val = 0;
@@ -658,7 +658,7 @@ static void upipe_bmd_sink_encode_v210(struct upipe *upipe, uint32_t *dst, int f
 static void upipe_bmd_sink_write_op47_header(struct upipe *upipe, int field)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
-        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+        upipe_bmd_sink_from_upipe(upipe);
 
     uint16_t *buf = upipe_bmd_sink->vanc_tmp[field];
 
@@ -688,7 +688,7 @@ static void upipe_bmd_sink_write_op47_packet(struct upipe *upipe, const uint8_t 
                                              uint8_t line_offset, uint8_t f2)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
-        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+        upipe_bmd_sink_from_upipe(upipe);
 
     uint16_t *buf = upipe_bmd_sink->vanc_tmp[f2];
 
@@ -713,7 +713,7 @@ static void upipe_bmd_sink_write_op47_packet(struct upipe *upipe, const uint8_t 
 static void upipe_bmd_sink_write_op47_footer(struct upipe *upipe, int f2)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
-        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+        upipe_bmd_sink_from_upipe(upipe);
 
     uint16_t *buf = upipe_bmd_sink->vanc_tmp[f2];
     int idx = OP47_STRUCT_B_OFFSET + 45*upipe_bmd_sink->op47_number_of_packets[f2];
@@ -744,7 +744,7 @@ static void upipe_bmd_sink_extract_ttx(struct upipe *upipe, IDeckLinkVideoFrameA
                                        const uint8_t *pic_data, size_t pic_data_size, int sd)
 {
     struct upipe_bmd_sink *upipe_bmd_sink =
-        upipe_bmd_sink_from_sub_mgr(upipe->mgr);
+        upipe_bmd_sink_from_upipe(upipe);
     void *vanc[2];
     pic_data++;
     pic_data_size--;
@@ -1348,7 +1348,7 @@ static upipe_bmd_sink_frame *get_video_frame(struct upipe *upipe,
         const uint8_t *buf;
         int size = -1;
         if (ubase_check(uref_block_read(subpic, 0, &size, &buf))) {
-            upipe_bmd_sink_extract_ttx(&subpic_sub->upipe, ancillary, buf, size, sd);
+            upipe_bmd_sink_extract_ttx(upipe, ancillary, buf, size, sd);
             uref_block_unmap(subpic, 0);
         }
         uref_free(subpic);
