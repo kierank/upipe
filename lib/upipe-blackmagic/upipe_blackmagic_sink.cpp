@@ -751,10 +751,7 @@ static void upipe_bmd_sink_extract_ttx(struct upipe *upipe, IDeckLinkVideoFrameA
 
     if(!sd) {
         ancillary->GetBufferForVerticalBlankingLine(OP47_LINE1, &vanc[0]);
-        upipe_bmd_sink_clear_vanc(upipe_bmd_sink->vanc_tmp[0]);
-
         ancillary->GetBufferForVerticalBlankingLine(OP47_LINE2, &vanc[1]);
-        upipe_bmd_sink_clear_vanc(upipe_bmd_sink->vanc_tmp[1]);
 
         upipe_bmd_sink->op47_number_of_packets[0] = upipe_bmd_sink->op47_number_of_packets[1] = 0;
     }
@@ -766,7 +763,7 @@ static void upipe_bmd_sink_extract_ttx(struct upipe *upipe, IDeckLinkVideoFrameA
             uint8_t data_unit_len = pic_data[1];
             if (data_unit_len == 0x2c) {
                 uint8_t line_offset = pic_data[2] & 0x1f;
-                uint8_t f2 = (pic_data[2] >> 5) & 1;
+                uint8_t f2 = !((pic_data[2] >> 5) & 1);
                 uint16_t line = line_offset + (PAL_FIELD_OFFSET * f2);
                 if (line > 0) {
                     /* Setup libzvbi or OP-47 */
@@ -1352,7 +1349,6 @@ static upipe_bmd_sink_frame *get_video_frame(struct upipe *upipe,
             uref_block_unmap(subpic, 0);
         }
         uref_free(subpic);
-        break;
     }
 
     video_frame->SetAncillaryData(ancillary);
