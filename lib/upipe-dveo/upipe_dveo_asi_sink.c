@@ -163,14 +163,28 @@ static uint64_t upipe_dveo_asi_sink_now(struct uclock *uclock)
         return 0;
     }
 
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_lock(&lock);
     if (val < upipe_dveo_asi_sink->last_val) {
-        upipe_notice(upipe, "clock wrapping");
-        upipe_dveo_asi_sink->wraparounds++;
+        if (val < UINT_MAX/2 && upipe_dveo_asi_sink->last_val > UINT_MAX/2) {
+            upipe_notice_va(upipe, "clock wrapping: %x < %x (wraps %" PRIu64 "",
+                    val, upipe_dveo_asi_sink->last_val,
+                    upipe_dveo_asi_sink->wraparounds
+                    );
+            upipe_dveo_asi_sink->wraparounds++;
+        } else {
+            upipe_err_va(upipe, "Clock running backwards: %u < %u", val,
+                    upipe_dveo_asi_sink->last_val);
+            val = upipe_dveo_asi_sink->last_val;
+        }
     }
 
     upipe_dveo_asi_sink->last_val = val;
 
-    return (upipe_dveo_asi_sink->wraparounds << 32) + val;
+    uint64_t out = (upipe_dveo_asi_sink->wraparounds << 32) | val;
+    pthread_mutex_unlock(&lock);
+
+    return out;
 }
 
 /** @internal @This allocates a file sink pipe.
