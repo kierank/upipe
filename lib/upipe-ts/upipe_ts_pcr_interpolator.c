@@ -65,6 +65,9 @@ struct upipe_ts_pcr_interpolator {
     /** previous PCR value */
     uint64_t last_pcr;
 
+    /** previous dejittered cr_sys value */
+    uint64_t last_cr_sys;
+
     /** number of TS packets since last PCR */
     unsigned int packets;
 
@@ -158,12 +161,25 @@ static void upipe_ts_pcr_interpolator_input(struct upipe *upipe, struct uref *ur
 
         upipe_ts_pcr_interpolator->pcr_delta = delta;
         upipe_ts_pcr_interpolator->packets = 0;
+        if (upipe_ts_pcr_interpolator->last_cr_sys && upipe_ts_pcr_interpolator->pcr_packets) {
+            uint64_t cr_sys = upipe_ts_pcr_interpolator->last_cr_sys;
+            uint64_t offset = upipe_ts_pcr_interpolator->pcr_delta
+                / upipe_ts_pcr_interpolator->pcr_packets;
+            cr_sys += offset;
+            upipe_ts_pcr_interpolator->last_cr_sys += offset;
+
+            uref_clock_set_cr_sys(uref, cr_sys);
+        }
+        upipe_throw_clock_ref(upipe, uref, pcr_prog, discontinuity);
+
     } else if (upipe_ts_pcr_interpolator->pcr_packets) {
         uint64_t offset = upipe_ts_pcr_interpolator->pcr_delta *
                     upipe_ts_pcr_interpolator->packets / upipe_ts_pcr_interpolator->pcr_packets;
         uint64_t prog = upipe_ts_pcr_interpolator->last_pcr + offset;
         uref_clock_set_date_prog(uref, prog, UREF_DATE_CR);
         upipe_throw_clock_ts(upipe, uref);
+
+        uref_clock_get_cr_sys(uref, &upipe_ts_pcr_interpolator->last_cr_sys);
     }
 
     if (!upipe_ts_pcr_interpolator->pcr_packets) {
