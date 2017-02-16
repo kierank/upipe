@@ -115,7 +115,7 @@ static struct upipe *upipe_ts_getpcr_alloc(struct upipe_mgr *mgr,
     upipe_ts_getpcr_init_output(upipe);
     upipe_ts_getpcr->pcr_pid = 0xffff;
     upipe_ts_getpcr->new_pcr_pid_count = 0;
-    upipe_ts_getpcr->last_pcr = 0;
+    upipe_ts_getpcr->last_pcr = UINT64_MAX;
     upipe_ts_getpcr->last_sys = UINT64_MAX;
     upipe_ts_getpcr->wraparounds = 0;
     upipe_ts_getpcr->pcr_cc = UINT_MAX;
@@ -260,13 +260,17 @@ static void upipe_ts_getpcr_input(struct upipe *upipe, struct uref *uref,
     uref_clock_set_ref(uref);
 
     /* Check interval */
+    if (upipe_ts_getpcr->last_pcr == UINT64_MAX)
+        upipe_ts_getpcr->last_pcr = pcr_orig;
     uint64_t delta = pcr_orig + (1LLU << 33) - upipe_ts_getpcr->last_pcr;
     delta &= (1LLU << 33) - 1;
 /** max interval between PCRs (ISO/IEC 13818-1 2.7.2) - could be 100 ms but
  * allow higher tolerance */
  #define MAX_PCR_INTERVAL (UCLOCK_FREQ / 2)
-    if (delta > MAX_PCR_INTERVAL)
+    if (delta > MAX_PCR_INTERVAL) {
+        upipe_warn_va(upipe, "PCR interval too big");
         discontinuity = 1;
+    }
 
     if (discontinuity)
         upipe_warn_va(upipe, "PCR discontinuity %" PRIu64 ": %"PRIu64 " -> %" PRIu64,
@@ -286,7 +290,7 @@ static void upipe_ts_getpcr_input(struct upipe *upipe, struct uref *uref,
         upipe_warn_va(upipe, "PCR RESET");
         upipe_ts_getpcr->new_pcr_pid_count = 0;
         upipe_ts_getpcr->wraparounds++;
-        upipe_ts_getpcr->last_pcr = 0;
+        upipe_ts_getpcr->last_pcr = UINT64_MAX;
         upipe_ts_getpcr->pcr_cc = UINT_MAX;
 
         uref_flow_set_discontinuity(uref);
