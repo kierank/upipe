@@ -406,6 +406,13 @@ static bool upipe_dveo_asi_sink_output(struct upipe *upipe, struct uref *uref,
         return true;
     }
 
+    uint64_t cr_prg = 0;
+    if (unlikely(!ubase_check(uref_clock_get_cr_prog(uref, &cr_prg))) || cr_prg == -1) {
+        upipe_warn(upipe, "received non-prog-dated buffer");
+        uref_free(uref);
+        return true;
+    }
+
     uint64_t cr_sys = 0;
     if (unlikely(!ubase_check(uref_clock_get_cr_sys(uref, &cr_sys))) || cr_sys == -1) {
         upipe_warn(upipe, "received non-dated buffer");
