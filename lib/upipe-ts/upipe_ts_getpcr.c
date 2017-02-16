@@ -52,14 +52,6 @@
 /** we only accept TS packets */
 #define EXPECTED_FLOW_DEF "block.mpegts."
 
-/** 2^33 (max resolution of PCR, PTS and DTS) */
-#define POW2_33 UINT64_C(8589934592)
-/** max resolution of PCR, PTS and DTS */
-#define TS_CLOCK_MAX (POW2_33 * UCLOCK_FREQ / 27000000)
-/** max interval between PCRs (ISO/IEC 13818-1 2.7.2) - could be 100 ms but
- * allow higher tolerance */
- #define MAX_PCR_INTERVAL (UCLOCK_FREQ / 2)
-
 /** @internal @This is the private context of a ts_getpcr pipe. */
 struct upipe_ts_getpcr {
     /** refcount management structure */
@@ -86,11 +78,8 @@ struct upipe_ts_getpcr {
     /** arrival time of previous PCR value */
     uint64_t last_sys;
 
-    /** offset between MPEG pcrs and Upipe pcrs */
-    uint64_t pcr_offset;
-
-    /** highest Upipe timestamp given to a frame */
-    uint64_t pcr_highest;
+    /** number of PCR wraparounds */
+    uint64_t wraparounds;
 
     /** last continuity counter on PCR */
     unsigned pcr_cc;
@@ -126,10 +115,9 @@ static struct upipe *upipe_ts_getpcr_alloc(struct upipe_mgr *mgr,
     upipe_ts_getpcr_init_output(upipe);
     upipe_ts_getpcr->pcr_pid = 0xffff;
     upipe_ts_getpcr->new_pcr_pid_count = 0;
-    upipe_ts_getpcr->last_pcr = TS_CLOCK_MAX;
+    upipe_ts_getpcr->last_pcr = 0;
     upipe_ts_getpcr->last_sys = UINT64_MAX;
-    upipe_ts_getpcr->pcr_offset = 0;
-    upipe_ts_getpcr->pcr_highest = TS_CLOCK_MAX;
+    upipe_ts_getpcr->wraparounds = 0;
     upipe_ts_getpcr->pcr_cc = UINT_MAX;
 
     upipe_throw_ready(upipe);
@@ -212,20 +200,13 @@ static void upipe_ts_getpcr_input(struct upipe *upipe, struct uref *uref,
     uint64_t cr_sys = 0;
     UBASE_FATAL(upipe, uref_clock_get_cr_sys(uref, &cr_sys))
     if (likely(upipe_ts_getpcr->last_sys != UINT64_MAX)) {
-        if (unlikely(cr_sys - upipe_ts_getpcr->last_sys > MAX_IAT))
+        if (unlikely(cr_sys - upipe_ts_getpcr->last_sys > MAX_IAT)) {
             discontinuity = 1;
+            upipe_dbg_va(upipe, "time discontinuity %" PRIu64 " %" PRIu64 "",
+                    cr_sys, upipe_ts_getpcr->last_sys);
+        }
     }
     upipe_ts_getpcr->last_sys = cr_sys;
-
-    /* reset on discontinuities */
-    if (discontinuity) {
-        upipe_ts_getpcr->new_pcr_pid_count = 0;
-        upipe_ts_getpcr->pcr_offset = 0;
-        upipe_ts_getpcr->last_pcr = TS_CLOCK_MAX;
-        upipe_ts_getpcr->pcr_cc = UINT_MAX;
-
-        uref_flow_set_discontinuity(uref);
-    }
 
     /* Read TS buffer */
     uint8_t buffer[TS_HEADER_SIZE];
@@ -278,28 +259,38 @@ static void upipe_ts_getpcr_input(struct upipe *upipe, struct uref *uref,
     uref_clock_set_cr_orig(uref, pcr_orig);
     uref_clock_set_ref(uref);
 
-    /* handle 2^33 wrap-arounds */
-    uint64_t delta =
-        (TS_CLOCK_MAX + pcr_orig -
-         (upipe_ts_getpcr->last_pcr % TS_CLOCK_MAX)) % TS_CLOCK_MAX;
-
-    if (delta <= MAX_PCR_INTERVAL && !discontinuity)
-        upipe_ts_getpcr->last_pcr += delta;
-    else {
-        upipe_warn_va(upipe, "PCR discontinuity %"PRIu64, delta);
-        upipe_ts_getpcr->pcr_offset =
-            upipe_ts_getpcr->pcr_highest - pcr_orig;
-        upipe_ts_getpcr->last_pcr = pcr_orig;
+    /* Check interval */
+    uint64_t delta = pcr_orig + (1LLU << 33) - upipe_ts_getpcr->last_pcr;
+    delta &= (1LLU << 33) - 1;
+/** max interval between PCRs (ISO/IEC 13818-1 2.7.2) - could be 100 ms but
+ * allow higher tolerance */
+ #define MAX_PCR_INTERVAL (UCLOCK_FREQ / 2)
+    if (delta > MAX_PCR_INTERVAL)
         discontinuity = 1;
-    }
 
-    if (upipe_ts_getpcr->last_pcr > upipe_ts_getpcr->pcr_highest)
-        upipe_ts_getpcr->pcr_highest = upipe_ts_getpcr->last_pcr;
+    if (discontinuity)
+        upipe_warn_va(upipe, "PCR discontinuity %" PRIu64 ": %"PRIu64 " -> %" PRIu64,
+                delta, upipe_ts_getpcr->last_pcr, pcr_orig);
+
+    if (pcr_orig < upipe_ts_getpcr->last_pcr)
+        upipe_ts_getpcr->wraparounds++;
+
+    upipe_ts_getpcr->last_pcr = pcr_orig;
 
     /* Make sure cr_prog increases monotonically */
-    uint64_t prog = upipe_ts_getpcr->last_pcr + upipe_ts_getpcr->pcr_offset;
+    uint64_t prog = upipe_ts_getpcr->last_pcr + (upipe_ts_getpcr->wraparounds << 33);
     uref_clock_set_cr_prog(uref, prog);
-    upipe_throw_clock_ref(upipe, uref, prog, discontinuity);
+
+    /* reset on discontinuities */
+    if (discontinuity) {
+        upipe_warn_va(upipe, "PCR RESET");
+        upipe_ts_getpcr->new_pcr_pid_count = 0;
+        upipe_ts_getpcr->wraparounds++;
+        upipe_ts_getpcr->last_pcr = 0;
+        upipe_ts_getpcr->pcr_cc = UINT_MAX;
+
+        uref_flow_set_discontinuity(uref);
+    }
 
     upipe_verbose_va(upipe, "PCR: %"PRId64" > %"PRId64", %"PRId64,
             pcr_orig, prog, delta);
