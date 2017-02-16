@@ -51,13 +51,8 @@
 #include <sys/ioctl.h>
 #include "asi_ioctl.h"
 
-#include <stdlib.h>
-#include <termios.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdarg.h>
-#include <string.h>
-#include <unistd.h>
+#include <limits.h>
+#include <pthread.h>
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
