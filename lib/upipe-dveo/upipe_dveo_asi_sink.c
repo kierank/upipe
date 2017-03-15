@@ -73,6 +73,12 @@ struct upipe_dveo_asi_sink {
     /** write watcher */
     struct upump *upump;
 
+    /** latency **/
+    uint64_t latency;
+
+    /** start **/
+    uint64_t start;
+
     /** file descriptor */
     int fd;
 
@@ -92,6 +98,7 @@ struct upipe_dveo_asi_sink {
     struct uclock uclock;
     unsigned int last_val;
     uint64_t wraparounds;
+    pthread_mutex_t lock;
 
     /** first timestamp */
     bool first_timestamp;
@@ -163,14 +170,27 @@ static uint64_t upipe_dveo_asi_sink_now(struct uclock *uclock)
         return 0;
     }
 
+    pthread_mutex_lock(&upipe_dveo_asi_sink->lock);
     if (val < upipe_dveo_asi_sink->last_val) {
-        upipe_notice(upipe, "clock wrapping");
-        upipe_dveo_asi_sink->wraparounds++;
+        if (val < UINT_MAX/2 && upipe_dveo_asi_sink->last_val > UINT_MAX/2) {
+            upipe_notice_va(upipe, "clock wrapping: %x < %x (wraps %" PRIu64 "",
+                    val, upipe_dveo_asi_sink->last_val,
+                    upipe_dveo_asi_sink->wraparounds
+                    );
+            upipe_dveo_asi_sink->wraparounds++;
+        } else {
+            upipe_err_va(upipe, "Clock running backwards: %u < %u", val,
+                    upipe_dveo_asi_sink->last_val);
+            val = upipe_dveo_asi_sink->last_val;
+        }
     }
 
     upipe_dveo_asi_sink->last_val = val;
 
-    return (upipe_dveo_asi_sink->wraparounds << 32) + val;
+    uint64_t out = (upipe_dveo_asi_sink->wraparounds << 32) | val;
+    pthread_mutex_unlock(&upipe_dveo_asi_sink->lock);
+
+    return out;
 }
 
 /** @internal @This allocates a file sink pipe.
@@ -194,6 +214,8 @@ static struct upipe *upipe_dveo_asi_sink_alloc(struct upipe_mgr *mgr,
     upipe_dveo_asi_sink_init_upump_mgr(upipe);
     upipe_dveo_asi_sink_init_upump(upipe);
     upipe_dveo_asi_sink_init_input(upipe);
+    upipe_dveo_asi_sink->latency = 0;
+    upipe_dveo_asi_sink->start = 0;
     upipe_dveo_asi_sink->fd = -1;
     upipe_dveo_asi_sink->card_idx = 0;
     upipe_dveo_asi_sink->first_timestamp = true;
@@ -201,6 +223,7 @@ static struct upipe *upipe_dveo_asi_sink_alloc(struct upipe_mgr *mgr,
     upipe_dveo_asi_sink->uclock.uclock_now = upipe_dveo_asi_sink_now;
     upipe_dveo_asi_sink->last_val = 0;
     upipe_dveo_asi_sink->wraparounds = 0;
+    pthread_mutex_init(&upipe_dveo_asi_sink->lock, NULL);
 
     upipe_throw_ready(upipe);
     return upipe;
@@ -339,6 +362,7 @@ static bool upipe_dveo_asi_sink_add_header(struct upipe *upipe, struct uref *ure
     if (upipe_dveo_asi_sink->first_timestamp) {
         upipe_dveo_asi_sink->first_timestamp = false;
         // FIXME: set the counter in an empty packet, and account for latency
+        upipe_dveo_asi_sink->start = uclock_now(&upipe_dveo_asi_sink->uclock);
         timestamp.pts |= 1LLU << 63; /* Set MSB = Set the counter */
     }
 
@@ -380,6 +404,11 @@ static bool upipe_dveo_asi_sink_output(struct upipe *upipe, struct uref *uref,
     struct upipe_dveo_asi_sink *upipe_dveo_asi_sink = upipe_dveo_asi_sink_from_upipe(upipe);
     const char *def;
     if (unlikely(ubase_check(uref_flow_get_def(uref, &def)))) {
+        uint64_t latency = 0;
+        uref_clock_get_latency(uref, &latency);
+
+        if (latency > upipe_dveo_asi_sink->latency)
+            upipe_dveo_asi_sink->latency = latency;
         uref_free(uref);
         return true;
     }
@@ -417,6 +446,8 @@ static bool upipe_dveo_asi_sink_output(struct upipe *upipe, struct uref *uref,
             return true;
         }
     }
+
+    cr_sys += upipe_dveo_asi_sink->latency;
 
     /* Make sure we set the counter */
     bool reset_first_timestamp = upipe_dveo_asi_sink->first_timestamp;
@@ -724,6 +755,8 @@ static int upipe_dveo_asi_sink_control(struct upipe *upipe, int command, va_list
 static void upipe_dveo_asi_sink_free(struct upipe *upipe)
 {
     struct upipe_dveo_asi_sink *upipe_dveo_asi_sink = upipe_dveo_asi_sink_from_upipe(upipe);
+
+    pthread_mutex_destroy(&upipe_dveo_asi_sink->lock);
 
     if (likely(upipe_dveo_asi_sink->fd != -1)) {
         upipe_notice_va(upipe, "closing device %d", upipe_dveo_asi_sink->card_idx);
