@@ -217,16 +217,6 @@ static void upipe_ts_getpcr_input(struct upipe *upipe, struct uref *uref,
     }
     upipe_ts_getpcr->last_sys = cr_sys;
 
-    /* reset on discontinuities */
-    if (discontinuity) {
-        upipe_ts_getpcr->new_pcr_pid_count = 0;
-        upipe_ts_getpcr->pcr_offset = 0;
-        upipe_ts_getpcr->last_pcr = TS_CLOCK_MAX;
-        upipe_ts_getpcr->pcr_cc = UINT_MAX;
-
-        uref_flow_set_discontinuity(uref);
-    }
-
     /* Read TS buffer */
     uint8_t buffer[TS_HEADER_SIZE];
     const uint8_t *ts_header = uref_block_peek(uref, 0, TS_HEADER_SIZE, buffer);
@@ -256,6 +246,16 @@ static void upipe_ts_getpcr_input(struct upipe *upipe, struct uref *uref,
         }
 
         upipe_ts_getpcr->pcr_cc = cc;
+    }
+
+    /* reset on discontinuities */
+    if (discontinuity) {
+        upipe_ts_getpcr->new_pcr_pid_count = 0;
+        upipe_ts_getpcr->pcr_offset = 0;
+        upipe_ts_getpcr->last_pcr = TS_CLOCK_MAX;
+        upipe_ts_getpcr->pcr_cc = UINT_MAX;
+
+        uref_flow_set_discontinuity(uref);
     }
 
     /* No adaptation field = no PCR */
