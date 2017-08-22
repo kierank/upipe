@@ -222,7 +222,7 @@ static bool upipe_row_split_handle(struct upipe *upipe, struct uref *uref,
         return true;
     }
 
-    uint64_t vsize_slice = 16; /* 1080 / 6 */
+    uint64_t vsize_slice = 16;
     uint64_t done = 0;
     while (vsize) {
         if (vsize_slice > vsize)
