@@ -68,6 +68,9 @@ struct upipe_row_split {
     /** ubuf manager request */
     struct urequest ubuf_mgr_request;
 
+    /** frame duration in ticks */
+    uint64_t frame_duration;
+
     /** temporary uref storage (used during urequest) */
     struct uchain input_urefs;
     /** nb urefs in storage */
@@ -125,6 +128,10 @@ static int upipe_row_split_set_flow_def(struct upipe *upipe,
     if (flow_def == NULL)
         return UBASE_ERR_INVALID;
     UBASE_RETURN(uref_flow_match_def(flow_def, "pic."))
+
+    struct urational fps;
+    UBASE_RETURN(uref_pic_flow_get_fps(flow_def, &fps));
+    upipe_row_split->frame_duration = UCLOCK_FREQ * fps.den / fps.num;
 
     struct uref *flow_def_dup = uref_dup(flow_def);
     if (unlikely(flow_def_dup == NULL)) {
@@ -260,8 +267,16 @@ static bool upipe_row_split_handle(struct upipe *upipe, struct uref *uref,
         }
 
         struct uref *uref_slice = uref_fork(uref, ubuf);
-        uref_pic_set_vposition(uref, done);
+
+        uref_pic_set_vposition(uref_slice, done);
+
+        uint64_t pts = 0;
+        uref_clock_get_pts_sys(uref_slice, &pts);
+        pts += (done * upipe_row_split->frame_duration) / vsize;
+        uref_clock_set_pts_sys(uref_slice, pts);
+
         upipe_row_split_output(upipe, uref_slice, NULL);
+
         vsize -= vsize_slice;
         done += vsize_slice;
     }
