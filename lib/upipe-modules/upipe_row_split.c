@@ -222,12 +222,12 @@ static bool upipe_row_split_handle(struct upipe *upipe, struct uref *uref,
         return true;
     }
 
-    uint64_t hsize_slice = 16; /* 1080 / 6 */
+    uint64_t vsize_slice = 16; /* 1080 / 6 */
     uint64_t done = 0;
-    while (hsize) {
-        if (hsize_slice > hsize)
-            hsize_slice = hsize;
-        struct ubuf *ubuf = ubuf_pic_alloc(upipe_row_split->ubuf_mgr, hsize_slice, vsize);
+    while (vsize) {
+        if (vsize_slice > vsize)
+            vsize_slice = vsize;
+        struct ubuf *ubuf = ubuf_pic_alloc(upipe_row_split->ubuf_mgr, hsize, vsize_slice);
         if (!ubuf)
             abort();
 
@@ -242,7 +242,7 @@ printf("ubuf %p\n", ubuf);
                 abort();
             }
 
-            if (!ubase_check(uref_pic_plane_read(uref, chroma, done, 0, hsize_slice, -1, &src))) {
+            if (!ubase_check(uref_pic_plane_read(uref, chroma, 0, done, -1, vsize_slice, &src))) {
                 abort();
             }
 
@@ -253,15 +253,15 @@ printf("ubuf %p\n", ubuf);
                 abort();
             }
 
-            memcpy(dst, src, hsize_slice * dst_stride);
+            memcpy(dst, src, vsize_slice * dst_stride);
             // TODO: dst stride != src stride
 
-            ubase_assert(uref_pic_plane_unmap(uref, chroma, done, 0, hsize_slice, -1));
+            ubase_assert(uref_pic_plane_unmap(uref, chroma, 0, done, -1, vsize_slice));
             ubase_assert(ubuf_pic_plane_unmap(ubuf, chroma, 0, 0, -1, -1));
 
         }
-        hsize -= hsize_slice;
-        done += hsize_slice;
+        vsize -= vsize_slice;
+        done += vsize_slice;
 
         struct uref *uref_slice = uref_fork(uref, ubuf);
         // TODO: x position to indicate slice position in picture
