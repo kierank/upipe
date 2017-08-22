@@ -231,11 +231,9 @@ static bool upipe_row_split_handle(struct upipe *upipe, struct uref *uref,
         if (!ubuf)
             abort();
 
-printf("ubuf %p\n", ubuf);
         const char *chroma = NULL;
         while (ubase_check(ubuf_pic_plane_iterate(ubuf, &chroma)) &&
                 chroma != NULL) {
-                printf("CH %s\n", chroma);
             const uint8_t *src;
             uint8_t *dst;
             if (!ubase_check(ubuf_pic_plane_write(ubuf, chroma, 0, 0, -1, -1, &dst))) {
