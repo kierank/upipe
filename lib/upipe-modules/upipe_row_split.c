@@ -258,13 +258,12 @@ static bool upipe_row_split_handle(struct upipe *upipe, struct uref *uref,
             ubase_assert(ubuf_pic_plane_unmap(ubuf, chroma, 0, 0, -1, -1));
 
         }
-        vsize -= vsize_slice;
-        done += vsize_slice;
 
         struct uref *uref_slice = uref_fork(uref, ubuf);
-        // TODO: x position to indicate slice position in picture
+        uref_pic_set_vposition(uref, done);
         upipe_row_split_output(upipe, uref_slice, NULL);
-        upipe_notice_va(upipe, "Done %" PRIu64, done);
+        vsize -= vsize_slice;
+        done += vsize_slice;
     }
 
     uref_free(uref);
