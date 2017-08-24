@@ -338,12 +338,18 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
         if (AV_RN32(src + src_offset) != UBASE_FOURCC('B', 'B', 'C', 'D')) {
             upipe_err(upipe, "incorrect magic prefix");
             uref_free(uref);
-            upipe_throw_fatal(upipe, UBASE_ERR_LOCAL);
+            upipe_throw_fatal(upipe, UBASE_ERR_UNKNOWN);
             return true;
         }
         uint8_t parse_code = src[src_offset + 4];
         ptrdiff_t next_offset = AV_RB32(src + src_offset + 5);
         ptrdiff_t prev_offset = AV_RB32(src + src_offset + 9);
+        if (!next_offset) {
+            upipe_err(upipe, "next offset is 0, this is not currently supported");
+            uref_free(uref);
+            upipe_throw_fatal(upipe, UBASE_ERR_UNKNOWN);
+            return true;
+        }
 
         switch (parse_code) {
             case DIRAC_PCODE_SEQ_HEADER: {
