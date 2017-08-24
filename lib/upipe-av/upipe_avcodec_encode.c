@@ -637,8 +637,7 @@ static void upipe_avcenc_encode_video(struct upipe *upipe,
 
     /* FIXME check picture format against flow def */
     size_t hsize, vsize;
-    if (unlikely(!ubase_check(uref_pic_size(uref, &hsize, &vsize, NULL)) ||
-                 hsize != context->width || vsize != context->height)) {
+    if (unlikely(!ubase_check(uref_pic_size(uref, &hsize, &vsize, NULL)))) {
         upipe_warn(upipe, "invalid buffer received");
         uref_free(uref);
         return;
@@ -657,8 +656,11 @@ static void upipe_avcenc_encode_video(struct upipe *upipe,
             uref_free(uref);
             return;
         }
+        uint64_t pos_y;
+        UBASE_RETURN(uref_pic_get_vposition(uref, &pos_y));
         frame->data[i] = (uint8_t *)data;
         frame->linesize[i] = stride;
+        frame->pos_y = pos_y;
     }
 
     /* set frame dimensions */
