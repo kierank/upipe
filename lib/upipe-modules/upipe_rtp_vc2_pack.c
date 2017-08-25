@@ -352,143 +352,143 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
         }
 
         if (DIRAC_PCODE_SEQ_HEADER) {
-                upipe_dbg(upipe, "found sequence header");
-                /* TODO: remove parse info header */
+            upipe_dbg(upipe, "found sequence header");
+            /* TODO: remove parse info header */
 
-                size_t packet_size = RTP_HEADER_SIZE
-                                   + 4 /* ext seqnum, reserved byte, parse code */
-                                   + next_offset;
-                /* TODO: check size is less than INT_MAX */
+            size_t packet_size = RTP_HEADER_SIZE
+                               + 4 /* ext seqnum, reserved byte, parse code */
+                               + next_offset;
+            /* TODO: check size is less than INT_MAX */
 
-                struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
-                if (!packet) {
-                    uref_free(uref);
-                    upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-                    return true;
-                }
+            struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
+            if (!packet) {
+                uref_free(uref);
+                upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+                return true;
+            }
 
-                uint8_t *dst = NULL;
-                int dst_size = -1;
-                UBASE_RETURN(ubuf_block_write(packet, 0, &dst_size, &dst));
-                /* TODO: check dst_size is equal to packet_size */
+            uint8_t *dst = NULL;
+            int dst_size = -1;
+            UBASE_RETURN(ubuf_block_write(packet, 0, &dst_size, &dst));
+            /* TODO: check dst_size is equal to packet_size */
 
-                memcpy(dst + RTP_HEADER_SIZE + 4, src + src_offset, next_offset);
-                UBASE_RETURN(ubuf_block_unmap(packet, 0));
-                UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
+            memcpy(dst + RTP_HEADER_SIZE + 4, src + src_offset, next_offset);
+            UBASE_RETURN(ubuf_block_unmap(packet, 0));
+            UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
         }
 
         else if (DIRAC_PCODE_AUX) {
-                upipe_dbg(upipe, "found auxiliary data");
-                /* TODO: remove parse info header, add data length */
+            upipe_dbg(upipe, "found auxiliary data");
+            /* TODO: remove parse info header, add data length */
 
-                size_t packet_size = RTP_HEADER_SIZE
-                                   + 4 /* ext seqnum, reserved byte, parse code */
-                                   //+ 4 /* data length */
-                                   + next_offset;
-                /* TODO: check size is less than INT_MAX */
+            size_t packet_size = RTP_HEADER_SIZE
+                               + 4 /* ext seqnum, reserved byte, parse code */
+                               //+ 4 /* data length */
+                               + next_offset;
+            /* TODO: check size is less than INT_MAX */
 
-                struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
-                if (!packet) {
-                    uref_free(uref);
-                    upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-                    return true;
-                }
+            struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
+            if (!packet) {
+                uref_free(uref);
+                upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+                return true;
+            }
 
-                uint8_t *dst = NULL;
-                int dst_size = -1;
-                UBASE_RETURN(ubuf_block_write(packet, 0, &dst_size, &dst));
-                /* TODO: check dst_size is equal to packet_size */
+            uint8_t *dst = NULL;
+            int dst_size = -1;
+            UBASE_RETURN(ubuf_block_write(packet, 0, &dst_size, &dst));
+            /* TODO: check dst_size is equal to packet_size */
 
-                memcpy(dst + RTP_HEADER_SIZE + 4, src + src_offset, next_offset);
-                UBASE_RETURN(ubuf_block_unmap(packet, 0));
-                UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
+            memcpy(dst + RTP_HEADER_SIZE + 4, src + src_offset, next_offset);
+            UBASE_RETURN(ubuf_block_unmap(packet, 0));
+            UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
         }
 
         else if (DIRAC_PCODE_PICTURE_HQ) {
-                upipe_dbg(upipe, "found HQ picture");
-                upipe_err(upipe, "splitting HQ pictures into fragments and "
-                        "packets is not implemented at this time, skipping picture");
+            upipe_dbg(upipe, "found HQ picture");
+            upipe_err(upipe, "splitting HQ pictures into fragments and "
+                    "packets is not implemented at this time, skipping picture");
         }
 
         else if (DIRAC_PCODE_PICTURE_FRAGMENT_HQ) {
-                /* TODO: remove parse info header, remove fragment header,
-                 * get slice prefix bytes, get slice size scaler */
+            /* TODO: remove parse info header, remove fragment header,
+             * get slice prefix bytes, get slice size scaler */
 
-                uint32_t picture_number = AV_RN32(src + src_offset + 13);
-                //uint16_t fragment_data_length = AV_RB16(src + src_offset + 17);
-                uint16_t fragment_slice_count = AV_RB16(src + src_offset + 19);
+            uint32_t picture_number = AV_RN32(src + src_offset + 13);
+            //uint16_t fragment_data_length = AV_RB16(src + src_offset + 17);
+            uint16_t fragment_slice_count = AV_RB16(src + src_offset + 19);
 
-                /* TODO: check size is less than INT_MAX */
-                size_t packet_size = RTP_HEADER_SIZE
-                                + 4 /* ext seqnum, reserved byte, parse code */
-                                + 4 /* picture number */
-                                + 4 /* slice prefix bytes, slice size scaler */
-                                + 4 /* fragment length, num slices */
-                                + next_offset;
-                if (fragment_slice_count)
-                    packet_size += 4; /* slice x/y offset */
+            /* TODO: check size is less than INT_MAX */
+            size_t packet_size = RTP_HEADER_SIZE
+                               + 4 /* ext seqnum, reserved byte, parse code */
+                               + 4 /* picture number */
+                               + 4 /* slice prefix bytes, slice size scaler */
+                               + 4 /* fragment length, num slices */
+                               + next_offset;
+            if (fragment_slice_count)
+                packet_size += 4; /* slice x/y offset */
 
-                struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
-                if (!packet) {
-                    uref_free(uref);
-                    upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-                    return true;
-                }
+            struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
+            if (!packet) {
+                uref_free(uref);
+                upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+                return true;
+            }
 
-                uint8_t *dst = NULL;
-                int dst_size = -1;
-                UBASE_RETURN(ubuf_block_write(packet, 0, &dst_size, &dst));
-                /* TODO: check dst_size is equal to packet_size */
+            uint8_t *dst = NULL;
+            int dst_size = -1;
+            UBASE_RETURN(ubuf_block_write(packet, 0, &dst_size, &dst));
+            /* TODO: check dst_size is equal to packet_size */
 
-                AV_WN32(dst + RTP_HEADER_SIZE + 4, picture_number);
-                AV_WB16(dst + RTP_HEADER_SIZE + 8, 0); /* slice prefix bytes */
-                AV_WB16(dst + RTP_HEADER_SIZE + 10, 0); /* slice size scaler */
-                if (fragment_slice_count)
-                    /* fragment data length, fragment slice count, slice x
-                     * offset, slice y offset */
-                    memcpy(dst + RTP_HEADER_SIZE + 12, src + src_offset + 17, 8);
-                else
-                    /* fragment data length, fragment slice count */
-                    memcpy(dst + RTP_HEADER_SIZE + 12, src + src_offset + 17, 4);
+            AV_WN32(dst + RTP_HEADER_SIZE + 4, picture_number);
+            AV_WB16(dst + RTP_HEADER_SIZE + 8, 0); /* slice prefix bytes */
+            AV_WB16(dst + RTP_HEADER_SIZE + 10, 0); /* slice size scaler */
+            if (fragment_slice_count)
+                /* fragment data length, fragment slice count, slice x
+                 * offset, slice y offset */
+                memcpy(dst + RTP_HEADER_SIZE + 12, src + src_offset + 17, 8);
+            else
+                /* fragment data length, fragment slice count */
+                memcpy(dst + RTP_HEADER_SIZE + 12, src + src_offset + 17, 4);
 
-                /* packet payload */
-                /* TODO: remove headers and copy only coded data */
-                if (fragment_slice_count)
-                    memcpy(dst + RTP_HEADER_SIZE + 20, src + src_offset, next_offset);
-                else
-                    memcpy(dst + RTP_HEADER_SIZE + 16, src + src_offset, next_offset);
+            /* packet payload */
+            /* TODO: remove headers and copy only coded data */
+            if (fragment_slice_count)
+                memcpy(dst + RTP_HEADER_SIZE + 20, src + src_offset, next_offset);
+            else
+                memcpy(dst + RTP_HEADER_SIZE + 16, src + src_offset, next_offset);
 
-                UBASE_RETURN(ubuf_block_unmap(packet, 0));
-                UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
+            UBASE_RETURN(ubuf_block_unmap(packet, 0));
+            UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
         }
 
         else if (DIRAC_PCODE_END_SEQ) {
-                upipe_dbg(upipe, "found end sequence");
-                size_t packet_size = RTP_HEADER_SIZE
-                                   + 4; /* ext seqnum, reserved byte, parse code */
+            upipe_dbg(upipe, "found end sequence");
+            size_t packet_size = RTP_HEADER_SIZE
+                               + 4; /* ext seqnum, reserved byte, parse code */
 
-                struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
-                if (!packet) {
-                    uref_free(uref);
-                    upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-                    return true;
-                }
+            struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
+            if (!packet) {
+                uref_free(uref);
+                upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+                return true;
+            }
 
-                UBASE_RETURN(ubuf_block_unmap(packet, 0));
-                UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
+            UBASE_RETURN(ubuf_block_unmap(packet, 0));
+            UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
         }
 
 #if 0
         else if (DIRAC_PCODE_PAD) {
-                upipe_dbg(upipe, "found padding");
+            upipe_dbg(upipe, "found padding");
         }
 #endif
 
         else {
-                upipe_err(upipe, "unknown parse code");
-                uref_free(uref);
-                upipe_throw_fatal(upipe, UBASE_ERR_LOCAL);
-                return true;
+            upipe_err(upipe, "unknown parse code");
+            uref_free(uref);
+            upipe_throw_fatal(upipe, UBASE_ERR_LOCAL);
+            return true;
         }
 
         src_offset += next_offset;
