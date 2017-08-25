@@ -116,6 +116,7 @@ struct upipe_rtp_vc2_pack {
 
     uint64_t sequence_number;
 
+    uint16_t slice_prefix_bytes, slice_size_scaler;
     uint8_t field; /* 0 = progressive, 1 = first field, 2 = second field */
 };
 
@@ -457,8 +458,8 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             dst[RTP_HEADER_SIZE + 3] |= (rtp_vc2_pack->field == 2) << 7; /* second field */
 
             AV_WN32(dst + RTP_HEADER_SIZE + 4, picture_number);
-            AV_WB16(dst + RTP_HEADER_SIZE + 8, 0); /* slice prefix bytes */
-            AV_WB16(dst + RTP_HEADER_SIZE + 10, 0); /* slice size scaler */
+            AV_WB16(dst + RTP_HEADER_SIZE + 8, rtp_vc2_pack->slice_prefix_bytes);
+            AV_WB16(dst + RTP_HEADER_SIZE + 10, rtp_vc2_pack->slice_size_scaler);
             /* The input data can be copied straight to the output packet
              * because the endianess is the same and after the picture number in
              * the fragment header of the input data the layout is the same as
