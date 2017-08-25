@@ -423,9 +423,6 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
         }
 
         else if (DIRAC_PCODE_PICTURE_FRAGMENT_HQ) {
-            /* TODO: remove parse info header, remove fragment header,
-             * get slice prefix bytes, get slice size scaler */
-
             uint32_t picture_number = AV_RN32(src + src_offset + 13);
             //uint16_t fragment_data_length = AV_RB16(src + src_offset + 17);
             uint16_t fragment_slice_count = AV_RB16(src + src_offset + 19);
@@ -436,7 +433,8 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
                                + 4 /* picture number */
                                + 4 /* slice prefix bytes, slice size scaler */
                                + 4 /* fragment length, num slices */
-                               + next_offset;
+                               + next_offset
+                               - PARSE_INFO_HEADER_SIZE;
             if (fragment_slice_count)
                 packet_size += 4; /* slice x/y offset */
 
@@ -455,20 +453,14 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             AV_WN32(dst + RTP_HEADER_SIZE + 4, picture_number);
             AV_WB16(dst + RTP_HEADER_SIZE + 8, 0); /* slice prefix bytes */
             AV_WB16(dst + RTP_HEADER_SIZE + 10, 0); /* slice size scaler */
-            if (fragment_slice_count)
-                /* fragment data length, fragment slice count, slice x
-                 * offset, slice y offset */
-                memcpy(dst + RTP_HEADER_SIZE + 12, src + src_offset + 17, 8);
-            else
-                /* fragment data length, fragment slice count */
-                memcpy(dst + RTP_HEADER_SIZE + 12, src + src_offset + 17, 4);
-
-            /* packet payload */
-            /* TODO: remove headers and copy only coded data */
-            if (fragment_slice_count)
-                memcpy(dst + RTP_HEADER_SIZE + 20, src + src_offset, next_offset);
-            else
-                memcpy(dst + RTP_HEADER_SIZE + 16, src + src_offset, next_offset);
+            /* The input data can be copied straight to the output packet
+             * because the endianess is the same and after the picture number in
+             * the fragment header of the input data the layout is the same as
+             * in the output packet after the slice prefix bytes and the slice
+             * size scaler. */
+            memcpy(dst + RTP_HEADER_SIZE + 12,
+                    src + src_offset + PARSE_INFO_HEADER_SIZE + 4,
+                    next_offset - PARSE_INFO_HEADER_SIZE - 4);
 
             UBASE_RETURN(ubuf_block_unmap(packet, 0));
             UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
