@@ -351,8 +351,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             return true;
         }
 
-        switch (parse_code) {
-            case DIRAC_PCODE_SEQ_HEADER: {
+        if (DIRAC_PCODE_SEQ_HEADER) {
                 upipe_dbg(upipe, "found sequence header");
                 /* TODO: remove parse info header */
 
@@ -376,9 +375,9 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
                 memcpy(dst + RTP_HEADER_SIZE + 4, src + src_offset, next_offset);
                 UBASE_RETURN(ubuf_block_unmap(packet, 0));
                 UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
-            } break;
+        }
 
-            case DIRAC_PCODE_AUX: {
+        else if (DIRAC_PCODE_AUX) {
                 upipe_dbg(upipe, "found auxiliary data");
                 /* TODO: remove parse info header, add data length */
 
@@ -403,15 +402,15 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
                 memcpy(dst + RTP_HEADER_SIZE + 4, src + src_offset, next_offset);
                 UBASE_RETURN(ubuf_block_unmap(packet, 0));
                 UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
-            } break;
+        }
 
-            case DIRAC_PCODE_PICTURE_HQ: {
+        else if (DIRAC_PCODE_PICTURE_HQ) {
                 upipe_dbg(upipe, "found HQ picture");
                 upipe_err(upipe, "splitting HQ pictures into fragments and "
                         "packets is not implemented at this time, skipping picture");
-            } break;
+        }
 
-            case DIRAC_PCODE_PICTURE_FRAGMENT_HQ: {
+        else if (DIRAC_PCODE_PICTURE_FRAGMENT_HQ) {
                 /* TODO: remove parse info header, remove fragment header,
                  * get slice prefix bytes, get slice size scaler */
 
@@ -461,9 +460,9 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
                 UBASE_RETURN(ubuf_block_unmap(packet, 0));
                 UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
-            } break;
+        }
 
-            case DIRAC_PCODE_END_SEQ: {
+        else if (DIRAC_PCODE_END_SEQ) {
                 upipe_dbg(upipe, "found end sequence");
                 size_t packet_size = RTP_HEADER_SIZE
                                    + 4; /* ext seqnum, reserved byte, parse code */
@@ -477,15 +476,15 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
                 UBASE_RETURN(ubuf_block_unmap(packet, 0));
                 UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
-            } break;
+        }
 
 #if 0
-            case DIRAC_PCODE_PAD: {
+        else if (DIRAC_PCODE_PAD) {
                 upipe_dbg(upipe, "found padding");
-            } break;
+        }
 #endif
 
-            default:
+        else {
                 upipe_err(upipe, "unknown parse code");
                 uref_free(uref);
                 upipe_throw_fatal(upipe, UBASE_ERR_LOCAL);
