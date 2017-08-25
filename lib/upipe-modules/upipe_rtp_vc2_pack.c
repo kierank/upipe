@@ -359,7 +359,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             return true;
         }
 
-        if (DIRAC_PCODE_SEQ_HEADER) {
+        if (parse_code == DIRAC_PCODE_SEQ_HEADER) {
             upipe_dbg(upipe, "found sequence header");
 
             size_t packet_size = RTP_HEADER_SIZE
@@ -387,7 +387,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
         }
 
-        else if (DIRAC_PCODE_AUX) {
+        else if (parse_code == DIRAC_PCODE_AUX) {
             upipe_dbg(upipe, "found auxiliary data");
 
             size_t packet_size = RTP_HEADER_SIZE
@@ -420,13 +420,13 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
         }
 
-        else if (DIRAC_PCODE_PICTURE_HQ) {
+        else if (parse_code == DIRAC_PCODE_PICTURE_HQ) {
             upipe_dbg(upipe, "found HQ picture");
             upipe_err(upipe, "splitting HQ pictures into fragments and "
                     "packets is not implemented at this time, skipping picture");
         }
 
-        else if (DIRAC_PCODE_PICTURE_FRAGMENT_HQ) {
+        else if (parse_code == DIRAC_PCODE_PICTURE_FRAGMENT_HQ) {
             uint32_t picture_number = AV_RN32(src + src_offset + 13);
             //uint16_t fragment_data_length = AV_RB16(src + src_offset + 17);
             uint16_t fragment_slice_count = AV_RB16(src + src_offset + 19);
@@ -473,7 +473,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
         }
 
-        else if (DIRAC_PCODE_END_SEQ) {
+        else if (parse_code == DIRAC_PCODE_END_SEQ) {
             upipe_dbg(upipe, "found end sequence");
             size_t packet_size = RTP_HEADER_SIZE
                                + 4; /* ext seqnum, reserved byte, parse code */
