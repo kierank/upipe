@@ -408,6 +408,9 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             UBASE_RETURN(ubuf_block_write(packet, 0, &dst_size, &dst));
             /* TODO: check dst_size is equal to packet_size */
 
+            dst[RTP_HEADER_SIZE + 3] |= 0x80; /* contains first byte of aux data */
+            dst[RTP_HEADER_SIZE + 3] |= 0x40; /* contains last byte of aux data */
+
             AV_WB32(dst + RTP_HEADER_SIZE + 4, next_offset - PARSE_INFO_HEADER_SIZE);
             memcpy(dst + RTP_HEADER_SIZE + 8,
                     src + src_offset + PARSE_INFO_HEADER_SIZE,
