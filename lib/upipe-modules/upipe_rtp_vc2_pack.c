@@ -172,8 +172,6 @@ static int upipe_rtp_vc2_pack_set_flow_def(struct upipe *upipe,
     }
 
     uref_flow_set_def(flow_def_dup, "block.rtp.vc2.");
-    /* RTP clock rate */
-    //uref_sound_flow_set_rate(flow_def_dup, upipe_rtp_pcm_pack->rate);
 
     upipe_rtp_vc2_pack_require_ubuf_mgr(upipe, flow_def_dup);
 
@@ -490,12 +488,6 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
         }
 
-#if 0
-        else if (DIRAC_PCODE_PAD) {
-            upipe_dbg(upipe, "found padding");
-        }
-#endif
-
         else {
             upipe_err(upipe, "unknown parse code");
             uref_free(uref);
@@ -508,27 +500,6 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
     uref_block_unmap(uref, 0);
     uref_free(uref);
-
-#if 0
-    const size_t chunk_size = (MTU / 3 / upipe_rtp_pcm_pack->channels)
-        * 3 * upipe_rtp_pcm_pack->channels;
-
-    upipe_rtp_pcm_pack_append_uref_stream(upipe, uref);
-
-    if (upipe_rtp_pcm_pack->next_uref_size + s < chunk_size)
-        return true;
-
-    uint64_t pts_prog = 0;
-    uref_clock_get_pts_prog(upipe_rtp_pcm_pack->next_uref, &pts_prog);
-
-    do {
-        uref = upipe_rtp_pcm_pack_extract_uref_stream(upipe, chunk_size);
-        uref_clock_set_pts_prog(uref, pts_prog);
-        pts_prog += (chunk_size / 3 / upipe_rtp_pcm_pack->channels)
-            * UCLOCK_FREQ / upipe_rtp_pcm_pack->rate;
-        upipe_rtp_pcm_pack_output(upipe, uref, upump_p);
-    } while (uref && upipe_rtp_pcm_pack->next_uref_size > chunk_size);
-#endif
 
     return true;
 }
