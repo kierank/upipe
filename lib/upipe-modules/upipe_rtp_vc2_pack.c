@@ -50,6 +50,13 @@
 
 #include <upipe-modules/upipe_rtp_vc2_pack.h>
 
+/**
+ * Dirac Specification ->
+ * 9.6 Parse Info Header Syntax. parse_info()
+ * 4 byte start code + byte parse code + 4 byte size + 4 byte previous size
+ */
+#define PARSE_INFO_HEADER_SIZE 13
+
 enum DiracParseCodes {
     DIRAC_PCODE_SEQ_HEADER      = 0x00,
     DIRAC_PCODE_END_SEQ         = 0x10,
@@ -353,11 +360,11 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
         if (DIRAC_PCODE_SEQ_HEADER) {
             upipe_dbg(upipe, "found sequence header");
-            /* TODO: remove parse info header */
 
             size_t packet_size = RTP_HEADER_SIZE
                                + 4 /* ext seqnum, reserved byte, parse code */
-                               + next_offset;
+                               + next_offset
+                               - PARSE_INFO_HEADER_SIZE;
             /* TODO: check size is less than INT_MAX */
 
             struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
@@ -372,7 +379,9 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             UBASE_RETURN(ubuf_block_write(packet, 0, &dst_size, &dst));
             /* TODO: check dst_size is equal to packet_size */
 
-            memcpy(dst + RTP_HEADER_SIZE + 4, src + src_offset, next_offset);
+            memcpy(dst + RTP_HEADER_SIZE + 4,
+                    src + src_offset + PARSE_INFO_HEADER_SIZE,
+                    next_offset - PARSE_INFO_HEADER_SIZE);
             UBASE_RETURN(ubuf_block_unmap(packet, 0));
             UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
         }
