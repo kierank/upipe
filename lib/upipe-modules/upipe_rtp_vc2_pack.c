@@ -230,7 +230,7 @@ static void parse_sequence_header(struct upipe_rtp_vc2_pack *ctx, const uint8_t 
             if (read_bool(&state)) /* custom transfer function flag */
                 skip_uint(&state);
         }
-    rtp_vc2_pack->picture_coding_mode = read_uint(&state);
+    ctx->picture_coding_mode = read_uint(&state);
 }
 
 /** @hidden */
