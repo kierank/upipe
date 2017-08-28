@@ -90,6 +90,7 @@ libupipe_modules_la_SOURCES += \
 	upipe_rtcp.c \
 	upipe_rtp_reorder.c \
 	upipe_s337_encaps.c \
+	upipe_rtp_vc2_unpack.c \
 	$(NULL)
 endif
 
