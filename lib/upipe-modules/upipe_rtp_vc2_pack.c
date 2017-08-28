@@ -233,7 +233,7 @@ static void parse_sequence_header(struct upipe_rtp_vc2_pack *ctx, const uint8_t 
     ctx->picture_coding_mode = read_uint(&state);
 }
 
-static void parse_transform_paramters(struct rtp_vc2_pack *ctx, const uint8_t *ptr)
+static void parse_transform_paramters(struct upipe_rtp_vc2_pack *ctx, const uint8_t *ptr)
 {
     struct state state;
     init_state(&state, ptr);
@@ -563,7 +563,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
             int field = 0;
             if (rtp_vc2_pack->picture_coding_mode == 1)
-                field = 1 + picture_number & 1;
+                field = 1 + (picture_number & 1);
             dst[RTP_HEADER_SIZE + 3] |= (field != 0) << 6; /* picture is interlaced */
             dst[RTP_HEADER_SIZE + 3] |= (field == 2) << 7; /* second field */
 
