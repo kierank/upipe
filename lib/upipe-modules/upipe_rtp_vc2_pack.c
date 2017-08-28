@@ -116,8 +116,8 @@ struct upipe_rtp_vc2_pack {
 
     uint64_t sequence_number;
 
+    uint32_t picture_coding_mode;
     uint16_t slice_prefix_bytes, slice_size_scaler;
-    uint8_t field; /* 0 = progressive, 1 = first field, 2 = second field */
 };
 
 /** @hidden */
@@ -454,8 +454,11 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             UBASE_RETURN(ubuf_block_write(packet, 0, &dst_size, &dst));
             /* TODO: check dst_size is equal to packet_size */
 
-            dst[RTP_HEADER_SIZE + 3] |= (rtp_vc2_pack->field != 0) << 6; /* picture is interlaced */
-            dst[RTP_HEADER_SIZE + 3] |= (rtp_vc2_pack->field == 2) << 7; /* second field */
+            int field = 0;
+            if (rtp_vc2_pack->picture_coding_mode == 1)
+                field = 1 + picture_number & 1;
+            dst[RTP_HEADER_SIZE + 3] |= (field != 0) << 6; /* picture is interlaced */
+            dst[RTP_HEADER_SIZE + 3] |= (field == 2) << 7; /* second field */
 
             AV_WB32(dst + RTP_HEADER_SIZE + 4, picture_number);
             AV_WB16(dst + RTP_HEADER_SIZE + 8, rtp_vc2_pack->slice_prefix_bytes);
