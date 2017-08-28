@@ -233,6 +233,25 @@ static void parse_sequence_header(struct upipe_rtp_vc2_pack *ctx, const uint8_t 
     ctx->picture_coding_mode = read_uint(&state);
 }
 
+static void parse_transform_paramters(struct rtp_vc2_pack *ctx, const uint8_t *ptr)
+{
+    struct state state;
+    init_state(&state, ptr);
+    skip_uint(&state); /* wavelet index */
+    skip_uint(&state); /* dwt depth */
+    if (ctx->major_version >= 3) {
+        if (read_bool(&state)) /* asymmetric transform index flag */
+            skip_uint(&state); /* wavelet index horizontal */
+        if (read_bool(&state)) /* asymmetric transform flag */
+            skip_uint(&state); /* dwt depth horizontal */
+    }
+    skip_uint(&state); /* num slices x */
+    skip_uint(&state); /* num slices y */
+    /* RTP VC2 is only defined for HQ pictures */
+    ctx->slice_prefix_bytes = read_uint(&state);
+    ctx->slice_size_scaler = read_uint(&state);
+}
+
 /** @hidden */
 static int upipe_rtp_vc2_pack_check(struct upipe *upipe, struct uref *flow_format);
 
@@ -554,8 +573,10 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
                                + 4 /* fragment length, num slices */
                                + next_offset
                                - PARSE_INFO_HEADER_SIZE;
-            if (fragment_slice_count)
+            if (fragment_slice_count) {
                 packet_size += 4; /* slice x/y offset */
+                parse_transform_paramters(rtp_vc2_pack, src + src_offset + RTP_HEADER_SIZE);
+            }
 
             struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
             if (!packet) {
