@@ -116,7 +116,7 @@ struct upipe_rtp_vc2_pack {
 
     uint64_t sequence_number;
 
-    uint32_t picture_coding_mode;
+    uint32_t major_version, picture_coding_mode;
     uint16_t slice_prefix_bytes, slice_size_scaler;
 };
 
@@ -185,7 +185,7 @@ static void parse_sequence_header(struct upipe_rtp_vc2_pack *ctx, const uint8_t 
 {
     struct state state;
     init_state(&state, ptr);
-    skip_uint(&state); /* major version */
+    ctx->major_version = read_uint(&state);
     skip_uint(&state); /* minor version */
     skip_uint(&state); /* profile */
     skip_uint(&state); /* level */
