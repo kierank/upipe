@@ -427,7 +427,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
         }
 
         else if (parse_code == DIRAC_PCODE_PICTURE_FRAGMENT_HQ) {
-            uint32_t picture_number = AV_RN32(src + src_offset + 13);
+            uint32_t picture_number = AV_RB32(src + src_offset + 13);
             //uint16_t fragment_data_length = AV_RB16(src + src_offset + 17);
             uint16_t fragment_slice_count = AV_RB16(src + src_offset + 19);
 
@@ -457,7 +457,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             dst[RTP_HEADER_SIZE + 3] |= (rtp_vc2_pack->field != 0) << 6; /* picture is interlaced */
             dst[RTP_HEADER_SIZE + 3] |= (rtp_vc2_pack->field == 2) << 7; /* second field */
 
-            AV_WN32(dst + RTP_HEADER_SIZE + 4, picture_number);
+            AV_WB32(dst + RTP_HEADER_SIZE + 4, picture_number);
             AV_WB16(dst + RTP_HEADER_SIZE + 8, rtp_vc2_pack->slice_prefix_bytes);
             AV_WB16(dst + RTP_HEADER_SIZE + 10, rtp_vc2_pack->slice_size_scaler);
             /* The input data can be copied straight to the output packet
