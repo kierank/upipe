@@ -67,13 +67,6 @@ enum DiracParseCodes {
     DIRAC_PCODE_MAGIC           = 0x42424344,
 };
 
-struct dirac_parse_info {
-    uint32_t magic_prefix;
-    uint8_t parse_code;
-    uint32_t next_offset;
-    uint32_t prev_offset;
-};
-
 struct upipe_rtp_vc2_pack {
     /** refcount management structure */
     struct urefcount urefcount;
