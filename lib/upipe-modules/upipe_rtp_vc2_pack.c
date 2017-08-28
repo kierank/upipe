@@ -493,7 +493,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             UBASE_RETURN(ubuf_block_write(packet, 0, &dst_size, &dst));
             /* TODO: check dst_size is equal to packet_size */
 
-            parse_sequence_header(rtp_vc2_pack, src + PARSE_INFO_HEADER_SIZE);
+            parse_sequence_header(rtp_vc2_pack, src + src_offset + PARSE_INFO_HEADER_SIZE);
 
             memcpy(dst + RTP_HEADER_SIZE + 4,
                     src + src_offset + PARSE_INFO_HEADER_SIZE,
