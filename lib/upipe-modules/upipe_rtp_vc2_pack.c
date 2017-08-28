@@ -522,36 +522,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
         }
 
         else if (parse_code == DIRAC_PCODE_AUX) {
-            upipe_dbg(upipe, "found auxiliary data");
-
-            size_t packet_size = RTP_HEADER_SIZE
-                               + 4 /* ext seqnum, reserved byte, parse code */
-                               + 4 /* data length */
-                               + next_offset
-                               - PARSE_INFO_HEADER_SIZE;
-            /* TODO: check size is less than INT_MAX */
-
-            struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
-            if (!packet) {
-                uref_free(uref);
-                upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-                return true;
-            }
-
-            uint8_t *dst = NULL;
-            int dst_size = -1;
-            UBASE_RETURN(ubuf_block_write(packet, 0, &dst_size, &dst));
-            /* TODO: check dst_size is equal to packet_size */
-
-            dst[RTP_HEADER_SIZE + 3] |= 0x80; /* contains first byte of aux data */
-            dst[RTP_HEADER_SIZE + 3] |= 0x40; /* contains last byte of aux data */
-
-            AV_WB32(dst + RTP_HEADER_SIZE + 4, next_offset - PARSE_INFO_HEADER_SIZE);
-            memcpy(dst + RTP_HEADER_SIZE + 8,
-                    src + src_offset + PARSE_INFO_HEADER_SIZE,
-                    next_offset - PARSE_INFO_HEADER_SIZE);
-            UBASE_RETURN(ubuf_block_unmap(packet, 0));
-            UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
+            upipe_dbg(upipe, "found auxiliary data, skipping");
         }
 
         else if (parse_code == DIRAC_PCODE_PICTURE_HQ) {
