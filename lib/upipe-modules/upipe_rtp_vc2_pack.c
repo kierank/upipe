@@ -120,6 +120,119 @@ struct upipe_rtp_vc2_pack {
     uint16_t slice_prefix_bytes, slice_size_scaler;
 };
 
+struct state {
+    const uint8_t *current_byte;
+    int next_bit;
+};
+
+static inline void init_state(struct state *state, const uint8_t *ptr)
+{
+    state->current_byte = ptr;
+    state->next_bit = 7;
+}
+
+static inline void read_byte(struct state *state)
+{
+    state->next_bit = 7;
+    state->current_byte += 1;
+}
+
+static inline uint32_t read_bit(struct state *state)
+{
+    uint32_t bit = (*state->current_byte >> state->next_bit) & 1;
+    state->next_bit -= 1;
+    if (state->next_bit < 0) {
+        read_byte(state);
+    }
+    return bit;
+}
+
+static inline bool read_bool(struct state *state)
+{
+    if (read_bit(state) == 1)
+        return true;
+    else
+        return false;
+}
+
+static inline uint32_t read_uint(struct state *state)
+{
+    uint32_t value = 1;
+    while (read_bit(state) == 0) {
+        value <<= 1;
+        if (read_bit(state) == 1) {
+            value += 1;
+        }
+    }
+    value -= 1;
+    return value;
+}
+
+static inline void skip_bit(struct state *state)
+{
+    state->next_bit -= 1;
+    if (state->next_bit < 0)
+        read_byte(state);
+}
+
+static inline void skip_uint(struct state *state)
+{
+    while (read_bit(state) == 0)
+        skip_bit(state);
+}
+
+static void parse_sequence_header(struct upipe_rtp_vc2_pack *ctx, const uint8_t *ptr)
+{
+    struct state state;
+    init_state(&state, ptr);
+    skip_uint(&state); /* major version */
+    skip_uint(&state); /* minor version */
+    skip_uint(&state); /* profile */
+    skip_uint(&state); /* level */
+    skip_uint(&state); /* base video format */
+    if (read_bool(&state)) { /* custom dimensions flag */
+        skip_uint(&state); /* frame width */
+        skip_uint(&state); /* frame height */
+    }
+    if (read_bool(&state)) /* custom color difference format flag */
+        skip_uint(&state); /* color difference format index */
+    if (read_bool(&state)) /* custom scan format flag */
+        skip_uint(&state); /* source sampling */
+    if (read_bool(&state)) /* custom frame rate flag */
+        if (read_uint(&state) == 0) { /* frame rate index */
+            skip_uint(&state); /* frame rate numerator */
+            skip_uint(&state); /* frame rate denominator */
+        }
+    if (read_bool(&state)) /* custom pixel aspect ratio flag */
+        if (read_uint(&state) == 0) { /* pixel aspect ratio index */
+            skip_uint(&state); /* pixel aspect ratio numerator */
+            skip_uint(&state); /* pixel aspect ratio denominator */
+        }
+    if (read_bool(&state)) { /* custom clean area flag */
+        skip_uint(&state); /* clean width */
+        skip_uint(&state); /* clean height */
+        skip_uint(&state); /* left offset */
+        skip_uint(&state); /* top offset */
+    }
+    if (read_bool(&state)) /*custom signal range flag */
+        if (read_uint(&state) == 0) { /* signal range index */
+            skip_uint(&state); /* luma offset */
+            skip_uint(&state); /* luma excursion */
+            skip_uint(&state); /* color diff offset */
+            skip_uint(&state); /* color diff excursion */
+        }
+    if (read_bool(&state)) /* custom color spec flag */
+        if (read_uint(&state) == 0) { /*color spec index */
+            if (read_bool(&state)) /* custom color primaries flag */
+                skip_uint(&state);
+            if (read_bool(&state)) /* custom color matrix flag */
+                skip_uint(&state);
+            if (read_bool(&state)) /* custom transfer function flag */
+                skip_uint(&state);
+        }
+    rtp_vc2_pack->picture_coding_mode = read_uint(&state);
+}
+
 /** @hidden */
 static int upipe_rtp_vc2_pack_check(struct upipe *upipe, struct uref *flow_format);
 
@@ -379,6 +492,8 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             int dst_size = -1;
             UBASE_RETURN(ubuf_block_write(packet, 0, &dst_size, &dst));
             /* TODO: check dst_size is equal to packet_size */
+
+            parse_sequence_header(rtp_vc2_pack, src + PARSE_INFO_HEADER_SIZE);
 
             memcpy(dst + RTP_HEADER_SIZE + 4,
                     src + src_offset + PARSE_INFO_HEADER_SIZE,
