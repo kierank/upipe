@@ -311,32 +311,14 @@ static int upipe_rtp_vc2_pack_set_flow_def(struct upipe *upipe,
     return UBASE_ERR_NONE;
 }
 
-/** @internal @This provides a flow format suggestion.
- *
- * @param upipe description structure of the pipe
- * @param request description structure of the request
- * @return an error code
- */
-static int upipe_rtp_vc2_pack_provide_flow_format(struct upipe *upipe,
-                                          struct urequest *request)
-{
-    struct uref *flow = uref_dup(request->uref);
-    UBASE_ALLOC_RETURN(flow);
-
-    //uref_flow_set_def(flow, "block.dirac.pic.");
-
-    return urequest_provide_flow_format(request, flow);
-}
-
 static int upipe_rtp_vc2_pack_control(struct upipe *upipe, int command,
                                   va_list args)
 {
     switch (command) {
         case UPIPE_REGISTER_REQUEST: {
             struct urequest *request = va_arg(args, struct urequest *);
-            if (request->type == UREQUEST_FLOW_FORMAT)
-                return upipe_rtp_vc2_pack_provide_flow_format(upipe, request);
-            if (request->type == UREQUEST_UBUF_MGR)
+            if (request->type == UREQUEST_FLOW_FORMAT ||
+                request->type == UREQUEST_UBUF_MGR)
                 return upipe_throw_provide_request(upipe, request);
             return upipe_rtp_vc2_pack_alloc_output_proxy(upipe, request);
         }
