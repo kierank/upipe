@@ -266,8 +266,6 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
     /* NOTE: assuming RTP headers have not been removed. */
 
     uint8_t parse_code = src[RTP_HEADER_SIZE + 3];
-    uint32_t seqnum = AV_RB16(src + 2) | (AV_RB16(src + 12) << 16);
-    upipe_dbg_va(upipe, "seqnum: %u, parse code: %d\n", seqnum, parse_code);
 
     if (parse_code == DIRAC_PCODE_SEQ_HEADER) {
         upipe_dbg(upipe, "found sequence header");
