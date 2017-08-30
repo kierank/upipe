@@ -256,7 +256,12 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
 
     const uint8_t *src = NULL;
     int src_size = -1;
-    UBASE_RETURN(uref_block_read(uref, 0, &src_size, &src));
+    int err = uref_block_read(uref, 0, &src_size, &src);
+    if (!ubase_check(err)) {
+        upipe_throw_fatal(upipe, err);
+        uref_free(uref);
+        return true;
+    }
 
     /* NOTE: assuming RTP headers have not been removed. */
 
@@ -274,9 +279,8 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
 
         struct ubuf *data_unit = ubuf_block_alloc(ctx->ubuf_mgr, data_unit_size);
         if (!data_unit) {
-            uref_free(uref);
             upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-            return true;
+            goto no_output;
         }
 
         uint8_t *dst = NULL;
@@ -290,13 +294,14 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
                 src + RTP_HEADER_SIZE + 4,
                 src_size - 4);
 
-        UBASE_RETURN(ubuf_block_unmap(data_unit, 0));
+        ubuf_block_unmap(data_unit, 0);
         uref_attach_ubuf(uref, data_unit);
         upipe_rtp_vc2_unpack_output(upipe, uref, upump_p);
     }
 
     else if (parse_code == DIRAC_PCODE_AUX) {
         upipe_dbg(upipe, "found auxiliary data, skipping");
+        goto no_output;
     }
 
     else if (parse_code == DIRAC_PCODE_PICTURE_FRAGMENT_HQ) {
@@ -317,9 +322,8 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
 
         struct ubuf *data_unit = ubuf_block_alloc(ctx->ubuf_mgr, data_unit_size);
         if (!data_unit) {
-            uref_free(uref);
             upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-            return true;
+            goto no_output;
         }
 
         uint8_t *dst = NULL;
@@ -340,7 +344,7 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
                 src + RTP_HEADER_SIZE + 12,
                 fragment_data_length); /* includes fragment x/y offset when slice_count is not zero. */
 
-        UBASE_RETURN(ubuf_block_unmap(data_unit, 0));
+        ubuf_block_unmap(data_unit, 0);
         uref_attach_ubuf(uref, data_unit);
         upipe_rtp_vc2_unpack_output(upipe, uref, upump_p);
     }
@@ -350,9 +354,8 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
 
         struct ubuf *data_unit = ubuf_block_alloc(ctx->ubuf_mgr, PARSE_INFO_HEADER_SIZE);
         if (!data_unit) {
-            uref_free(uref);
             upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-            return true;
+            goto no_output;
         }
 
         uint8_t *dst = NULL;
@@ -363,26 +366,28 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
         /* TODO: write previous offset (needs storage) */
         write_parse_info(dst, DIRAC_PCODE_END_SEQ, PARSE_INFO_HEADER_SIZE, 0);
 
-        UBASE_RETURN(ubuf_block_unmap(data_unit, 0));
+        ubuf_block_unmap(data_unit, 0);
         uref_attach_ubuf(uref, data_unit);
         upipe_rtp_vc2_unpack_output(upipe, uref, upump_p);
     }
 
     else if (parse_code == DIRAC_PCODE_PAD) {
         upipe_dbg(upipe, "found padding, skipping");
+        goto no_output;
     }
 
     else {
         upipe_err_va(upipe, "unknown parse code (0x%x)", (int)parse_code);
-        uref_block_unmap(uref, 0);
-        uref_free(uref);
         upipe_throw_fatal(upipe, UBASE_ERR_LOCAL);
-        return true;
+        goto no_output;
     }
 
     uref_block_unmap(uref, 0);
-    uref_free(uref);
+    return true;
 
+no_output:
+    uref_block_unmap(uref, 0);
+    uref_free(uref);
     return true;
 }
 
