@@ -146,7 +146,7 @@ static int upipe_rtp_vc2_unpack_set_flow_def(struct upipe *upipe,
     if (flow_def == NULL)
         return UBASE_ERR_INVALID;
 
-    UBASE_RETURN(uref_flow_match_def(flow_def, "block.rtp.vc2."))
+    UBASE_RETURN(uref_flow_match_def(flow_def, "block."))
 
     struct uref *flow_def_dup = uref_dup(flow_def);
     if (unlikely(flow_def_dup == NULL)) {
@@ -258,9 +258,12 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
     int src_size = -1;
     UBASE_RETURN(uref_block_read(uref, 0, &src_size, &src));
 
-    /* NOTE: assuming RTP headers have been removed. */
+    /* NOTE: assuming RTP headers have not been removed. */
 
-    uint8_t parse_code = src[3];
+    uint8_t parse_code = src[RTP_HEADER_SIZE + 3];
+    uint32_t seqnum = AV_RB16(src + 2) | (AV_RB16(src + 12) << 16);
+    upipe_dbg_va(upipe, "seqnum: %u, parse code: %d\n", seqnum, parse_code);
+
     if (parse_code == DIRAC_PCODE_SEQ_HEADER) {
         upipe_dbg(upipe, "found sequence header");
 
@@ -284,7 +287,7 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
         /* TODO: write previous offset (needs storage) */
         write_parse_info(dst, DIRAC_PCODE_SEQ_HEADER, data_unit_size, 0);
         memcpy(dst + PARSE_INFO_HEADER_SIZE,
-                src + 4,
+                src + RTP_HEADER_SIZE + 4,
                 src_size - 4);
 
         UBASE_RETURN(ubuf_block_unmap(data_unit, 0));
@@ -299,8 +302,8 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
     else if (parse_code == DIRAC_PCODE_PICTURE_FRAGMENT_HQ) {
         upipe_dbg(upipe, "found HQ picture fragment");
 
-        uint32_t picture_number = AV_RB32(src + 4);
-        uint16_t slice_count = AV_RB16(src + 14);
+        uint32_t picture_number = AV_RB32(src + RTP_HEADER_SIZE + 4);
+        uint16_t slice_count = AV_RB16(src + RTP_HEADER_SIZE + 14);
         size_t fragment_data_length = src_size - 16;
         /* TODO: check fragment_data_length is less than UINT16_MAX */
 
@@ -334,7 +337,7 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
 
         AV_WB16(dst + PARSE_INFO_HEADER_SIZE + 6, slice_count);
         memcpy(dst + PARSE_INFO_HEADER_SIZE + 8,
-                src + 12,
+                src + RTP_HEADER_SIZE + 12,
                 fragment_data_length); /* includes fragment x/y offset when slice_count is not zero. */
 
         UBASE_RETURN(ubuf_block_unmap(data_unit, 0));
@@ -370,7 +373,7 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
     }
 
     else {
-        upipe_err(upipe, "unknown parse code");
+        upipe_err_va(upipe, "unknown parse code (0x%x)", (int)parse_code);
         uref_block_unmap(uref, 0);
         uref_free(uref);
         upipe_throw_fatal(upipe, UBASE_ERR_LOCAL);
