@@ -274,7 +274,8 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
 
         size_t data_unit_size = PARSE_INFO_HEADER_SIZE
                               + src_size
-                              - 4; /* ext seqnum, reserved byte, parse code */
+                              - 4 /* ext seqnum, reserved byte, parse code */
+                              - RTP_HEADER_SIZE;
         /* TODO: check size is less than INT_MAX */
 
         struct ubuf *data_unit = ubuf_block_alloc(ctx->ubuf_mgr, data_unit_size);
@@ -309,7 +310,12 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
 
         uint32_t picture_number = AV_RB32(src + RTP_HEADER_SIZE + 4);
         uint16_t slice_count = AV_RB16(src + RTP_HEADER_SIZE + 14);
-        size_t fragment_data_length = src_size - 16;
+        size_t fragment_data_length = src_size
+                                    - 4 /* ext seqnum, reserved byte, parse code */
+                                    - 4 /* picture number */
+                                    - 4 /* slice prefix bytes, slice size scaler */
+                                    - 4 /* fragment length, slice count */
+                                    - RTP_HEADER_SIZE;
         /* TODO: check fragment_data_length is less than UINT16_MAX */
 
         /* When slice_count is not zero the fragment_data_length will include
@@ -317,7 +323,7 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
 
         size_t data_unit_size = PARSE_INFO_HEADER_SIZE
                               + 8 /* picture number, data length, slice count */
-                              + fragment_data_length; /* ext seqnum, reserved byte, parse code */
+                              + fragment_data_length;
         /* TODO: check size is less than INT_MAX */
 
         struct ubuf *data_unit = ubuf_block_alloc(ctx->ubuf_mgr, data_unit_size);
@@ -341,7 +347,7 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
 
         AV_WB16(dst + PARSE_INFO_HEADER_SIZE + 6, slice_count);
         memcpy(dst + PARSE_INFO_HEADER_SIZE + 8,
-                src + RTP_HEADER_SIZE + 12,
+                src + RTP_HEADER_SIZE + 16,
                 fragment_data_length); /* includes fragment x/y offset when slice_count is not zero. */
 
         ubuf_block_unmap(data_unit, 0);
