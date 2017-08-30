@@ -629,35 +629,12 @@ static void uplay_start(struct upump *upump)
 
     /* deport to the source thread */
     upipe_src = upipe_wsrc_alloc(upipe_wsrc_mgr,
-            uprobe_pfx_alloc(uprobe_use(&uprobe_src_s),
+            uprobe_pfx_alloc(uprobe_use(&uprobe_video_s),
                              UPROBE_LOG_VERBOSE, "wsrc"),
             upipe_src,
-            uprobe_pfx_alloc(uprobe_use(uprobe_main),
+            uprobe_pfx_alloc(uprobe_use(&uprobe_video_s),
                              UPROBE_LOG_VERBOSE, "wsrc_x"),
             src_out_queue_length);
-
-    /* ts demux */
-    struct upipe_mgr *upipe_ts_demux_mgr = upipe_ts_demux_mgr_alloc();
-    struct upipe_mgr *upipe_autof_mgr = upipe_autof_mgr_alloc();
-    upipe_ts_demux_mgr_set_autof_mgr(upipe_ts_demux_mgr, upipe_autof_mgr);
-    upipe_mgr_release(upipe_autof_mgr);
-    struct upipe *ts_demux = upipe_void_alloc_output(upipe_src,
-            upipe_ts_demux_mgr,
-            uprobe_pfx_alloc(
-                uprobe_selflow_alloc(uprobe_use(uprobe_main),
-                    uprobe_selflow_alloc(
-                        uprobe_selflow_alloc(
-                            uprobe_selflow_alloc(uprobe_use(uprobe_dejitter),
-                                uprobe_use(&uprobe_video_s),
-                                UPROBE_SELFLOW_PIC, select_video),
-                            uprobe_use(&uprobe_sub_s),
-                            UPROBE_SELFLOW_SUBPIC, select_sub),
-                        uprobe_use(&uprobe_audio_s),
-                        UPROBE_SELFLOW_SOUND, select_audio),
-                    UPROBE_SELFLOW_VOID, select_program),
-                UPROBE_LOG_VERBOSE, "ts demux"));
-    upipe_release(ts_demux);
-    upipe_mgr_release(upipe_ts_demux_mgr);
 }
 
 static void uplay_stop(struct upump *upump)
