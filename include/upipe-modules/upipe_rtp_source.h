@@ -57,7 +57,7 @@ enum upipe_rtpsrc_mgr_command {
     UPIPE_RTPSRC_MGR_SET_##NAME##_MGR,
 
     UPIPE_RTPSRC_MGR_GET_SET_MGR(udpsrc, UDPSRC)
-    UPIPE_RTPSRC_MGR_GET_SET_MGR(rtpd, RTPD)
+    UPIPE_RTPSRC_MGR_GET_SET_MGR(rtp_vc2, RTP_VC2)
     UPIPE_RTPSRC_MGR_GET_SET_MGR(setflowdef, SETFLOWDEF)
 #undef UPIPE_RTPSRC_MGR_GET_SET_MGR
 };
@@ -93,7 +93,7 @@ static inline int                                                           \
 }
 
 UPIPE_RTPSRC_MGR_GET_SET_MGR2(udpsrc, UDPSRC)
-UPIPE_RTPSRC_MGR_GET_SET_MGR2(rtpd, RTPD)
+UPIPE_RTPSRC_MGR_GET_SET_MGR2(rtp_vc2, RTP_VC2)
 UPIPE_RTPSRC_MGR_GET_SET_MGR2(setflowdef, SETFLOWDEF)
 #undef UPIPE_RTPSRC_MGR_GET_SET_MGR2
 
