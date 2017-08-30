@@ -521,7 +521,8 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
                                - PARSE_INFO_HEADER_SIZE;
             if (fragment_slice_count) {
                 packet_size += 4; /* slice x/y offset */
-                parse_transform_paramters(rtp_vc2_pack, src + src_offset + RTP_HEADER_SIZE);
+            } else {
+                parse_transform_paramters(rtp_vc2_pack, src + src_offset + PARSE_INFO_HEADER_SIZE + 8);
             }
 
             struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
