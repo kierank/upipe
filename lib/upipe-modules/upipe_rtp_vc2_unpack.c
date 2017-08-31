@@ -101,6 +101,8 @@ struct upipe_rtp_vc2_unpack {
 
     /** public upipe structure */
     struct upipe upipe;
+
+    uint32_t prev_offset;
 };
 
 /** @hidden */
@@ -235,8 +237,8 @@ static void upipe_rtp_vc2_unpack_input(struct upipe *upipe, struct uref *uref,
     }
 }
 
-static void write_parse_info(uint8_t *dst, uint8_t parse_code,
-        uint32_t next_offset, uint32_t prev_offset)
+static void write_parse_info(struct upipe_rtp_vc2_unpack *ctx, uint8_t *dst,
+        uint8_t parse_code, uint32_t next_offset)
 {
     dst[0] = 'B';
     dst[1] = 'B';
@@ -244,7 +246,8 @@ static void write_parse_info(uint8_t *dst, uint8_t parse_code,
     dst[3] = 'D';
     dst[4] = parse_code;
     AV_WB32(dst + 5, next_offset);
-    AV_WB32(dst + 9, prev_offset);
+    AV_WB32(dst + 9, ctx->prev_offset);
+    ctx->prev_offset = next_offset;
 }
 
 static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
@@ -287,8 +290,7 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
         UBASE_RETURN(ubuf_block_write(data_unit, 0, &dst_size, &dst));
         /* TODO: check dst_size is equal to data_unit_size */
 
-        /* TODO: write previous offset (needs storage) */
-        write_parse_info(dst, DIRAC_PCODE_SEQ_HEADER, data_unit_size, 0);
+        write_parse_info(ctx, dst, DIRAC_PCODE_SEQ_HEADER, data_unit_size);
         memcpy(dst + PARSE_INFO_HEADER_SIZE,
                 src + RTP_HEADER_SIZE + 4,
                 src_size - 4);
@@ -335,7 +337,7 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
         UBASE_RETURN(ubuf_block_write(data_unit, 0, &dst_size, &dst));
         /* TODO: check dst_size is equal to data_unit_size */
 
-        write_parse_info(dst, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, data_unit_size, 0);
+        write_parse_info(ctx, dst, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, data_unit_size);
         AV_WB32(dst + PARSE_INFO_HEADER_SIZE, picture_number);
 
         if (slice_count)
@@ -367,8 +369,7 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
         UBASE_RETURN(ubuf_block_write(data_unit, 0, &dst_size, &dst));
         /* TODO: check dst_size is equal to data_unit_size */
 
-        /* TODO: write previous offset (needs storage) */
-        write_parse_info(dst, DIRAC_PCODE_END_SEQ, PARSE_INFO_HEADER_SIZE, 0);
+        write_parse_info(ctx, dst, DIRAC_PCODE_END_SEQ, PARSE_INFO_HEADER_SIZE);
 
         ubuf_block_unmap(data_unit, 0);
         uref_attach_ubuf(uref, data_unit);
