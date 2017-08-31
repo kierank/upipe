@@ -287,7 +287,13 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
 
         uint8_t *dst = NULL;
         int dst_size = -1;
-        UBASE_RETURN(ubuf_block_write(data_unit, 0, &dst_size, &dst));
+        err = ubuf_block_write(data_unit, 0, &dst_size, &dst);
+        if (unlikely(!ubase_check(err))) {
+            upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+            ubuf_free(data_unit);
+            goto no_output;
+        }
+
         /* TODO: check dst_size is equal to data_unit_size */
 
         write_parse_info(ctx, dst, DIRAC_PCODE_SEQ_HEADER, data_unit_size);
@@ -334,7 +340,12 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
 
         uint8_t *dst = NULL;
         int dst_size = -1;
-        UBASE_RETURN(ubuf_block_write(data_unit, 0, &dst_size, &dst));
+        err = ubuf_block_write(data_unit, 0, &dst_size, &dst);
+        if (unlikely(!ubase_check(err))) {
+            upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+            ubuf_free(data_unit);
+            goto no_output;
+        }
         /* TODO: check dst_size is equal to data_unit_size */
 
         write_parse_info(ctx, dst, DIRAC_PCODE_PICTURE_FRAGMENT_HQ, data_unit_size);
@@ -366,7 +377,12 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
 
         uint8_t *dst = NULL;
         int dst_size = -1;
-        UBASE_RETURN(ubuf_block_write(data_unit, 0, &dst_size, &dst));
+        err = ubuf_block_write(data_unit, 0, &dst_size, &dst);
+        if (unlikely(!ubase_check(err))) {
+            upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+            ubuf_free(data_unit);
+            goto no_output;
+        }
         /* TODO: check dst_size is equal to data_unit_size */
 
         write_parse_info(ctx, dst, DIRAC_PCODE_END_SEQ, PARSE_INFO_HEADER_SIZE);
