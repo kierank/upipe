@@ -422,7 +422,12 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
     const uint8_t *src = NULL;
     int src_size = -1;
-    UBASE_RETURN(uref_block_read(uref, 0, &src_size, &src));
+    int err = uref_block_read(uref, 0, &src_size, &src);
+    if (unlikely(!ubase_check(err))) {
+        upipe_throw_fatal(upipe, err);
+        uref_free(uref);
+        return true;
+    }
 
     //copy data from input to output
 
@@ -452,18 +457,16 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
     do {
         if (AV_RN32(src + src_offset) != UBASE_FOURCC('B', 'B', 'C', 'D')) {
             upipe_err(upipe, "incorrect magic prefix");
-            uref_free(uref);
             upipe_throw_fatal(upipe, UBASE_ERR_UNKNOWN);
-            return true;
+            goto end;
         }
         uint8_t parse_code = src[src_offset + 4];
         ptrdiff_t next_offset = AV_RB32(src + src_offset + 5);
         ptrdiff_t prev_offset = AV_RB32(src + src_offset + 9);
         if (!next_offset) {
             upipe_err(upipe, "next offset is 0, this is not currently supported");
-            uref_free(uref);
             upipe_throw_fatal(upipe, UBASE_ERR_UNKNOWN);
-            return true;
+            goto end;
         }
 
         if (parse_code == DIRAC_PCODE_SEQ_HEADER) {
@@ -477,14 +480,18 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
             struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
             if (!packet) {
-                uref_free(uref);
                 upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-                return true;
+                goto end;
             }
 
             uint8_t *dst = NULL;
             int dst_size = -1;
-            UBASE_RETURN(ubuf_block_write(packet, 0, &dst_size, &dst));
+            err = ubuf_block_write(packet, 0, &dst_size, &dst);
+            if (unlikely(!ubase_check(err))) {
+                upipe_throw_fatal(upipe, err);
+                ubuf_free(packet);
+                goto end;
+            }
             /* TODO: check dst_size is equal to packet_size */
 
             parse_sequence_header(rtp_vc2_pack, src + src_offset + PARSE_INFO_HEADER_SIZE);
@@ -492,8 +499,14 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             memcpy(dst + RTP_HEADER_SIZE + 4,
                     src + src_offset + PARSE_INFO_HEADER_SIZE,
                     next_offset - PARSE_INFO_HEADER_SIZE);
-            UBASE_RETURN(ubuf_block_unmap(packet, 0));
-            UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
+
+            ubuf_block_unmap(packet, 0);
+            err = output_packet(upipe, uref, upump_p, packet, parse_code);
+            if (unlikely(!ubase_check(err))) {
+                upipe_throw_fatal(upipe, err);
+                ubuf_free(packet);
+                goto end;
+            }
         }
 
         else if (parse_code == DIRAC_PCODE_AUX) {
@@ -527,14 +540,18 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
             struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
             if (!packet) {
-                uref_free(uref);
                 upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
-                return true;
+                goto end;
             }
 
             uint8_t *dst = NULL;
             int dst_size = -1;
-            UBASE_RETURN(ubuf_block_write(packet, 0, &dst_size, &dst));
+            err = ubuf_block_write(packet, 0, &dst_size, &dst);
+            if (unlikely(!ubase_check(err))) {
+                upipe_throw_fatal(upipe, err);
+                ubuf_free(packet);
+                goto end;
+            }
             /* TODO: check dst_size is equal to packet_size */
 
             int field = 0;
@@ -555,8 +572,13 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
                     src + src_offset + PARSE_INFO_HEADER_SIZE + 4,
                     next_offset - PARSE_INFO_HEADER_SIZE - 4);
 
-            UBASE_RETURN(ubuf_block_unmap(packet, 0));
-            UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
+            ubuf_block_unmap(packet, 0);
+            err = output_packet(upipe, uref, upump_p, packet, parse_code);
+            if (unlikely(!ubase_check(err))) {
+                upipe_throw_fatal(upipe, err);
+                ubuf_free(packet);
+                goto end;
+            }
         }
 
         else if (parse_code == DIRAC_PCODE_END_SEQ) {
@@ -571,20 +593,25 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
                 return true;
             }
 
-            UBASE_RETURN(ubuf_block_unmap(packet, 0));
-            UBASE_RETURN(output_packet(upipe, uref, upump_p, packet, parse_code));
+            ubuf_block_unmap(packet, 0);
+            err = output_packet(upipe, uref, upump_p, packet, parse_code);
+            if (unlikely(!ubase_check(err))) {
+                upipe_throw_fatal(upipe, err);
+                ubuf_free(packet);
+                goto end;
+            }
         }
 
         else {
             upipe_err(upipe, "unknown parse code");
-            uref_free(uref);
             upipe_throw_fatal(upipe, UBASE_ERR_LOCAL);
-            return true;
+            goto end;
         }
 
         src_offset += next_offset;
     } while (src_offset < src_size);
 
+end:
     uref_block_unmap(uref, 0);
     uref_free(uref);
 
