@@ -463,14 +463,34 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
         uint8_t parse_code = src[src_offset + 4];
         ptrdiff_t next_offset = AV_RB32(src + src_offset + 5);
         ptrdiff_t prev_offset = AV_RB32(src + src_offset + 9);
-        if (!next_offset) {
+
+        if (next_offset && parse_code == DIRAC_PCODE_END_SEQ)
+            next_offset = PARSE_INFO_HEADER_SIZE;
+
+        else if (!next_offset) {
             upipe_err(upipe, "next offset is 0, this is not currently supported");
             upipe_throw_fatal(upipe, UBASE_ERR_UNKNOWN);
             goto end;
         }
 
+        else if (next_offset >= src_size) {
+            upipe_err(upipe, "next offset is greater than the size of the input uref, dropping");
+            upipe_throw_fatal(upipe, UBASE_ERR_UNKNOWN);
+            goto end;
+        }
+
+        else if (next_offset < PARSE_INFO_HEADER_SIZE) {
+            upipe_warn(upipe, "next offset is smaller than PARSE_INFO_HEADER_SIZE, skipping");
+            goto skip;
+        }
+
         if (parse_code == DIRAC_PCODE_SEQ_HEADER) {
             upipe_dbg(upipe, "found sequence header");
+
+            if (next_offset <= PARSE_INFO_HEADER_SIZE) {
+                upipe_warn(upipe, "next offset too small for DIRAC_PCODE_SEQ_HEADER, skipping");
+                goto skip;
+            }
 
             size_t packet_size = RTP_HEADER_SIZE
                                + 4 /* ext seqnum, reserved byte, parse code */
@@ -520,6 +540,13 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
         }
 
         else if (parse_code == DIRAC_PCODE_PICTURE_FRAGMENT_HQ) {
+            /* check that there is enough input data for the parse info header,
+             * the fragment header, and 1 byte of data */
+            if (next_offset < PARSE_INFO_HEADER_SIZE + 8 + 1) {
+                upipe_warn(upipe, "next offset too small for DIRAC_PCODE_PICTURE_FRAGMENT_HQ, skipping");
+                goto skip;
+            }
+
             uint32_t picture_number = AV_RB32(src + src_offset + 13);
             //uint16_t fragment_data_length = AV_RB16(src + src_offset + 17);
             uint16_t fragment_slice_count = AV_RB16(src + src_offset + 19);
@@ -608,6 +635,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             goto end;
         }
 
+skip:
         src_offset += next_offset;
     } while (src_offset < src_size);
 
