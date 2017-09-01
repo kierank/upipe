@@ -314,6 +314,12 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
     else if (parse_code == DIRAC_PCODE_PICTURE_FRAGMENT_HQ) {
         upipe_dbg(upipe, "found HQ picture fragment");
 
+        if (src_size <= 16 + RTP_HEADER_SIZE) {
+            upipe_err(upipe, "packet is too small for DIRAC_PCODE_PICTURE_FRAGMENT_HQ");
+            upipe_throw_fatal(upipe, UBASE_ERR_UNKNOWN);
+            goto no_output;
+        }
+
         uint32_t picture_number = AV_RB32(src + RTP_HEADER_SIZE + 4);
         uint16_t slice_count = AV_RB16(src + RTP_HEADER_SIZE + 14);
         size_t fragment_data_length = src_size
