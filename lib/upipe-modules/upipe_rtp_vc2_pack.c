@@ -405,7 +405,7 @@ static int output_packet(struct upipe *upipe, struct uref *uref, struct upump **
 
     ubuf_block_unmap(packet, 0);
     struct uref *uref_packet = uref_fork(uref, packet);
-    if (!uref_packet)
+    if (unlikely(!uref_packet))
         return UBASE_ERR_ALLOC;
 
     /*TODO: get errors from output? */
@@ -479,7 +479,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             /* TODO: check size is less than INT_MAX */
 
             struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
-            if (!packet) {
+            if (unlikely(!packet)) {
                 upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
                 goto end;
             }
@@ -539,7 +539,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             }
 
             struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
-            if (!packet) {
+            if (unlikely(!packet)) {
                 upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
                 goto end;
             }
@@ -587,7 +587,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
                                + 4; /* ext seqnum, reserved byte, parse code */
 
             struct ubuf *packet = ubuf_block_alloc(rtp_vc2_pack->ubuf_mgr, packet_size);
-            if (!packet) {
+            if (unlikely(!packet)) {
                 uref_free(uref);
                 upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
                 return true;
