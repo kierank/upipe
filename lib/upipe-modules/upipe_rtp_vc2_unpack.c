@@ -289,7 +289,7 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
         int dst_size = -1;
         err = ubuf_block_write(data_unit, 0, &dst_size, &dst);
         if (unlikely(!ubase_check(err))) {
-            upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+            upipe_throw_fatal(upipe, err);
             ubuf_free(data_unit);
             goto no_output;
         }
@@ -342,7 +342,7 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
         int dst_size = -1;
         err = ubuf_block_write(data_unit, 0, &dst_size, &dst);
         if (unlikely(!ubase_check(err))) {
-            upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+            upipe_throw_fatal(upipe, err);
             ubuf_free(data_unit);
             goto no_output;
         }
@@ -379,7 +379,7 @@ static bool upipe_rtp_vc2_unpack_handle(struct upipe *upipe, struct uref *uref,
         int dst_size = -1;
         err = ubuf_block_write(data_unit, 0, &dst_size, &dst);
         if (unlikely(!ubase_check(err))) {
-            upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
+            upipe_throw_fatal(upipe, err);
             ubuf_free(data_unit);
             goto no_output;
         }
