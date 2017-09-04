@@ -383,7 +383,7 @@ static void upipe_rtp_vc2_pack_input(struct upipe *upipe, struct uref *uref,
 #define MTU 1440 /* MTU from rtp pcm pack */
 
 static int output_packet(struct upipe *upipe, struct uref *uref, struct upump **upump_p,
-        struct ubuf *packet, uint8_t parse_code)
+        struct ubuf *packet, uint8_t parse_code, uint64_t clock)
 {
     struct upipe_rtp_vc2_pack *rtp_vc2_pack = upipe_rtp_vc2_pack_from_upipe(upipe);
     uint8_t *dst = NULL;
@@ -407,6 +407,8 @@ static int output_packet(struct upipe *upipe, struct uref *uref, struct upump **
     struct uref *uref_packet = uref_fork(uref, packet);
     if (unlikely(!uref_packet))
         return UBASE_ERR_ALLOC;
+
+    uref_clock_set_cr_sys(uref_packet, clock);
 
     /*TODO: get errors from output? */
     upipe_rtp_vc2_pack_output(upipe, uref_packet, upump_p);
@@ -451,6 +453,34 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
      * - keep/create fragment length
      * - keep/create slice x/y offsets
      */
+
+    /* About timing.
+     * k.sys and k.prog start with the same value on the first uref made by the
+     * rowsplit module.  That increments k.sys for each subsequent uref it
+     * outputs based on its position down the frame.
+     *
+     * k.duration remains the same for each uref: the duration of one whole
+     * frame.
+     *
+     * To space packets across 1 row I should read the fraction_duration
+     * attribute from the uref (which I added in rowsplit).  Then I should add
+     * more to k.sys based on the position a slice has across the row.
+     */
+
+    uint64_t clock;
+    err = uref_clock_get_dts_sys(uref, &clock);
+    if (unlikely(!ubase_check(err))) {
+        upipe_err(upipe, "unable to get clock");
+        upipe_throw_fatal(upipe, err);
+        goto end;
+    }
+
+    uint64_t fraction_duration;
+    err = uref_attr_get_unsigned(uref, &fraction_duration, UDICT_TYPE_UNSIGNED, "fraction_duration");
+    if (unlikely(!ubase_check(err))) {
+        upipe_warn(upipe, "unable to get fraction_duration");
+        fraction_duration = 0;
+    }
 
     ptrdiff_t src_offset = 0;
     /* some loop over parse info blocks in the input buffer */
@@ -521,7 +551,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
                     next_offset - PARSE_INFO_HEADER_SIZE);
 
             ubuf_block_unmap(packet, 0);
-            err = output_packet(upipe, uref, upump_p, packet, parse_code);
+            err = output_packet(upipe, uref, upump_p, packet, parse_code, clock);
             if (unlikely(!ubase_check(err))) {
                 upipe_throw_fatal(upipe, err);
                 ubuf_free(packet);
@@ -602,7 +632,8 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
                     next_offset - PARSE_INFO_HEADER_SIZE - 4);
 
             ubuf_block_unmap(packet, 0);
-            err = output_packet(upipe, uref, upump_p, packet, parse_code);
+            err = output_packet(upipe, uref, upump_p, packet, parse_code,
+                    clock + (fragment_x_offset * fraction_duration) / rtp_vc2_pack->slices_x );
             if (unlikely(!ubase_check(err))) {
                 upipe_throw_fatal(upipe, err);
                 ubuf_free(packet);
@@ -623,7 +654,8 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             }
 
             ubuf_block_unmap(packet, 0);
-            err = output_packet(upipe, uref, upump_p, packet, parse_code);
+            err = output_packet(upipe, uref, upump_p, packet, parse_code,
+                    clock + fraction_duration);
             if (unlikely(!ubase_check(err))) {
                 upipe_throw_fatal(upipe, err);
                 ubuf_free(packet);
