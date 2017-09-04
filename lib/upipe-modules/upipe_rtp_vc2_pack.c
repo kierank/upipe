@@ -109,7 +109,7 @@ struct upipe_rtp_vc2_pack {
 
     uint64_t sequence_number;
 
-    uint32_t major_version, picture_coding_mode;
+    uint32_t major_version, picture_coding_mode, slices_x;
     uint16_t slice_prefix_bytes, slice_size_scaler;
 };
 
@@ -238,7 +238,7 @@ static void parse_transform_paramters(struct upipe_rtp_vc2_pack *ctx, const uint
         if (read_bool(&state)) /* asymmetric transform flag */
             skip_uint(&state); /* dwt depth horizontal */
     }
-    skip_uint(&state); /* num slices x */
+    ctx->slices_x = read_uint(&state);
     skip_uint(&state); /* num slices y */
     /* RTP VC2 is only defined for HQ pictures */
     ctx->slice_prefix_bytes = read_uint(&state);
