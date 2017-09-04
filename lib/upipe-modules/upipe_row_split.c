@@ -229,6 +229,7 @@ static bool upipe_row_split_handle(struct upipe *upipe, struct uref *uref,
         return true;
     }
 
+    uint64_t original_height = vsize;
     uint64_t vsize_slice = 16;
     uint64_t done = 0;
     while (vsize) {
@@ -267,6 +268,12 @@ static bool upipe_row_split_handle(struct upipe *upipe, struct uref *uref,
         }
 
         struct uref *uref_slice = uref_fork(uref, ubuf);
+
+        uref_attr_set_unsigned(uref_slice,
+                original_height, UDICT_TYPE_UNSIGNED, "original_height");
+        uref_attr_set_unsigned(uref_slice,
+                (vsize_slice * upipe_row_split->frame_duration) / original_height,
+                UDICT_TYPE_UNSIGNED, "fraction_duration");
 
         uref_pic_set_vposition(uref_slice, done);
 
