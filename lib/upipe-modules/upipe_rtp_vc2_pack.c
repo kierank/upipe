@@ -550,6 +550,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             uint32_t picture_number = AV_RB32(src + src_offset + 13);
             //uint16_t fragment_data_length = AV_RB16(src + src_offset + 17);
             uint16_t fragment_slice_count = AV_RB16(src + src_offset + 19);
+            uint16_t fragment_x_offset = 0;
 
             /* TODO: check size is less than INT_MAX */
             size_t packet_size = RTP_HEADER_SIZE
@@ -561,6 +562,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
                                - PARSE_INFO_HEADER_SIZE;
             if (fragment_slice_count) {
                 packet_size += 4; /* slice x/y offset */
+                fragment_x_offset = AV_RB16(src + src_offset + 21);
             } else {
                 parse_transform_paramters(rtp_vc2_pack, src + src_offset + PARSE_INFO_HEADER_SIZE + 8);
             }
