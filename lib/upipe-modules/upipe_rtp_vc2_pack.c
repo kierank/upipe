@@ -475,6 +475,8 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
         goto end;
     }
 
+    clock += 2*UCLOCK_FREQ;
+
     uint64_t fraction_duration;
     err = uref_attr_get_unsigned(uref, &fraction_duration, UDICT_TYPE_UNSIGNED, "fraction_duration");
     if (unlikely(!ubase_check(err))) {
