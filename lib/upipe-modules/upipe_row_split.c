@@ -24,7 +24,7 @@
  */
 
 /** @file
- * @short Upipe module to split raw audio into RTP packets
+ * @short Upipe module to split pictures into a series of rows
  */
 
 #include <stdlib.h>
