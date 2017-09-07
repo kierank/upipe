@@ -153,7 +153,8 @@ static int upipe_separate_fields_set_flow_def(struct upipe *upipe,
     ctx->field_duration = UCLOCK_FREQ * fps.den / fps.num;
     UBASE_RETURN(uref_pic_flow_set_fps(flow_def_dup, fps));
     UBASE_RETURN(uref_pic_flow_set_vsize(flow_def_dup, height));
-    UBASE_RETURN(uref_pic_delete_progressive(flow_def_dup));
+    if (ubase_check(uref_pic_get_progressive(flow_def_dup)))
+        UBASE_RETURN(uref_pic_delete_progressive(flow_def_dup));
 
     upipe_separate_fields_require_ubuf_mgr(upipe, flow_def_dup);
 
