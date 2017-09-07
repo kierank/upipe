@@ -153,6 +153,7 @@ static int upipe_separate_fields_set_flow_def(struct upipe *upipe,
     ctx->field_duration = UCLOCK_FREQ * fps.den / fps.num;
     UBASE_RETURN(uref_pic_flow_set_fps(flow_def_dup, fps));
     UBASE_RETURN(uref_pic_flow_set_vsize(flow_def_dup, height));
+    UBASE_RETURN(uref_pic_delete_progressive(flow_def_dup));
 
     upipe_separate_fields_require_ubuf_mgr(upipe, flow_def_dup);
 
@@ -282,6 +283,16 @@ static bool upipe_separate_fields_handle(struct upipe *upipe, struct uref *uref,
     }
 
     struct uref *uref_field = uref_fork(uref, ubuf);
+
+    uref_pic_delete_progressive(uref_field);
+    if (has_tff_attr) {
+        uref_pic_delete_bf(uref_field);
+        uref_pic_set_tf(uref_field);
+    } else {
+        uref_pic_delete_tf(uref_field);
+        uref_pic_set_bf(uref_field);
+    }
+
     upipe_separate_fields_output(upipe, uref_field, NULL);
 
     /* second field */
@@ -315,6 +326,15 @@ static bool upipe_separate_fields_handle(struct upipe *upipe, struct uref *uref,
     }
 
     uref_field = uref_fork(uref, ubuf);
+
+    uref_pic_delete_progressive(uref_field);
+    if (!has_tff_attr) {
+        uref_pic_delete_bf(uref_field);
+        uref_pic_set_tf(uref_field);
+    } else {
+        uref_pic_delete_tf(uref_field);
+        uref_pic_set_bf(uref_field);
+    }
 
     uint64_t pts = 0;
     uref_clock_get_pts_sys(uref_field, &pts);
