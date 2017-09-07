@@ -274,7 +274,7 @@ static bool upipe_separate_fields_handle(struct upipe *upipe, struct uref *uref,
 
         for (int i = 0; i < height/(2*vsub); i++)
             memcpy(dst + i*dst_stride,
-                    src_stride + 2*i*src_stride + offset*src_stride,
+                    src + 2*i*src_stride + offset*src_stride,
                     width/hsub);
 
         ubase_assert(ubuf_pic_plane_unmap(ubuf, plane_desc, 0, 0, -1, -1));
@@ -307,7 +307,7 @@ static bool upipe_separate_fields_handle(struct upipe *upipe, struct uref *uref,
 
         for (int i = 0; i < height/(2*vsub); i++)
             memcpy(dst + i*dst_stride,
-                    src_stride + 2*i*src_stride + offset*src_stride,
+                    src + 2*i*src_stride + offset*src_stride,
                     width/hsub);
 
         ubase_assert(ubuf_pic_plane_unmap(ubuf, plane_desc, 0, 0, -1, -1));
