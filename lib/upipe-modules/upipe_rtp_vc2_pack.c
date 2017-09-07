@@ -468,14 +468,12 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
      */
 
     uint64_t clock;
-    err = uref_clock_get_dts_sys(uref, &clock);
+    err = uref_clock_get_pts_sys(uref, &clock);
     if (unlikely(!ubase_check(err))) {
         upipe_err(upipe, "unable to get clock");
         upipe_throw_fatal(upipe, err);
         goto end;
     }
-
-    clock += 2*UCLOCK_FREQ;
 
     uint64_t fraction_duration;
     err = uref_attr_get_unsigned(uref, &fraction_duration, UDICT_TYPE_UNSIGNED, "fraction_duration");
