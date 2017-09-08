@@ -266,8 +266,7 @@ static bool upipe_row_split_handle(struct upipe *upipe, struct uref *uref,
     if (vsize_slice > vsize)
         vsize_slice = vsize;
 
-    uint64_t done = 0;
-    while (done < vsize) {
+    for (uint64_t done = 0; done < vsize; done += vsize_slice) {
         struct ubuf *ubuf = ubuf_pic_alloc(upipe_row_split->ubuf_mgr, hsize, vsize_slice);
         if (!ubuf)
             abort();
@@ -313,9 +312,6 @@ static bool upipe_row_split_handle(struct upipe *upipe, struct uref *uref,
         uref_clock_set_pts_sys(uref_slice, pts + (done * upipe_row_split->frame_duration) / vsize);
 
         upipe_row_split_output(upipe, uref_slice, NULL);
-
-        done += vsize_slice;
-        assert(done <= vsize);
     }
 
     uref_free(uref);
