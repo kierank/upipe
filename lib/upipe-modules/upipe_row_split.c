@@ -71,6 +71,9 @@ struct upipe_row_split {
     /** frame duration in ticks */
     uint64_t frame_duration;
 
+    /** slice height */
+    uint64_t slice_height;
+
     /** temporary uref storage (used during urequest) */
     struct uchain input_urefs;
     /** nb urefs in storage */
@@ -144,6 +147,25 @@ static int upipe_row_split_set_flow_def(struct upipe *upipe,
     return UBASE_ERR_NONE;
 }
 
+static int upipe_row_split_set_option(struct upipe *upipe, const char *k, const char *v)
+{
+    struct upipe_row_split *upipe_row_split = upipe_row_split_from_upipe(upipe);
+
+    if (!strcmp(k, "slice_height")) {
+        int slice_height = atoi(v);
+        if (slice_height <= 0) {
+            upipe_err_va(upipe, "Invalid slice height %s", v);
+            return UBASE_ERR_INVALID;
+        }
+        upipe_row_split->slice_height = slice_height;
+    } else {
+        upipe_err_va(upipe, "Unknown option %s", k);
+        return UBASE_ERR_INVALID;
+    }
+
+    return UBASE_ERR_NONE;
+}
+
 static int upipe_row_split_control(struct upipe *upipe, int command,
                                   va_list args)
 {
@@ -164,6 +186,11 @@ static int upipe_row_split_control(struct upipe *upipe, int command,
         case UPIPE_GET_OUTPUT:
         case UPIPE_SET_OUTPUT:
             return upipe_row_split_control_output(upipe, command, args);
+        case UPIPE_SET_OPTION: {
+             const char *k = va_arg(args, const char *);
+             const char *v = va_arg(args, const char *);
+            return upipe_row_split_set_option(upipe, k, v);
+        }
         default:
             return UBASE_ERR_UNHANDLED;
     }
@@ -188,6 +215,8 @@ static struct upipe *upipe_row_split_alloc(struct upipe_mgr *mgr,
     if (unlikely(upipe == NULL))
         return NULL;
     struct upipe_row_split *upipe_row_split = upipe_row_split_from_upipe(upipe);
+
+    upipe_row_split->slice_height = 16;
 
     upipe_row_split_init_urefcount(upipe);
     upipe_row_split_init_input(upipe);
@@ -233,11 +262,12 @@ static bool upipe_row_split_handle(struct upipe *upipe, struct uref *uref,
     uref_clock_get_pts_sys(uref, &pts);
 
     uint64_t original_height = vsize;
-    uint64_t vsize_slice = 16;
+    uint64_t vsize_slice = upipe_row_split->slice_height;
+    if (vsize_slice > vsize)
+        vsize_slice = vsize;
+
     uint64_t done = 0;
     while (done < vsize) {
-        if (vsize_slice > vsize)
-            vsize_slice = vsize;
         struct ubuf *ubuf = ubuf_pic_alloc(upipe_row_split->ubuf_mgr, hsize, vsize_slice);
         if (!ubuf)
             abort();
