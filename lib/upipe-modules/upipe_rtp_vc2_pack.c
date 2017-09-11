@@ -551,7 +551,8 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
                     next_offset - PARSE_INFO_HEADER_SIZE);
 
             ubuf_block_unmap(packet, 0);
-            err = output_packet(upipe, uref, upump_p, packet, parse_code, clock);
+            err = output_packet(upipe, uref, upump_p, packet, parse_code,
+                    clock + src_offset/src_size);
             if (unlikely(!ubase_check(err))) {
                 upipe_throw_fatal(upipe, err);
                 ubuf_free(packet);
@@ -633,7 +634,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
             ubuf_block_unmap(packet, 0);
             err = output_packet(upipe, uref, upump_p, packet, parse_code,
-                    clock + (fragment_x_offset * fraction_duration) / rtp_vc2_pack->slices_x );
+                    clock + src_offset/src_size);
             if (unlikely(!ubase_check(err))) {
                 upipe_throw_fatal(upipe, err);
                 ubuf_free(packet);
@@ -655,7 +656,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
             ubuf_block_unmap(packet, 0);
             err = output_packet(upipe, uref, upump_p, packet, parse_code,
-                    clock + fraction_duration);
+                    clock + src_offset/src_size);
             if (unlikely(!ubase_check(err))) {
                 upipe_throw_fatal(upipe, err);
                 ubuf_free(packet);
