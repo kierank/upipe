@@ -33,6 +33,7 @@
 #include <upipe/upipe.h>
 #include <upipe/uclock.h>
 #include <upipe/uref_clock.h>
+#include <upipe/uref_dump.h>
 #include <upipe/upipe_helper_upipe.h>
 #include <upipe/upipe_helper_urefcount.h>
 #include <upipe/upipe_helper_void.h>
@@ -258,8 +259,13 @@ static bool upipe_row_split_handle(struct upipe *upipe, struct uref *uref,
         return true;
     }
 
-    uint64_t pts = 0;
-    uref_clock_get_pts_sys(uref, &pts);
+    uint64_t dts = 0;
+    if (!ubase_check(uref_clock_get_dts_prog(uref, &dts))) {
+        upipe_err(upipe, "unable to get clock");
+        uref_dump(uref, upipe->uprobe);
+        uref_free(uref);
+        return true;
+    }
 
     uint64_t vsize_slice = upipe_row_split->slice_height;
     if (vsize_slice > vsize)
@@ -308,7 +314,14 @@ static bool upipe_row_split_handle(struct upipe *upipe, struct uref *uref,
 
         uref_pic_set_vposition(uref_slice, done);
 
-        uref_clock_set_pts_sys(uref_slice, pts + (done * upipe_row_split->frame_duration) / vsize);
+        uint64_t dts_slice = dts + (done * upipe_row_split->frame_duration) / vsize;
+        uref_clock_set_dts_prog(uref_slice, dts_slice);
+
+        uint64_t cr_sys;
+        if (ubase_check(uref_clock_get_cr_sys(uref, &cr_sys))) {
+            cr_sys += (done * upipe_row_split->frame_duration) / vsize;
+            uref_clock_set_cr_sys(uref_slice, cr_sys);
+        }
 
         upipe_row_split_output(upipe, uref_slice, NULL);
     }
