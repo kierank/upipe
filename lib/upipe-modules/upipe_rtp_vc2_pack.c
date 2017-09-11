@@ -408,6 +408,7 @@ static int output_packet(struct upipe *upipe, struct uref *uref, struct upump **
     if (unlikely(!uref_packet))
         return UBASE_ERR_ALLOC;
 
+    clock -= UCLOCK_FREQ / 25; // FIXME 16:35 < Meuuh> the last packet should have cr_sys = dts_sys
     uref_clock_set_cr_sys(uref_packet, clock);
 
     /*TODO: get errors from output? */
@@ -468,7 +469,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
      */
 
     uint64_t clock;
-    err = uref_clock_get_pts_sys(uref, &clock);
+    err = uref_clock_get_dts_sys(uref, &clock);
     if (unlikely(!ubase_check(err))) {
         upipe_err(upipe, "unable to get clock");
         upipe_throw_fatal(upipe, err);
@@ -552,7 +553,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
             ubuf_block_unmap(packet, 0);
             err = output_packet(upipe, uref, upump_p, packet, parse_code,
-                    clock + src_offset/src_size);
+                    clock + src_offset * fraction_duration /src_size);
             if (unlikely(!ubase_check(err))) {
                 upipe_throw_fatal(upipe, err);
                 ubuf_free(packet);
@@ -634,7 +635,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
             ubuf_block_unmap(packet, 0);
             err = output_packet(upipe, uref, upump_p, packet, parse_code,
-                    clock + src_offset/src_size);
+                    clock + src_offset*fraction_duration/src_size);
             if (unlikely(!ubase_check(err))) {
                 upipe_throw_fatal(upipe, err);
                 ubuf_free(packet);
@@ -656,7 +657,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
             ubuf_block_unmap(packet, 0);
             err = output_packet(upipe, uref, upump_p, packet, parse_code,
-                    clock + src_offset/src_size);
+                    clock + src_offset*fraction_duration/src_size);
             if (unlikely(!ubase_check(err))) {
                 upipe_throw_fatal(upipe, err);
                 ubuf_free(packet);
