@@ -657,7 +657,8 @@ static void upipe_avcenc_encode_video(struct upipe *upipe,
             return;
         }
         uint64_t pos_y;
-        UBASE_RETURN(uref_pic_get_vposition(uref, &pos_y));
+        if (!ubase_check(uref_pic_get_vposition(uref, &pos_y)))
+            return;
         frame->data[i] = (uint8_t *)data;
         frame->linesize[i] = stride;
         frame->pos_y = pos_y;
