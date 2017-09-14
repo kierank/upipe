@@ -383,7 +383,7 @@ static void upipe_rtp_vc2_pack_input(struct upipe *upipe, struct uref *uref,
 #define MTU 1440 /* MTU from rtp pcm pack */
 
 static int output_packet(struct upipe *upipe, struct uref *uref, struct upump **upump_p,
-        struct ubuf *packet, uint8_t parse_code, uint64_t clock)
+        struct ubuf *packet, uint8_t parse_code, uint64_t clock, bool set_marker)
 {
     struct upipe_rtp_vc2_pack *rtp_vc2_pack = upipe_rtp_vc2_pack_from_upipe(upipe);
     uint8_t *dst = NULL;
@@ -392,6 +392,8 @@ static int output_packet(struct upipe *upipe, struct uref *uref, struct upump **
 
     memset(dst, 0, RTP_HEADER_SIZE);
     rtp_set_hdr(dst);
+    if (set_marker)
+        rtp_set_marker(dst);
 
     /* sequence number */
     rtp_set_seqnum(dst, rtp_vc2_pack->sequence_number);
@@ -553,7 +555,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
             ubuf_block_unmap(packet, 0);
             err = output_packet(upipe, uref, upump_p, packet, parse_code,
-                    clock + src_offset * fraction_duration /src_size);
+                    clock + src_offset * fraction_duration /src_size, false);
             if (unlikely(!ubase_check(err))) {
                 upipe_throw_fatal(upipe, err);
                 ubuf_free(packet);
@@ -639,12 +641,9 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
                     src + src_offset + PARSE_INFO_HEADER_SIZE + 4,
                     next_offset - PARSE_INFO_HEADER_SIZE - 4);
 
-            if (set_marker_bit)
-                rtp_set_marker(dst);
-
             ubuf_block_unmap(packet, 0);
             err = output_packet(upipe, uref, upump_p, packet, parse_code,
-                    clock + src_offset*fraction_duration/src_size);
+                    clock + src_offset*fraction_duration/src_size, set_marker_bit);
             if (unlikely(!ubase_check(err))) {
                 upipe_throw_fatal(upipe, err);
                 ubuf_free(packet);
@@ -666,7 +665,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
 
             ubuf_block_unmap(packet, 0);
             err = output_packet(upipe, uref, upump_p, packet, parse_code,
-                    clock + src_offset*fraction_duration/src_size);
+                    clock + src_offset*fraction_duration/src_size, false);
             if (unlikely(!ubase_check(err))) {
                 upipe_throw_fatal(upipe, err);
                 ubuf_free(packet);
