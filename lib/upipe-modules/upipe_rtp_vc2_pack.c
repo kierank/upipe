@@ -109,7 +109,7 @@ struct upipe_rtp_vc2_pack {
 
     uint64_t sequence_number;
 
-    uint32_t major_version, picture_coding_mode, slices_x;
+    uint32_t major_version, picture_coding_mode, slices_x, slices_y;
     uint16_t slice_prefix_bytes, slice_size_scaler;
 };
 
@@ -239,7 +239,7 @@ static void parse_transform_paramters(struct upipe_rtp_vc2_pack *ctx, const uint
             skip_uint(&state); /* dwt depth horizontal */
     }
     ctx->slices_x = read_uint(&state);
-    skip_uint(&state); /* num slices y */
+    ctx->slices_y = read_uint(&state);
     /* RTP VC2 is only defined for HQ pictures */
     ctx->slice_prefix_bytes = read_uint(&state);
     ctx->slice_size_scaler = read_uint(&state);
@@ -582,7 +582,8 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             uint32_t picture_number = AV_RB32(src + src_offset + 13);
             //uint16_t fragment_data_length = AV_RB16(src + src_offset + 17);
             uint16_t fragment_slice_count = AV_RB16(src + src_offset + 19);
-            uint16_t fragment_x_offset = 0;
+            uint16_t fragment_x_offset = 0, fragment_y_offset = 0;
+            bool set_marker_bit = false;
 
             /* TODO: check size is less than INT_MAX */
             size_t packet_size = RTP_HEADER_SIZE
@@ -595,6 +596,11 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             if (fragment_slice_count) {
                 packet_size += 4; /* slice x/y offset */
                 fragment_x_offset = AV_RB16(src + src_offset + 21);
+                fragment_y_offset = AV_RB16(src + src_offset + 23);
+
+                if (fragment_y_offset+1 == rtp_vc2_pack->slices_y
+                        && fragment_x_offset + fragment_slice_count == rtp_vc2_pack->slices_x)
+                    set_marker_bit = true;
             } else {
                 parse_transform_paramters(rtp_vc2_pack, src + src_offset + PARSE_INFO_HEADER_SIZE + 8);
             }
@@ -632,6 +638,9 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             memcpy(dst + RTP_HEADER_SIZE + 12,
                     src + src_offset + PARSE_INFO_HEADER_SIZE + 4,
                     next_offset - PARSE_INFO_HEADER_SIZE - 4);
+
+            if (set_marker_bit)
+                rtp_set_marker(dst);
 
             ubuf_block_unmap(packet, 0);
             err = output_packet(upipe, uref, upump_p, packet, parse_code,
