@@ -75,6 +75,9 @@ struct upipe_row_split {
     /** slice height */
     uint64_t slice_height;
 
+    /** cached picture vertical size (to check slice_height option) */
+    uint64_t cached_vsize;
+
     /** temporary uref storage (used during urequest) */
     struct uchain input_urefs;
     /** nb urefs in storage */
@@ -137,6 +140,8 @@ static int upipe_row_split_set_flow_def(struct upipe *upipe,
     UBASE_RETURN(uref_pic_flow_get_fps(flow_def, &fps));
     upipe_row_split->frame_duration = UCLOCK_FREQ * fps.den / fps.num;
 
+    UBASE_RETURN(uref_pic_flow_get_vsize(flow_def, &upipe_row_split->cached_vsize));
+
     struct uref *flow_def_dup = uref_dup(flow_def);
     if (unlikely(flow_def_dup == NULL)) {
         upipe_throw_fatal(upipe, UBASE_ERR_ALLOC);
@@ -158,6 +163,10 @@ static int upipe_row_split_set_option(struct upipe *upipe, const char *k, const 
             upipe_err_va(upipe, "Invalid slice height %s", v);
             return UBASE_ERR_INVALID;
         }
+        if (upipe_row_split->cached_vsize % slice_height)
+            upipe_warn_va(upipe, "requested slice height (%d) is not a factor of the picture size (%d), a shorter slice will be output at the end of each frame"
+                    slice_height, (int)upipe_row_split->cached_vsize);
+
         upipe_row_split->slice_height = slice_height;
     } else {
         upipe_err_va(upipe, "Unknown option %s", k);
