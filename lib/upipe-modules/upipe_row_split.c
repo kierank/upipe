@@ -285,6 +285,9 @@ static bool upipe_row_split_handle(struct upipe *upipe, struct uref *uref,
                 abort();
             }
 
+            if (done + vsize_slice > vsize)
+                vsize_slice = vsize - done;
+
             if (!ubase_check(uref_pic_plane_read(uref, chroma, 0, done, -1, vsize_slice, &src))) {
                 abort();
             }
