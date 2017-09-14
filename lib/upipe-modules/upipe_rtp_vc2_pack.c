@@ -410,7 +410,6 @@ static int output_packet(struct upipe *upipe, struct uref *uref, struct upump **
     if (unlikely(!uref_packet))
         return UBASE_ERR_ALLOC;
 
-    clock -= UCLOCK_FREQ / 25; // FIXME 16:35 < Meuuh> the last packet should have cr_sys = dts_sys
     uref_clock_set_cr_sys(uref_packet, clock);
 
     /*TODO: get errors from output? */
