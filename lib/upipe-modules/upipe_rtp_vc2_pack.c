@@ -516,7 +516,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
         }
 
         if (parse_code == DIRAC_PCODE_SEQ_HEADER) {
-            upipe_dbg(upipe, "found sequence header");
+            upipe_verbose(upipe, "found sequence header");
 
             if (next_offset <= PARSE_INFO_HEADER_SIZE) {
                 upipe_warn(upipe, "next offset too small for DIRAC_PCODE_SEQ_HEADER, skipping");
@@ -562,11 +562,11 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
         }
 
         else if (parse_code == DIRAC_PCODE_AUX) {
-            upipe_dbg(upipe, "found auxiliary data, skipping");
+            upipe_verbose(upipe, "found auxiliary data, skipping");
         }
 
         else if (parse_code == DIRAC_PCODE_PICTURE_HQ) {
-            upipe_dbg(upipe, "found HQ picture");
+            upipe_verbose(upipe, "found HQ picture");
             upipe_err(upipe, "splitting HQ pictures into fragments and "
                     "packets is not implemented at this time, skipping picture");
         }
@@ -644,7 +644,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
         }
 
         else if (parse_code == DIRAC_PCODE_END_SEQ) {
-            upipe_dbg(upipe, "found end sequence");
+            upipe_verbose(upipe, "found end sequence");
             size_t packet_size = RTP_HEADER_SIZE
                                + 4; /* ext seqnum, reserved byte, parse code */
 
