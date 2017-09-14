@@ -164,7 +164,7 @@ static int upipe_row_split_set_option(struct upipe *upipe, const char *k, const 
             return UBASE_ERR_INVALID;
         }
         if (upipe_row_split->cached_vsize % slice_height)
-            upipe_warn_va(upipe, "requested slice height (%d) is not a factor of the picture size (%d), a shorter slice will be output at the end of each frame"
+            upipe_warn_va(upipe, "requested slice height (%d) is not a factor of the picture size (%d), a shorter slice will be output at the end of each frame",
                     slice_height, (int)upipe_row_split->cached_vsize);
 
         upipe_row_split->slice_height = slice_height;
