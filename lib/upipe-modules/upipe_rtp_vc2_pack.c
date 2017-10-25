@@ -505,7 +505,7 @@ static bool upipe_rtp_vc2_pack_handle(struct upipe *upipe, struct uref *uref,
             goto end;
         }
 
-        else if (next_offset >= src_size) {
+        else if (next_offset > src_size) {
             upipe_err(upipe, "next offset is greater than the size of the input uref, dropping");
             upipe_throw_fatal(upipe, UBASE_ERR_UNKNOWN);
             goto end;
