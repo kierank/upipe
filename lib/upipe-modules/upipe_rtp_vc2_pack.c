@@ -395,6 +395,16 @@ static int output_packet(struct upipe *upipe, struct uref *uref, struct upump **
     if (set_marker)
         rtp_set_marker(dst);
 
+    /* FIXME: use the right clock.  Need to get and store the timestamp of the
+     * uref at the start of the picture.  The RTP VC2 draft says the timestamp
+     * of picture packet should the the same. */
+    uint64_t pts = 0;
+    if (!ubase_check(uref_clock_get_pts_prog(uref, &pts))) {
+        upipe_err(upipe, "error getting pts_prog");
+        return UBASE_ERR_UNKNOWN;
+    }
+    rtp_set_timestamp(dst, pts/300);
+
     /* sequence number */
     rtp_set_seqnum(dst, rtp_vc2_pack->sequence_number);
     /* extended sequence number */

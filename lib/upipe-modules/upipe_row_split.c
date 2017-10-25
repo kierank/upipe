@@ -269,7 +269,7 @@ static bool upipe_row_split_handle(struct upipe *upipe, struct uref *uref,
     }
 
     uint64_t dts = 0;
-    if (!ubase_check(uref_clock_get_dts_prog(uref, &dts))) {
+    if (!ubase_check(uref_clock_get_pts_prog(uref, &dts))) {
         upipe_err(upipe, "unable to get clock");
         uref_dump(uref, upipe->uprobe);
         uref_free(uref);
