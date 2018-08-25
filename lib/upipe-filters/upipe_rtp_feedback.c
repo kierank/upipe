@@ -397,7 +397,8 @@ static void upipe_rtpfb_timer_lost(struct upump *upump)
                 - check the following packets to fill in bitmask
                 - send request in a single batch (multiple FCI)
              */
-            upipe_rtpfb_lost(upipe, expected_seq, seqnum, ssrc);
+            if (upipe_rtpfb->rtpfb_output)
+                upipe_rtpfb_lost(upipe, expected_seq, seqnum, ssrc);
             holes++;
         }
 
@@ -444,7 +445,7 @@ static void upipe_rtpfb_timer(struct upump *upump)
             uint16_t diff = seqnum - upipe_rtpfb->last_output_seqnum - 1;
             if (diff) {
                 upipe_rtpfb->loss += diff;
-                upipe_err_va(upipe, "PKT LOSS: %u -> %"PRIu64" DIFF %hu",
+                upipe_dbg_va(upipe, "PKT LOSS: %u -> %"PRIu64" DIFF %hu",
                         upipe_rtpfb->last_output_seqnum, seqnum, diff);
             }
         }
@@ -731,7 +732,7 @@ static bool upipe_rtpfb_insert_inner(struct upipe *upipe, struct uref *uref,
     /* if there's no previous packet we're too late */
     struct uchain *uchain = uref_to_uchain(next);
     if (unlikely(ulist_is_first(&upipe_rtpfb->queue, uchain))) {
-        upipe_err_va(upipe,
+        upipe_dbg_va(upipe,
                 "LATE packet drop: Expected %u, got %hu, didn't insert after %"PRIu64,
                 upipe_rtpfb->expected_seqnum, seqnum, next_seqnum);
         uref_free(uref);
@@ -815,6 +816,9 @@ static void upipe_rtpfb_handle_sr(struct upipe *upipe, struct uref *uref)
     upipe_rtpfb->sr_cr = cr;
 
     uref_block_peek_unmap(uref, 0, sr_buf, sr);
+
+    if (!upipe_rtpfb->rtpfb_output)
+        return;
 
     upipe_rtpfb_send_rr(upipe);
     upipe_rtpfb_send_xr(upipe);
