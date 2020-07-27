@@ -258,7 +258,7 @@ static int probe_src(struct uprobe *uprobe, struct upipe *inner,
 
     switch (event) {
     case UPROBE_SOURCE_END:
-        upipe_notice(upipe, "stopped");
+        upipe_dbg(upipe, "stopped");
         upipe_hls_playlist->playing = false;
         return upipe_hls_playlist_throw_item_end(upipe);
     }
@@ -565,6 +565,15 @@ static int upipe_hls_playlist_update_flow_def(struct upipe *upipe)
                                      upipe_hls_playlist->flow_def);
 }
 
+/** @This throws a need reload event.
+ *
+ * @param upipe description structure of the pipe
+ */
+static void upipe_hls_playlist_need_reload(struct upipe *upipe)
+{
+    UBASE_FATAL(upipe, upipe_hls_playlist_throw_need_reload(upipe));
+}
+
 /** @internal @This plays an URI.
  *
  * @param upipe description structure of the pipe
@@ -585,8 +594,26 @@ static int upipe_hls_playlist_play_uri(struct upipe *upipe,
     char uri[len + 1];
     UBASE_RETURN(uuri_to_buffer(uuri, uri, sizeof (uri)));
 
-    upipe_notice_va(upipe, "play next item sequence %"PRIu64" %s",
-                    upipe_hls_playlist->index, uri);
+    uint64_t media_sequence = 0;
+    uref_m3u_playlist_flow_get_media_sequence(input_flow_def, &media_sequence);
+    uint64_t last_sequence = media_sequence;
+    struct uchain *uchain;
+    uint64_t total_duration = 0;
+    ulist_foreach(&upipe_hls_playlist->items, uchain) {
+        if (last_sequence >= upipe_hls_playlist->index) {
+            struct uref *uref = uref_from_uchain(uchain);
+            uint64_t duration = 0;
+            uref_m3u_playlist_get_seq_duration(uref, &duration);
+            total_duration += duration;
+        }
+        last_sequence++;
+    }
+    upipe_notice_va(upipe, "play next item sequence "
+                    "%"PRIu64" in %"PRIu64" - %"PRIu64" "
+                    "buffer %.2f s %s",
+                    upipe_hls_playlist->index, media_sequence,
+                    last_sequence - 1,
+                    (float)total_duration / (float)(UCLOCK_FREQ), uri);
 
     struct uref *flow_def = upipe_hls_playlist->flow_def;
     if (ubase_check(uref_flow_match_def(flow_def, "block.aes."))) {
@@ -613,18 +640,21 @@ static int upipe_hls_playlist_play_uri(struct upipe *upipe,
             uprobe_use(&upipe_hls_playlist->probe_src),
             UPROBE_LOG_VERBOSE, "src"));
     UBASE_ALLOC_RETURN(inner);
-    UBASE_RETURN(upipe_hls_playlist_set_src(upipe, inner));
     UBASE_RETURN(upipe_set_output(inner, upipe_hls_playlist->setflowdef));
-
     UBASE_RETURN(upipe_set_uri(inner, uri));
+    UBASE_RETURN(upipe_hls_playlist_set_src(upipe, inner));
 
     uint64_t range_off = 0;
     uref_m3u_playlist_get_byte_range_off(item, &range_off);
     uint64_t range_len = (uint64_t)-1;
     uref_m3u_playlist_get_byte_range_len(item, &range_len);
     UBASE_RETURN(upipe_src_set_range(inner, range_off, range_len));
-    upipe_notice(upipe, "playing");
+    upipe_dbg(upipe, "playing");
     upipe_hls_playlist->playing = true;
+    if (upipe_hls_playlist->index >= last_sequence - 1) {
+        upipe_warn(upipe, "reach the end of the playlist");
+        upipe_hls_playlist_need_reload(upipe);
+    }
     return UBASE_ERR_NONE;
 }
 
@@ -725,7 +755,7 @@ static int _upipe_hls_playlist_play(struct upipe *upipe)
     struct uref *input_flow_def = upipe_hls_playlist->input_flow_def;
 
     if (upipe_hls_playlist->playing) {
-        upipe_notice(upipe, "playlist is already playing");
+        upipe_dbg(upipe, "playlist is already playing");
         return UBASE_ERR_NONE;
     }
 
@@ -886,7 +916,7 @@ static void upipe_hls_playlist_store_input_flow_def(struct upipe *upipe,
 static void upipe_hls_playlist_need_reload_cb(struct upump *upump)
 {
         struct upipe *upipe = upump_get_opaque(upump, struct upipe *);
-        UBASE_FATAL(upipe, upipe_hls_playlist_throw_need_reload(upipe));
+        upipe_hls_playlist_need_reload(upipe);
 }
 
 /** @internal @This sets a new flow definition.
@@ -925,7 +955,7 @@ static int upipe_hls_playlist_set_flow_def(struct upipe *upipe,
     if (!ubase_check(uref_m3u_playlist_flow_get_type(flow_def_dup, &type)) ||
         (strcasecmp(type, "VOD") && strcasecmp(type, "EVENT")) ||
         !ubase_check(uref_m3u_playlist_flow_get_endlist(flow_def_dup))) {
-        upipe_notice(upipe, "playlist need to be reloaded");
+        upipe_dbg(upipe, "playlist need to be reloaded");
 
         uint64_t old_media_sequence, media_sequence;
         if (!upipe_hls_playlist->input_flow_def ||

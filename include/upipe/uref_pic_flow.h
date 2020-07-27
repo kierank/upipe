@@ -58,6 +58,7 @@ UREF_ATTR_SMALL_UNSIGNED_VA(pic_flow, macropixel_size, "p.macropix[%" PRIu8"]",
         size of a compound, uint8_t plane, plane)
 UREF_ATTR_STRING_VA(pic_flow, chroma, "p.chroma[%" PRIu8"]",
         chroma type, uint8_t plane, plane)
+UREF_ATTR_STRING(pic_flow, surface_type, "p.surface_type", surface type)
 
 UREF_ATTR_RATIONAL(pic_flow, fps, "p.fps", frames per second)
 UREF_ATTR_SMALL_UNSIGNED(pic_flow, hmprepend, "p.hmprepend",
@@ -91,6 +92,7 @@ UREF_ATTR_STRING_SH(pic_flow, transfer_characteristics,
         UDICT_TYPE_PIC_TRANSFER_CHARACTERISTICS, transfer characteristics)
 UREF_ATTR_STRING_SH(pic_flow, matrix_coefficients,
         UDICT_TYPE_PIC_MATRIX_COEFFICIENTS, matrix coefficients)
+UREF_ATTR_VOID(pic_flow, sepfields, "p.separate_fields", whether the flow will send separate fields);
 
 /* SMPTE-2016 (AFD) */
 UREF_ATTR_SMALL_UNSIGNED(pic_flow, afd, "p.afd", Active Format Description)

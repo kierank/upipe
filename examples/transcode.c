@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2014 OpenHeadend S.A.R.L.
+ * Copyright (C) 2012-2018 OpenHeadend S.A.R.L.
  *
  * Authors: Benjamin Cohen
  *
@@ -63,6 +63,8 @@
 #include <upipe-av/upipe_avformat_sink.h>
 #include <upipe-av/upipe_avcodec_decode.h>
 #include <upipe-av/upipe_avcodec_encode.h>
+#include <upipe-av/upipe_avfilter.h>
+#include <upipe-av/uref_avfilter_flow.h>
 #include <upipe-swresample/upipe_swr.h>
 #include <upipe-swscale/upipe_sws.h>
 #include <upipe-filters/upipe_filter_format.h>
@@ -93,7 +95,9 @@ struct es_conf {
     struct uchain uchain;
     uint64_t id;
     const char *codec;
+    const char *filters;
     struct udict *options;
+    struct upipe *filter_out;
 };
 
 enum uprobe_log_level loglevel = UPROBE_LOG_LEVEL;
@@ -101,11 +105,14 @@ struct uref_mgr *uref_mgr;
 
 struct upipe_mgr *upipe_avcdec_mgr;
 struct upipe_mgr *upipe_avcenc_mgr;
+struct upipe_mgr *upipe_avfilt_mgr;
 struct upipe_mgr *upipe_ffmt_mgr;
 struct upipe_mgr *upipe_null_mgr;
 struct upipe_mgr *upipe_noclock_mgr;
 
 static bool file_mode;
+
+static const char *hw_accel;
 
 static struct uprobe *logger;
 static struct upipe *avfsrc;
@@ -113,13 +120,15 @@ static struct upipe *avfsink;
 struct uchain eslist;
 
 static void usage(const char *argv0) {
-    fprintf(stderr, "Usage: %s [-d] [-F] [-m <mime>] [-f <format>] [-p <id> -c <codec> [-o <option=value>] ...] ... <source file> <sink file>\n", argv0);
+    fprintf(stderr, "Usage: %s [-d] [-F] [-m <mime>] [-f <format>] [-p <id> -c <codec> [-x <hwaccel>] [-g <filters>] [-o <option=value>] ...] ... <source file> <sink file>\n", argv0);
     fprintf(stderr, "   -d: show more debug logs\n");
     fprintf(stderr, "   -F: file mode\n");
     fprintf(stderr, "   -f: output format name\n");
     fprintf(stderr, "   -m: output mime type\n");
     fprintf(stderr, "   -p: add stream with id\n");
     fprintf(stderr, "   -c: stream encoder\n");
+    fprintf(stderr, "   -x: decoder hw accel\n");
+    fprintf(stderr, "   -g: filter graph\n");
     fprintf(stderr, "   -o: encoder option (key=value)\n");
     exit(EXIT_FAILURE);
 }
@@ -211,6 +220,7 @@ static void es_conf_clean(struct uchain *list)
     ulist_delete_foreach (list, uchain, uchain_tmp) {
         ulist_delete(uchain);
         struct es_conf *conf = es_conf_from_uchain(uchain);
+        upipe_release(conf->filter_out);
         udict_free(conf->options);
         free(conf);
     }
@@ -291,6 +301,14 @@ static int catch_demux(struct uprobe *uprobe, struct upipe *upipe,
             upipe_release(decoder);
             incoming = decoder;
 
+            /* hw config */
+            if (!ubase_check(upipe_avcdec_set_hw_config(decoder,
+                                                        hw_accel,
+                                                        NULL))) {
+                upipe_err_va(upipe, "hw config unsupported: %s", hw_accel);
+                exit(EXIT_FAILURE);
+            }
+
             /* stream type */
             const char *ffmt_def = NULL;
             if (strstr(def, ".sound.")) {
@@ -302,6 +320,69 @@ static int catch_demux(struct uprobe *uprobe, struct upipe *upipe,
                              id, def);
                 exit(EXIT_FAILURE);
             }
+            /* filtering */
+            if (conf->filters != NULL) {
+                /* avfilter */
+                struct upipe *avfilt = upipe_void_alloc(
+                    upipe_avfilt_mgr,
+                    uprobe_pfx_alloc(uprobe_use(logger), loglevel, "avfilt"));
+                assert(avfilt);
+
+                struct uref *avfilt_input_flow = uref_alloc_control(uref_mgr);
+                ubase_assert(uref_avfilt_flow_set_name(avfilt_input_flow,
+                                                       "in"));
+
+                struct upipe *avfilt_input =
+                    upipe_flow_alloc_output_sub(
+                        incoming,
+                        avfilt,
+                        uprobe_pfx_alloc_va(uprobe_use(logger),
+                                            loglevel, "filtin %"PRIu64, id),
+                        avfilt_input_flow);
+                assert(avfilt_input != NULL);
+                uref_free(avfilt_input_flow);
+                upipe_release(avfilt_input);
+
+                struct uref *avfilt_output_flow = uref_alloc_control(uref_mgr);
+                ubase_assert(uref_avfilt_flow_set_name(avfilt_output_flow,
+                                                       "out"));
+                struct upipe *avfilt_output =
+                    upipe_flow_alloc_sub(
+                        avfilt,
+                        uprobe_pfx_alloc_va(uprobe_use(logger),
+                                            loglevel, "filtout %"PRIu64, id),
+                        avfilt_output_flow);
+                assert(avfilt_output != NULL);
+                uref_free(avfilt_output_flow);
+                if (!file_mode)
+                    upipe_attach_uclock(avfilt_output);
+                if (conf->filter_out)
+                    upipe_release(conf->filter_out);
+                conf->filter_out = avfilt_output;
+                upipe_release(avfilt);
+
+                incoming = avfilt_output;
+
+                if (unlikely(!ubase_check(
+                            upipe_avfilt_set_filters_desc(avfilt,
+                                                          conf->filters)))) {
+                    upipe_err_va(upipe, "cannot set filters for %"PRIu64" (%s)",
+                                 id, def);
+                    exit(EXIT_FAILURE);
+                }
+
+                /* create system timestamps when in file mode */
+                if (file_mode) {
+                    struct upipe *noclock = upipe_void_alloc_output(
+                        incoming,
+                        upipe_noclock_mgr,
+                        uprobe_pfx_alloc_va(uprobe_use(logger),
+                                            loglevel, "noclock filt %"PRIu64, id));
+                    upipe_release(noclock);
+                    incoming = noclock;
+                }
+            }
+
             /* format conversion */
             struct uref *ffmt_flow = uref_alloc_control(uref_mgr);
             uref_flow_set_def(ffmt_flow, ffmt_def);
@@ -330,6 +411,11 @@ static int catch_demux(struct uprobe *uprobe, struct upipe *upipe,
                 upipe_avcenc_mgr,
                 uprobe_pfx_alloc_va(uprobe_use(logger),
                                     loglevel, "enc %"PRIu64, id), flow);
+            if (encoder == NULL) {
+                upipe_err_va(upipe, "could not allocate encoder %"PRIu64, id);
+                exit(EXIT_FAILURE);
+            }
+
             upipe_release(encoder);
             uref_free(flow);
             if (strstr(def, ".pic.")) {
@@ -391,7 +477,7 @@ int main(int argc, char *argv[])
     ulist_init(&eslist);
 
     /* parse options */
-    while ((opt = getopt(argc, argv, "dFm:f:p:c:o:")) != -1) {
+    while ((opt = getopt(argc, argv, "dFm:f:p:c:g:o:x:")) != -1) {
         switch(opt) {
             case 'd':
                 if (loglevel > 0) loglevel--;
@@ -405,6 +491,9 @@ int main(int argc, char *argv[])
             case 'f':
                 format = optarg;
                 break;
+            case 'x':
+                hw_accel = optarg;
+                break;
 
             case 'p': {
                 uint64_t pid = strtoull(optarg, NULL, 0);
@@ -414,6 +503,11 @@ int main(int argc, char *argv[])
             case 'c': {
                 check_exit(es_cur, "no stream id specified\n");
                 es_cur->codec = optarg;
+                break;
+            }
+            case 'g': {
+                check_exit(es_cur, "no stream id specified\n");
+                es_cur->filters = optarg;
                 break;
             }
             case 'o': {
@@ -456,7 +550,8 @@ int main(int argc, char *argv[])
     assert(logger != NULL);
     uprobe_init(&uprobe_demux_s, catch_demux, uprobe_use(logger));
 
-    upipe_av_init(false, uprobe_use(logger));
+    upipe_av_init(false, uprobe_pfx_alloc(uprobe_use(logger),
+                                          UPROBE_LOG_VERBOSE, "av"));
 
     /* sighandler */
     struct upump *sigint_pump = upump_alloc_signal(upump_mgr, sighandler,
@@ -475,6 +570,7 @@ int main(int argc, char *argv[])
     struct upipe_mgr *upipe_sws_mgr = upipe_sws_mgr_alloc();
     upipe_avcdec_mgr = upipe_avcdec_mgr_alloc();
     upipe_avcenc_mgr = upipe_avcenc_mgr_alloc();
+    upipe_avfilt_mgr = upipe_avfilt_mgr_alloc();
     upipe_ffmt_mgr = upipe_ffmt_mgr_alloc();
     upipe_ffmt_mgr_set_sws_mgr(upipe_ffmt_mgr, upipe_sws_mgr);
     upipe_ffmt_mgr_set_swr_mgr(upipe_ffmt_mgr, upipe_swr_mgr);
@@ -520,6 +616,7 @@ int main(int argc, char *argv[])
 
     upipe_mgr_release(upipe_null_mgr);
     upipe_mgr_release(upipe_noclock_mgr);
+    upipe_mgr_release(upipe_avfilt_mgr);
     upipe_mgr_release(upipe_ffmt_mgr);
     upipe_mgr_release(upipe_sws_mgr); /* nop */
     upipe_mgr_release(upipe_swr_mgr); /* nop */
