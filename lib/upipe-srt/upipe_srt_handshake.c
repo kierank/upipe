@@ -380,7 +380,7 @@ static void upipe_srt_handshake_timer(struct upump *upump)
 
     uint64_t now = uclock_now(upipe_srt_handshake->uclock);
 
-    if (now - upipe_srt_handshake->last_hs_sent < UCLOCK_FREQ / 10) {
+    if (now - upipe_srt_handshake->last_hs_sent < UCLOCK_FREQ / 4) {
         return;
     }
 
