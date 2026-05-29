@@ -97,6 +97,122 @@ int uref_ts_scte35_desc_get_seg(struct uref *uref,
     return UBASE_ERR_NONE;
 }
 
+/** @internal @This decodes segmentation descriptor fields into a uref.
+ *
+ * @param out uref to fill
+ * @param desc pointer to the raw splice descriptor (including header)
+ * @param length length after the splice descriptor header has been consumed
+ * @return an error code
+ */
+static int uref_ts_scte35_decode_seg_desc(struct uref *out,
+                                          const uint8_t *desc,
+                                          size_t length,
+                                          uint64_t n)
+{
+    if (length < SCTE35_SEG_DESC_HEADER_SIZE)
+        return UBASE_ERR_INVALID;
+    length -= SCTE35_SEG_DESC_HEADER_SIZE;
+
+    uint32_t seg_event_id = scte35_seg_desc_get_event_id(desc);
+    bool cancel = scte35_seg_desc_has_cancel(desc);
+    uref_ts_scte35_desc_seg_set_event_id(out, seg_event_id, n);
+    if (cancel) {
+        uref_ts_scte35_desc_seg_set_cancel(out, n);
+        return UBASE_ERR_NONE;
+    }
+
+    if (length < SCTE35_SEG_DESC_NO_CANCEL_SIZE)
+        return UBASE_ERR_INVALID;
+    length -= SCTE35_SEG_DESC_NO_CANCEL_SIZE;
+
+    bool has_delivery_not_restricted =
+        scte35_seg_desc_has_delivery_not_restricted(desc);
+    if (!has_delivery_not_restricted) {
+        bool has_web_delivery_allowed =
+            scte35_seg_desc_has_web_delivery_allowed(desc);
+        bool has_no_regional_blackout =
+            scte35_seg_desc_has_no_regional_blackout(desc);
+        bool has_archive_allowed =
+            scte35_seg_desc_has_archive_allowed(desc);
+        uint8_t device_restrictions =
+            scte35_seg_desc_get_device_restrictions(desc);
+        if (has_web_delivery_allowed)
+            uref_ts_scte35_desc_seg_set_web(out, n);
+        if (has_no_regional_blackout)
+            uref_ts_scte35_desc_seg_set_no_regional_blackout(out, n);
+        if (has_archive_allowed)
+            uref_ts_scte35_desc_seg_set_archive(out, n);
+        uref_ts_scte35_desc_seg_set_device(out, device_restrictions, n);
+    } else {
+        uref_ts_scte35_desc_seg_set_delivery_not_restricted(out, n);
+    }
+
+    bool has_program_seg = scte35_seg_desc_has_program_seg(desc);
+    if (!has_program_seg) {
+        if (length < SCTE35_SEG_DESC_NO_PROG_SEG_SIZE)
+            return UBASE_ERR_INVALID;
+        length -= SCTE35_SEG_DESC_NO_PROG_SEG_SIZE;
+
+        uint8_t nb_comp = scte35_seg_desc_get_component_count(desc);
+        if (length < nb_comp * SCTE35_SEG_DESC_COMPONENT_SIZE)
+            return UBASE_ERR_INVALID;
+        length -= nb_comp * SCTE35_SEG_DESC_COMPONENT_SIZE;
+        uref_ts_scte35_desc_seg_set_nb_comp(out, nb_comp, n);
+        for (uint8_t j = 0; j < nb_comp; j++) {
+            const uint8_t *comp = scte35_seg_desc_get_component(desc, j);
+            uint8_t comp_tag = scte35_seg_desc_component_get_tag(comp);
+            uint64_t pts_off = scte35_seg_desc_component_get_pts_off(comp);
+            uref_ts_scte35_desc_seg_comp_set_tag(out, comp_tag, n, j);
+            uref_ts_scte35_desc_seg_comp_set_pts_off(out, pts_off, n, j);
+        }
+    }
+
+    bool has_duration = scte35_seg_desc_has_duration(desc);
+    if (has_duration) {
+        if (length < SCTE35_SEG_DESC_DURATION_SIZE)
+            return UBASE_ERR_INVALID;
+        length -= SCTE35_SEG_DESC_DURATION_SIZE;
+
+        uint64_t duration = scte35_seg_desc_get_duration(desc);
+        uref_clock_set_duration(out, duration * CLOCK_SCALE);
+    }
+
+    uint8_t upid_type = scte35_seg_desc_get_upid_type(desc);
+    uint8_t upid_length = scte35_seg_desc_get_upid_length(desc);
+    if (length < upid_length)
+        return UBASE_ERR_INVALID;
+    length -= upid_length;
+    const uint8_t *upid = scte35_seg_desc_get_upid(desc);
+    uint8_t type_id = scte35_seg_desc_get_type_id(desc);
+    uint8_t num = scte35_seg_desc_get_num(desc);
+    uint8_t expected = scte35_seg_desc_get_expected(desc);
+    if (upid_type || upid_length) {
+        uref_ts_scte35_desc_seg_set_upid_type(out, upid_type, n);
+        uref_ts_scte35_desc_seg_set_upid_type_name(
+            out, scte35_seg_desc_upid_type_to_str(upid_type), n);
+        uref_ts_scte35_desc_seg_set_upid_length(out, upid_length, n);
+        uref_ts_scte35_desc_seg_set_upid(out, upid, upid_length, n);
+    }
+    uref_ts_scte35_desc_seg_set_type_id(out, type_id, n);
+    uref_ts_scte35_desc_seg_set_type_id_name(
+        out, scte35_seg_desc_type_id_to_str(type_id), n);
+    uref_ts_scte35_desc_seg_set_num(out, num, n);
+    uref_ts_scte35_desc_seg_set_expected(out, expected, n);
+    if (length >= SCTE35_SEG_DESC_SUB_SEG_SIZE) {
+        length -= SCTE35_SEG_DESC_SUB_SEG_SIZE;
+        if (scte35_seg_desc_has_sub_num(desc)) {
+            uint8_t sub_num = scte35_seg_desc_get_sub_num(desc);
+            uref_ts_scte35_desc_seg_set_sub_num(out, sub_num, n);
+        }
+        if (scte35_seg_desc_has_sub_expected(desc)) {
+            uint8_t sub_expected = scte35_seg_desc_get_sub_expected(desc);
+            uref_ts_scte35_desc_seg_set_sub_expected(out, sub_expected, n);
+        }
+    }
+
+    return UBASE_ERR_NONE;
+}
+
 /** @This allocates an uref describing a SCTE35 descriptor.
  *
  * @param uref input buffer
@@ -138,131 +254,10 @@ struct uref *uref_ts_scte35_extract_desc(struct uref *uref, uint64_t at)
         }
 
         case SCTE35_SPLICE_DESC_TAG_SEG: {
-            if (length < SCTE35_SEG_DESC_HEADER_SIZE) {
+            if (!ubase_check(uref_ts_scte35_decode_seg_desc(out, desc,
+                                                            length, 0))) {
                 uref_free(out);
                 return NULL;
-            }
-            length -= SCTE35_SEG_DESC_HEADER_SIZE;
-
-            uint32_t seg_event_id = scte35_seg_desc_get_event_id(desc);
-            bool cancel = scte35_seg_desc_has_cancel(desc);
-            uref_ts_scte35_desc_seg_set_event_id(out, seg_event_id);
-            if (cancel)
-                uref_ts_scte35_desc_seg_set_cancel(out);
-            else {
-                if (length < SCTE35_SEG_DESC_NO_CANCEL_SIZE) {
-                    uref_free(out);
-                    return NULL;
-                }
-                length -= SCTE35_SEG_DESC_NO_CANCEL_SIZE;
-
-                bool has_delivery_not_restricted =
-                    scte35_seg_desc_has_delivery_not_restricted(desc);
-                if (!has_delivery_not_restricted) {
-                    bool has_web_delivery_allowed =
-                        scte35_seg_desc_has_web_delivery_allowed(desc);
-                    bool has_no_regional_blackout =
-                        scte35_seg_desc_has_no_regional_blackout(desc);
-                    bool has_archive_allowed =
-                        scte35_seg_desc_has_archive_allowed(desc);
-                    uint8_t device_restrictions =
-                        scte35_seg_desc_get_device_restrictions(desc);
-                    if (has_web_delivery_allowed)
-                        uref_ts_scte35_desc_seg_set_web(out);
-                    if (has_no_regional_blackout)
-                        uref_ts_scte35_desc_seg_set_no_regional_blackout(
-                            out);
-                    if (has_archive_allowed)
-                        uref_ts_scte35_desc_seg_set_archive(out);
-                    uref_ts_scte35_desc_seg_set_device(
-                        out, device_restrictions);
-                }
-                else
-                    uref_ts_scte35_desc_seg_set_delivery_not_restricted(
-                        out);
-
-                bool has_program_seg =
-                    scte35_seg_desc_has_program_seg(desc);
-                if (!has_program_seg) {
-                    if (length < SCTE35_SEG_DESC_NO_PROG_SEG_SIZE) {
-                        uref_free(out);
-                        return NULL;
-                    }
-                    length -= SCTE35_SEG_DESC_NO_PROG_SEG_SIZE;
-
-                    uint8_t nb_comp =
-                        scte35_seg_desc_get_component_count(desc);
-                    if (length < nb_comp * SCTE35_SEG_DESC_COMPONENT_SIZE) {
-                        uref_free(out);
-                        return NULL;
-                    }
-                    length -= nb_comp * SCTE35_SEG_DESC_COMPONENT_SIZE;
-                    uref_ts_scte35_desc_seg_set_nb_comp(out, nb_comp);
-                    for (uint8_t j = 0; j < nb_comp; j++) {
-                        const uint8_t *comp =
-                            scte35_seg_desc_get_component(desc, j);
-                        uint8_t comp_tag =
-                            scte35_seg_desc_component_get_tag(comp);
-                        uint64_t pts_off =
-                            scte35_seg_desc_component_get_pts_off(comp);
-                        uref_ts_scte35_desc_seg_comp_set_tag(
-                            out, comp_tag, j);
-                        uref_ts_scte35_desc_seg_comp_set_pts_off(
-                            out, pts_off, j);
-                    }
-                }
-
-                bool has_duration = scte35_seg_desc_has_duration(desc);
-                if (has_duration) {
-                    if (length < SCTE35_SEG_DESC_DURATION_SIZE) {
-                        uref_free(out);
-                        return NULL;
-                    }
-                    length -= SCTE35_SEG_DESC_DURATION_SIZE;
-
-                    uint64_t duration = scte35_seg_desc_get_duration(desc);
-                    uref_clock_set_duration(out, duration * CLOCK_SCALE);
-                }
-
-                uint8_t upid_type = scte35_seg_desc_get_upid_type(desc);
-                uint8_t upid_length = scte35_seg_desc_get_upid_length(desc);
-                if (length < upid_length) {
-                    uref_free(out);
-                    return NULL;
-                }
-                length -= upid_length;
-                const uint8_t *upid = scte35_seg_desc_get_upid(desc);
-                uint8_t type_id = scte35_seg_desc_get_type_id(desc);
-                uint8_t num = scte35_seg_desc_get_num(desc);
-                uint8_t expected = scte35_seg_desc_get_expected(desc);
-                if (upid_type || upid_length) {
-                    uref_ts_scte35_desc_seg_set_upid_type(out, upid_type);
-                    uref_ts_scte35_desc_seg_set_upid_type_name(
-                        out, scte35_seg_desc_upid_type_to_str(upid_type));
-                    uref_ts_scte35_desc_seg_set_upid_length(
-                        out, upid_length);
-                    uref_ts_scte35_desc_seg_set_upid(
-                        out, upid, upid_length);
-                }
-                uref_ts_scte35_desc_seg_set_type_id(out, type_id);
-                uref_ts_scte35_desc_seg_set_type_id_name(
-                    out, scte35_seg_desc_type_id_to_str(type_id));
-                uref_ts_scte35_desc_seg_set_num(out, num);
-                uref_ts_scte35_desc_seg_set_expected(out, expected);
-                if (length >= SCTE35_SEG_DESC_SUB_SEG_SIZE) {
-                    length -= SCTE35_SEG_DESC_SUB_SEG_SIZE;
-                    if (scte35_seg_desc_has_sub_num(desc)) {
-                        uint8_t sub_num =
-                            scte35_seg_desc_get_sub_num(desc);
-                        uref_ts_scte35_desc_seg_set_sub_num(out, sub_num);
-                    }
-                    if (scte35_seg_desc_has_sub_expected(desc)) {
-                        uint8_t sub_expected =
-                            scte35_seg_desc_get_sub_expected(desc);
-                        uref_ts_scte35_desc_seg_set_sub_expected(
-                            out, sub_expected);
-                    }
-                }
             }
             break;
         }
@@ -283,6 +278,31 @@ struct uref *uref_ts_scte35_extract_desc(struct uref *uref, uint64_t at)
         }
     }
     return out;
+}
+
+/** @This decodes a raw segmentation splice descriptor into an existing uref.
+ *
+ * @param uref uref to fill with decoded segmentation descriptor attributes
+ * @param desc pointer to the raw splice descriptor (including header)
+ * @param len total length of the descriptor
+ * @return an error code
+ */
+int uref_ts_scte35_fill_seg_desc(struct uref *uref,
+                                  const uint8_t *desc, size_t len,
+                                  uint64_t n)
+{
+    if (len < SCTE35_SPLICE_DESC_HEADER_SIZE)
+        return UBASE_ERR_INVALID;
+    if (scte35_splice_desc_get_tag(desc) != SCTE35_SPLICE_DESC_TAG_SEG)
+        return UBASE_ERR_INVALID;
+    if (scte35_splice_desc_get_identifier(desc) != SCTE35_SPLICE_DESC_IDENTIFIER)
+        return UBASE_ERR_INVALID;
+
+    uref_ts_scte35_desc_set_tag(uref, SCTE35_SPLICE_DESC_TAG_SEG);
+    uref_ts_scte35_desc_set_identifier(uref, SCTE35_SPLICE_DESC_IDENTIFIER);
+
+    len -= SCTE35_SPLICE_DESC_HEADER_SIZE;
+    return uref_ts_scte35_decode_seg_desc(uref, desc, len, n);
 }
 
 /** @This export an uref describing a SCTE35 descriptor.
@@ -306,51 +326,50 @@ int uref_ts_scte35_add_desc(struct uref *dst, struct uref *uref)
         case SCTE35_SPLICE_DESC_TAG_SEG: {
             uint32_t length = 0;
             uint64_t event_id = 0;
-            uref_ts_scte35_desc_seg_get_event_id(uref, &event_id);
-            bool cancel = ubase_check(uref_ts_scte35_desc_seg_get_cancel(uref));
+            uref_ts_scte35_desc_seg_get_event_id(uref, &event_id, 0);
+            bool cancel = ubase_check(uref_ts_scte35_desc_seg_get_cancel(uref, 0));
             bool has_delivery_not_restricted =
                 ubase_check(
-                    uref_ts_scte35_desc_seg_get_delivery_not_restricted(uref));
+                    uref_ts_scte35_desc_seg_get_delivery_not_restricted(uref, 0));
             bool has_web_delivery_allowed =
-                ubase_check(uref_ts_scte35_desc_seg_get_web(uref));
+                ubase_check(uref_ts_scte35_desc_seg_get_web(uref, 0));
             bool has_no_regional_blackout =
                 ubase_check(
-                    uref_ts_scte35_desc_seg_get_no_regional_blackout(
-                        uref));
+                    uref_ts_scte35_desc_seg_get_no_regional_blackout(uref, 0));
             bool has_archive_allowed =
-                ubase_check(uref_ts_scte35_desc_seg_get_archive(uref));
+                ubase_check(uref_ts_scte35_desc_seg_get_archive(uref, 0));
             uint8_t device_restrictions = 3;
             if (!cancel && !has_delivery_not_restricted)
-                uref_ts_scte35_desc_seg_get_device(uref, &device_restrictions);
+                uref_ts_scte35_desc_seg_get_device(uref, &device_restrictions, 0);
             uint8_t nb_comp = 0;
             bool has_program_seg =
-                !ubase_check(uref_ts_scte35_desc_seg_get_nb_comp(uref, &nb_comp));
+                !ubase_check(uref_ts_scte35_desc_seg_get_nb_comp(uref, &nb_comp, 0));
             uint64_t duration = UINT64_MAX;
             bool has_duration =
                 ubase_check(uref_clock_get_duration(uref, &duration));
 
             uint8_t upid_type = 0;
-            uref_ts_scte35_desc_seg_get_upid_type(uref, &upid_type);
+            uref_ts_scte35_desc_seg_get_upid_type(uref, &upid_type, 0);
             const uint8_t *upid = NULL;
             size_t upid_length = 0;
-            uref_ts_scte35_desc_seg_get_upid(uref, &upid, &upid_length);
+            uref_ts_scte35_desc_seg_get_upid(uref, &upid, &upid_length, 0);
 
             uint8_t type_id = 0;
             uint8_t num = 0;
             uint8_t expected = 0;
             if (!cancel) {
-                uref_ts_scte35_desc_seg_get_type_id(uref, &type_id);
-                uref_ts_scte35_desc_seg_get_num(uref, &num);
-                uref_ts_scte35_desc_seg_get_expected(uref, &expected);
+                uref_ts_scte35_desc_seg_get_type_id(uref, &type_id, 0);
+                uref_ts_scte35_desc_seg_get_num(uref, &num, 0);
+                uref_ts_scte35_desc_seg_get_expected(uref, &expected, 0);
             }
             uint8_t sub_num = 0;
             bool has_sub_num =
                 ubase_check(
-                    uref_ts_scte35_desc_seg_get_sub_num(uref, &sub_num));
+                    uref_ts_scte35_desc_seg_get_sub_num(uref, &sub_num, 0));
             uint8_t sub_expected = 0;
             bool has_sub_expected =
                 ubase_check(uref_ts_scte35_desc_seg_get_sub_expected(
-                        uref, &sub_expected));
+                        uref, &sub_expected, 0));
 
             if (!cancel) {
                 length += SCTE35_SEG_DESC_NO_CANCEL_SIZE;
@@ -393,9 +412,9 @@ int uref_ts_scte35_add_desc(struct uref *dst, struct uref *uref)
                 uint8_t comp_tag;
                 uint64_t pts_off;
                 UBASE_RETURN(uref_ts_scte35_desc_seg_comp_get_tag(
-                        uref, &comp_tag, i));
+                        uref, &comp_tag, 0, i));
                 UBASE_RETURN(uref_ts_scte35_desc_seg_comp_get_pts_off(
-                        uref, &pts_off, i));
+                        uref, &pts_off, 0, i));
                 scte35_seg_desc_component_init(comp);
                 scte35_seg_desc_component_set_tag(comp, comp_tag);
                 scte35_seg_desc_component_set_pts_off(comp, pts_off);

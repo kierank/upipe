@@ -63,6 +63,9 @@ int uref_ts_scte35_desc_get_seg(struct uref *uref,
 
 struct uref *uref_ts_scte35_extract_desc(struct uref *uref,
                                          uint64_t descriptor);
+int uref_ts_scte35_fill_seg_desc(struct uref *uref,
+                                  const uint8_t *desc, size_t len,
+                                  uint64_t n);
 int uref_ts_scte35_add_desc(struct uref *uref, struct uref *desc);
 
 #ifdef __cplusplus

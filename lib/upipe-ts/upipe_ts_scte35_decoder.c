@@ -118,9 +118,11 @@ static void upipe_ts_scte35d_parse_descs(struct upipe *upipe, struct uref *uref,
                                          const uint8_t *descl,
                                          uint16_t desclength)
 {
+    uint64_t n = 0;
     descl_each_desc(descl, desclength, desc) {
-        UBASE_FATAL(upipe, uref_ts_flow_add_descriptor(uref,
-                    desc, desc_get_length(desc) + DESC_HEADER_SIZE));
+        size_t len = desc_get_length(desc) + DESC_HEADER_SIZE;
+        UBASE_FATAL(upipe, uref_ts_flow_add_descriptor(uref, desc, len));
+        uref_ts_scte35_fill_seg_desc(uref, desc, len, n++);
     }
 }
 
