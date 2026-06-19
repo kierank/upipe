@@ -409,7 +409,7 @@ static int upipe_zvbidec_set_flow_def(struct upipe *upipe, struct uref *flow_def
  * @param channel caption channel (0-7)
  * @return an error code
  */
-static int upipe_zvbidec_set_channel(struct upipe *upipe, int channel)
+static int _upipe_zvbidec_set_channel(struct upipe *upipe, int channel)
 {
     struct upipe_zvbidec *upipe_zvbidec = upipe_zvbidec_from_upipe(upipe);
     if (channel < UPIPE_ZVBIDEC_CC1 || channel > UPIPE_ZVBIDEC_TEXT4)
@@ -424,7 +424,7 @@ static int upipe_zvbidec_set_channel(struct upipe *upipe, int channel)
  * @param channel_p filled in with the caption channel
  * @return an error code
  */
-static int upipe_zvbidec_get_channel(struct upipe *upipe, int *channel_p)
+static int _upipe_zvbidec_get_channel(struct upipe *upipe, int *channel_p)
 {
     struct upipe_zvbidec *upipe_zvbidec = upipe_zvbidec_from_upipe(upipe);
     if (channel_p != NULL)
@@ -451,12 +451,12 @@ static int upipe_zvbidec_control(struct upipe *upipe, int command, va_list args)
         case UPIPE_ZVBIDEC_SET_CHANNEL: {
             UBASE_SIGNATURE_CHECK(args, UPIPE_ZVBIDEC_SIGNATURE);
             int channel = va_arg(args, int);
-            return upipe_zvbidec_set_channel(upipe, channel);
+            return _upipe_zvbidec_set_channel(upipe, channel);
         }
         case UPIPE_ZVBIDEC_GET_CHANNEL: {
             UBASE_SIGNATURE_CHECK(args, UPIPE_ZVBIDEC_SIGNATURE);
             int *channel_p = va_arg(args, int *);
-            return upipe_zvbidec_get_channel(upipe, channel_p);
+            return _upipe_zvbidec_get_channel(upipe, channel_p);
         }
         default:
             return UBASE_ERR_UNHANDLED;
