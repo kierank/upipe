@@ -277,11 +277,15 @@ static void upipe_zvbidec_render(struct upipe *upipe, struct upump **upump_p)
     vbi_draw_cc_page_region(&pg, VBI_PIXFMT_RGBA32_LE, buf, (int)stride,
                             0, 0, pg.columns, pg.rows);
 
-    /* Punch out alpha for blank (space) cells so they don't cover the video. */
+    /* Punch out alpha for cells outside the caption banner so they don't
+     * cover the video. vbi_fetch_cc_page marks these VBI_TRANSPARENT_SPACE;
+     * spaces *within* a caption row keep VBI_OPAQUE and their black background
+     * box, so we must key off opacity, not the (space) unicode value. */
     for (int r = 0; r < pg.rows; r++) {
         for (int c = 0; c < pg.columns; c++) {
             const vbi_char *ac = &pg.text[r * pg.columns + c];
-            if (ac->unicode == 0x20 || ac->unicode == 0) {
+            if (ac->opacity == VBI_TRANSPARENT_SPACE ||
+                ac->opacity == VBI_TRANSPARENT_FULL) {
                 for (int y = 0; y < CCH; y++) {
                     uint8_t *px = buf + (r * CCH + y) * stride + c * CCW * 4;
                     for (int x = 0; x < CCW; x++)
