@@ -277,19 +277,51 @@ static void upipe_zvbidec_render(struct upipe *upipe, struct upump **upump_p)
     vbi_draw_cc_page_region(&pg, VBI_PIXFMT_RGBA32_LE, buf, (int)stride,
                             0, 0, pg.columns, pg.rows);
 
-    /* Punch out alpha for cells outside the caption banner so they don't
-     * cover the video. vbi_fetch_cc_page marks these VBI_TRANSPARENT_SPACE;
-     * spaces *within* a caption row keep VBI_OPAQUE and their black background
-     * box, so we must key off opacity, not the (space) unicode value. */
+    /* vbi_draw_cc_page_region ignores the per-cell opacity and draws every
+     * cell fully opaque, so we apply transparency afterward, per cell:
+     *
+     *   VBI_OPAQUE           - solid black box, leave as drawn
+     *   VBI_TRANSPARENT_SPACE- empty placeholder (the glyph is a space), the
+     *                          whole cell shows video
+     *   VBI_TRANSPARENT_FULL - text on video: glyph opaque, background shows
+     *                          video
+     *   VBI_SEMI_TRANSPARENT - glyph opaque, background translucent
+     *
+     * The caption font is a 1-bit bitmap (no anti-aliasing), so a pixel is
+     * either the foreground (glyph) or the background colour exactly. We
+     * detect background pixels by comparing against the cell's background
+     * colour and lower only their alpha; glyph pixels stay opaque. */
     for (int r = 0; r < pg.rows; r++) {
         for (int c = 0; c < pg.columns; c++) {
             const vbi_char *ac = &pg.text[r * pg.columns + c];
-            if (ac->opacity == VBI_TRANSPARENT_SPACE ||
-                ac->opacity == VBI_TRANSPARENT_FULL) {
-                for (int y = 0; y < CCH; y++) {
-                    uint8_t *px = buf + (r * CCH + y) * stride + c * CCW * 4;
-                    for (int x = 0; x < CCW; x++)
-                        px[x * 4 + 3] = 0;
+
+            uint8_t bg_alpha;
+            switch (ac->opacity) {
+                case VBI_OPAQUE:
+                    continue;
+                case VBI_SEMI_TRANSPARENT:
+                    bg_alpha = 0x80;
+                    break;
+                case VBI_TRANSPARENT_FULL:
+                case VBI_TRANSPARENT_SPACE:
+                default:
+                    bg_alpha = 0;
+                    break;
+            }
+
+            /* vbi_rgba is 0xAABBGGRR, i.e. R, G, B, A in memory like the
+             * RGBA32_LE buffer. */
+            vbi_rgba bg = pg.color_map[ac->background];
+            uint8_t bg_r = bg & 0xff;
+            uint8_t bg_g = (bg >> 8) & 0xff;
+            uint8_t bg_b = (bg >> 16) & 0xff;
+
+            for (int y = 0; y < CCH; y++) {
+                uint8_t *px = buf + (r * CCH + y) * stride + c * CCW * 4;
+                for (int x = 0; x < CCW; x++) {
+                    uint8_t *p = px + x * 4;
+                    if (p[0] == bg_r && p[1] == bg_g && p[2] == bg_b)
+                        p[3] = bg_alpha;
                 }
             }
         }
