@@ -358,64 +358,65 @@ static void upipe_zvbidec_input(struct upipe *upipe, struct uref *uref,
 {
     struct upipe_zvbidec *upipe_zvbidec = upipe_zvbidec_from_upipe(upipe);
 
+    /* Build sliced VBI from the CEA-608 (line 21) cc pairs, if any. cc_type 0
+     * and 1 are field 1 and field 2; cc_type 2 and 3 are CEA-708 DTVCC, which
+     * libzvbi does not decode. */
+    vbi_sliced sliced[2];
+    sliced[0].id = VBI_SLICED_CAPTION_525_F1;
+    sliced[0].line = 21;
+    memset(sliced[0].data, 0, sizeof(sliced[0].data));
+    sliced[1].id = VBI_SLICED_CAPTION_525_F2;
+    sliced[1].line = 284;
+    memset(sliced[1].data, 0, sizeof(sliced[1].data));
+    bool present[2] = { false, false };
+
     const uint8_t *pic_data = NULL;
     size_t pic_data_size = 0;
     uref_pic_get_cea_708(uref, &pic_data, &pic_data_size);
+    for (size_t i = 0; i < pic_data_size / 3; i++) {
+        const uint8_t valid = (pic_data[3 * i] >> 2) & 1;
+        const uint8_t cc_type = pic_data[3 * i] & 0x3;
 
-    if (pic_data_size >= 3) {
-        /* Build sliced VBI from the CEA-608 (line 21) cc pairs. cc_type 0 and 1
-         * are field 1 and field 2; cc_type 2 and 3 are CEA-708 DTVCC, which
-         * libzvbi does not decode. */
-        vbi_sliced sliced[2];
-        for (int i = 0; i < 2; i++) {
-            memset(sliced[i].data, 0, sizeof(sliced[i].data));
-            sliced[i].id = VBI_SLICED_NONE;
-        }
-        sliced[0].id = VBI_SLICED_CAPTION_525_F1;
-        sliced[0].line = 21;
-        sliced[1].id = VBI_SLICED_CAPTION_525_F2;
-        sliced[1].line = 284;
-        bool present[2] = { false, false };
-
-        for (size_t i = 0; i < pic_data_size / 3; i++) {
-            const uint8_t valid = (pic_data[3 * i] >> 2) & 1;
-            const uint8_t cc_type = pic_data[3 * i] & 0x3;
-
-            if (valid && cc_type < 2) {
-                memcpy(sliced[cc_type].data, &pic_data[3 * i + 1], 2);
-                present[cc_type] = true;
-            }
-        }
-
-        /* Pack the present fields contiguously for libzvbi. */
-        vbi_sliced decode[2];
-        int lines = 0;
-        for (int i = 0; i < 2; i++)
-            if (present[i])
-                decode[lines++] = sliced[i];
-
-        if (lines) {
-            /* libzvbi wants a monotonically increasing timestamp in seconds. */
-            double ts;
-            uint64_t date;
-            int type;
-            uref_clock_get_date_prog(uref, &date, &type);
-            if (date != UINT64_MAX)
-                ts = (double)date / UCLOCK_FREQ;
-            else
-                ts = upipe_zvbidec->timestamp + 1. / 30;
-            if (ts <= upipe_zvbidec->timestamp)
-                ts = upipe_zvbidec->timestamp + 1. / 30;
-            upipe_zvbidec->timestamp = ts;
-
-            upipe_zvbidec->uref = uref;
-            upipe_zvbidec->page_dirty = false;
-            vbi_decode(upipe_zvbidec->vbi, decode, lines, ts);
-            if (upipe_zvbidec->page_dirty)
-                upipe_zvbidec_render(upipe, upump_p);
-            upipe_zvbidec->uref = NULL;
+        if (valid && cc_type < 2) {
+            memcpy(sliced[cc_type].data, &pic_data[3 * i + 1], 2);
+            present[cc_type] = true;
         }
     }
+
+    /* Pack the present fields contiguously for libzvbi. */
+    vbi_sliced decode[2];
+    int lines = 0;
+    for (int i = 0; i < 2; i++)
+        if (present[i])
+            decode[lines++] = sliced[i];
+
+    /* libzvbi wants a monotonically increasing timestamp in seconds, and
+     * vbi_decode() must be called for *every* frame -- including those that
+     * carry no caption data (lines == 0) -- so its internal clock advances one
+     * frame at a time. If we only called it on caption-bearing frames, the gap
+     * across any span without captions would exceed libzvbi's ~85 ms reset
+     * threshold and trigger vbi_caption_desync(), wiping the caption state.
+     * That silently drops captions on clips whose caption data is not present
+     * on every frame (e.g. invalid-marked padding, or only sparse field-1
+     * pairs among CEA-708 cc_data). */
+    double ts;
+    uint64_t date;
+    int type;
+    uref_clock_get_date_prog(uref, &date, &type);
+    if (date != UINT64_MAX)
+        ts = (double)date / UCLOCK_FREQ;
+    else
+        ts = upipe_zvbidec->timestamp + 1. / 30;
+    if (ts <= upipe_zvbidec->timestamp)
+        ts = upipe_zvbidec->timestamp + 1. / 30;
+    upipe_zvbidec->timestamp = ts;
+
+    upipe_zvbidec->uref = uref;
+    upipe_zvbidec->page_dirty = false;
+    vbi_decode(upipe_zvbidec->vbi, decode, lines, ts);
+    if (upipe_zvbidec->page_dirty)
+        upipe_zvbidec_render(upipe, upump_p);
+    upipe_zvbidec->uref = NULL;
 
     /* The input video is not forwarded; only sub-pictures are emitted. */
     uref_free(uref);
