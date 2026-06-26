@@ -1219,6 +1219,13 @@ static void upipe_avcdec_output_sub(struct upipe *upipe, AVSubtitle *sub,
         /* Decode palettized to bgra */
         for (int i = 0; i < sub->num_rects; i++) {
             AVSubtitleRect *r = sub->rects[i];
+
+            if (unlikely(r->type != SUBTITLE_BITMAP ||
+                         r->data[0] == NULL || r->data[1] == NULL)) {
+                upipe_warn_va(upipe, "skipping non-bitmap subtitle rect %i", i);
+                continue;
+            }
+
             int x = r->x, y = r->y, w = r->w, h = r->h;
 
             if (x >= width) {
@@ -1246,6 +1253,9 @@ static void upipe_avcdec_output_sub(struct upipe *upipe, AVSubtitle *sub,
             uint8_t *dst = buf + 4 * ((width * y) + x);
             uint8_t *src = r->data[0];
             uint8_t *palette = r->data[1];
+            /* Source row stride; may exceed the (possibly cropped) blit width,
+             * so advance src by the real stride rather than by w. */
+            const int src_stride = r->linesize[0];
 
             for (int i = 0; i < h; i++) {
                 for (int j = 0; j < w; j++) {
@@ -1259,7 +1269,7 @@ static void upipe_avcdec_output_sub(struct upipe *upipe, AVSubtitle *sub,
                 }
 
                 dst += width * 4;
-                src += w;
+                src += src_stride;
             }
         }
 
@@ -1514,8 +1524,9 @@ static bool upipe_avcdec_decode_avpkt(struct upipe *upipe, AVPacket *avpkt,
             AVSubtitle subtitle;
             if (avpkt == NULL)
                 avpkt = upipe_avcdec->avpkt;
-            /* store original pointer */
+            /* store original pointer and size */
             void *data = avpkt->data;
+            int size = avpkt->size;
 
             if (context->codec_id == AV_CODEC_ID_DVB_SUBTITLE
                     && avpkt->size >= DVBSUB_HEADER_SIZE) {
@@ -1526,8 +1537,9 @@ static bool upipe_avcdec_decode_avpkt(struct upipe *upipe, AVPacket *avpkt,
             len = avcodec_decode_subtitle2(context,
                     &subtitle, &gotframe, avpkt);
             if (context->codec_id == AV_CODEC_ID_DVB_SUBTITLE) {
-                /* restore original pointer */
+                /* restore original pointer and size */
                 avpkt->data = data;
+                avpkt->size = size;
             }
             if (len < 0)
                 upipe_warn(upipe, "Error while decoding subtitle");
