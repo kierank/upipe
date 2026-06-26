@@ -271,10 +271,25 @@ static void upipe_zvbidec_render(struct upipe *upipe, struct upump **upump_p)
         return;
     }
 
-    /* libzvbi writes every pixel of the page region (transparent cells get a
-     * zero alpha), so the whole visible bitmap is covered. */
+    /* Draw all cells. vbi_draw_cc_page_region renders every cell as fully
+     * opaque (A=255) for CEA-608 regardless of content — it does not honour
+     * the opacity field. We zero the alpha channel for blank cells afterward. */
     vbi_draw_cc_page_region(&pg, VBI_PIXFMT_RGBA32_LE, buf, (int)stride,
                             0, 0, pg.columns, pg.rows);
+
+    /* Punch out alpha for blank (space) cells so they don't cover the video. */
+    for (int r = 0; r < pg.rows; r++) {
+        for (int c = 0; c < pg.columns; c++) {
+            const vbi_char *ac = &pg.text[r * pg.columns + c];
+            if (ac->unicode == 0x20 || ac->unicode == 0) {
+                for (int y = 0; y < CCH; y++) {
+                    uint8_t *px = buf + (r * CCH + y) * stride + c * CCW * 4;
+                    for (int x = 0; x < CCW; x++)
+                        px[x * 4 + 3] = 0;
+                }
+            }
+        }
+    }
 
     ubuf_pic_plane_unmap(ubuf, ZVBIDEC_CHROMA, 0, 0, -1, -1);
 
