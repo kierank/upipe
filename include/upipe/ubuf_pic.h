@@ -603,27 +603,33 @@ static inline int ubuf_pic_blit_alpha10(struct ubuf *dest, struct ubuf *src,
                     real_dst[j] = (real_dst[j] * (0x3ff - alpha) + real_src[j] * alpha) / 0x3ff;
                 }
             } else if (threshold != 0x3ff) {
-                /* This is an on/off blending
-                 * if alpha is over the threshold, we use the subpicture pixel.
-                 */
+                /* This is an on/off blending: if alpha is over the threshold,
+                 * we use the subpicture pixel. Select with an arithmetic mask
+                 * (0xffff when the pixel passes, 0 otherwise) instead of a
+                 * branch or a ternary. The threshold test is data-dependent
+                 * and mispredicts badly, and the compiler refuses to if-convert
+                 * the conditional store into a cmov; the mask has no control
+                 * flow to keep and vectorizes on the contiguous hsub == 1 path
+                 * (compare + blend). */
                 if (alpha == 0x3ff) {
                     if (hsub == 1) {
                         for (int j = 0; j < n; j++) {
-                            if (real_alpha[j] > threshold)
-                                real_dst[j] = real_src[j];
+                            const uint16_t m = (uint16_t)-(int)(real_alpha[j] > threshold);
+                            real_dst[j] = (real_src[j] & m) | (real_dst[j] & (uint16_t)~m);
                         }
                     } else {
                         const uint16_t *ap = real_alpha;
                         for (int j = 0; j < n; j++, ap += hsub) {
-                            if (*ap > threshold)
-                                real_dst[j] = real_src[j];
+                            const uint16_t m = (uint16_t)-(int)(*ap > threshold);
+                            real_dst[j] = (real_src[j] & m) | (real_dst[j] & (uint16_t)~m);
                         }
                     }
                 } else {
                     const uint16_t *ap = real_alpha;
                     for (int j = 0; j < n; j++, ap += hsub) {
                         const uint16_t a = *ap * alpha / 0x3ff;
-                        if (a > threshold) real_dst[j] = real_src[j];
+                        const uint16_t m = (uint16_t)-(int)(a > threshold);
+                        real_dst[j] = (real_src[j] & m) | (real_dst[j] & (uint16_t)~m);
                     }
                 }
             } else {
