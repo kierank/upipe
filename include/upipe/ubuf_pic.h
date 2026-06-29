@@ -577,6 +577,20 @@ static inline int ubuf_pic_blit_alpha10(struct ubuf *dest, struct ubuf *src,
                           src_macropixel_size;
         int plane_vsize = extract_vsize / src_vsub;
 
+        /* Number of 16-bit samples per destination line, hoisted out of the
+         * inner loops. */
+        const int n = plane_hsize / 2;
+        /* Pull the subsampling factor into a local so it stays in a register
+         * instead of being reloaded from a stack spill every iteration. The
+         * alpha plane is full resolution, so it is sampled at j * src_hsub to
+         * match a (possibly subsampled) destination plane. Rather than redo
+         * that multiply (and the int->64-bit sign-extension it forces) on the
+         * critical path of every alpha load, walk a running pointer that
+         * advances by src_hsub; the src_hsub == 1 case (e.g. the full-res luma
+         * plane, which dominates the pixel count) keeps a contiguous access
+         * the compiler can auto-vectorize. */
+        const unsigned hsub = src_hsub;
+
         for (int i = 0; i < plane_vsize; i++) {
             uint16_t *real_dst = (uint16_t *)dest_buffer;
             const uint16_t *real_src = (const uint16_t *)src_buffer;
@@ -585,7 +599,7 @@ static inline int ubuf_pic_blit_alpha10(struct ubuf *dest, struct ubuf *src,
             if ((!alpha_plane && alpha == 0x3ff) || threshold == 0) {
                 memcpy(dest_buffer, src_buffer, plane_hsize);
             } else if (!alpha_plane) {
-                for (int j = 0; j < plane_hsize/2; j++) {
+                for (int j = 0; j < n; j++) {
                     real_dst[j] = (real_dst[j] * (0x3ff - alpha) + real_src[j] * alpha) / 0x3ff;
                 }
             } else if (threshold != 0x3ff) {
@@ -593,26 +607,44 @@ static inline int ubuf_pic_blit_alpha10(struct ubuf *dest, struct ubuf *src,
                  * if alpha is over the threshold, we use the subpicture pixel.
                  */
                 if (alpha == 0x3ff) {
-                    for (int j = 0; j < plane_hsize/2; j++) {
-                        const uint16_t a = real_alpha[j * src_hsub];
-                        if (a > threshold) real_dst[j] = real_src[j];
+                    if (hsub == 1) {
+                        for (int j = 0; j < n; j++) {
+                            if (real_alpha[j] > threshold)
+                                real_dst[j] = real_src[j];
+                        }
+                    } else {
+                        const uint16_t *ap = real_alpha;
+                        for (int j = 0; j < n; j++, ap += hsub) {
+                            if (*ap > threshold)
+                                real_dst[j] = real_src[j];
+                        }
                     }
                 } else {
-                    for (int j = 0; j < plane_hsize/2; j++) {
-                        const uint16_t a = real_alpha[j * src_hsub] * alpha / 0x3ff;
+                    const uint16_t *ap = real_alpha;
+                    for (int j = 0; j < n; j++, ap += hsub) {
+                        const uint16_t a = *ap * alpha / 0x3ff;
                         if (a > threshold) real_dst[j] = real_src[j];
                     }
                 }
             } else {
                 /* smooth and slow blending */
                 if (alpha == 0x3ff) {
-                    for (int j = 0; j < plane_hsize/2; j++) {
-                        const uint16_t a = real_alpha[j * src_hsub];
-                        real_dst[j] = (real_dst[j] * (0x3ff - a) + real_src[j] * a) / 0x3ff;
+                    if (hsub == 1) {
+                        for (int j = 0; j < n; j++) {
+                            const uint16_t a = real_alpha[j];
+                            real_dst[j] = (real_dst[j] * (0x3ff - a) + real_src[j] * a) / 0x3ff;
+                        }
+                    } else {
+                        const uint16_t *ap = real_alpha;
+                        for (int j = 0; j < n; j++, ap += hsub) {
+                            const uint16_t a = *ap;
+                            real_dst[j] = (real_dst[j] * (0x3ff - a) + real_src[j] * a) / 0x3ff;
+                        }
                     }
                 } else {
-                    for (int j = 0; j < plane_hsize/2; j++) {
-                        const uint16_t a = real_alpha[j * src_hsub] * alpha / 0x3ff;
+                    const uint16_t *ap = real_alpha;
+                    for (int j = 0; j < n; j++, ap += hsub) {
+                        const uint16_t a = *ap * alpha / 0x3ff;
                         real_dst[j] = (real_dst[j] * (0x3ff - a) + real_src[j] * a) / 0x3ff;
                     }
                 }
